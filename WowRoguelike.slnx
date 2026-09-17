@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WowRoguelike.Core/WowRoguelike.Core.fsproj" />
+    <Project Path="src/WowRoguelike.Game/WowRoguelike.Game.fsproj" />
+    <Project Path="src/WowRoguelike.Harness/WowRoguelike.Harness.fsproj" />
+  </Folder>
+</Solution>

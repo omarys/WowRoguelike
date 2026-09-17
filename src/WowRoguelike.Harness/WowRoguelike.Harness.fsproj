@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>sim</AssemblyName>
+    <RootNamespace>WowRoguelike.Harness</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Deliberately references no MonoGame package: this is the headless entry point. -->
+  <ItemGroup>
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../WowRoguelike.Core/WowRoguelike.Core.fsproj" />
+  </ItemGroup>
+
+</Project>
