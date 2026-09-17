@@ -21,9 +21,14 @@ type private Input =
 
 module private Parse =
 
-  /// Abilities are matched by a space-free key so that "Lesser Heal" can be
-  /// typed as `lesserheal`.
-  let key (name: string) = name.Replace(" ", "").ToLowerInvariant()
+  /// Abilities are matched by a punctuation-free key so that "Lesser Heal" can
+  /// be typed as `lesserheal` and "Druid's Slumber" as `druidsslumber`.
+  let key (name: string) =
+    name
+    |> Seq.filter Char.IsLetterOrDigit
+    |> Seq.map Char.ToLowerInvariant
+    |> Seq.toArray
+    |> String
 
   let private idOf (s: string) =
     match Int32.TryParse s with
