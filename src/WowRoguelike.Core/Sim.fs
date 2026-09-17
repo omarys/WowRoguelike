@@ -52,9 +52,6 @@ module Sim =
   let withinRange (range: int) (a: Entity) (b: Entity) =
     Pos.chebyshev a.Pos b.Pos <= range
 
-  let occupiedByOther (w: World) (self: EntityId) (p: Pos) =
-    w.Entities |> List.exists (fun e -> alive e && e.Id <> self && e.Pos = p)
-
   /// A tile is taken if someone stands on it *or* is already stepping into it,
   /// otherwise two entities claim the same tile in the same tick.
   let claimedByOther (w: World) (self: EntityId) (p: Pos) =
@@ -175,6 +172,7 @@ module Sim =
             Auras = t.Auras |> List.filter (function Sleeping _ -> false | _ -> true)
             Casting = if hp = 0 then None else t.Casting
             Goal = if hp = 0 then None else t.Goal
+            Path = if hp = 0 then [] else t.Path
             Destination = if hp = 0 then None else t.Destination
             MoveTicksLeft = if hp = 0 then ticks 0 else t.MoveTicksLeft
             MoveTicksTotal = if hp = 0 then ticks 0 else t.MoveTicksTotal })
@@ -253,6 +251,7 @@ module Sim =
                   Auras = Sleeping duration :: e.Auras
                   Casting = None
                   Goal = None
+                  Path = []
                   Destination = None })
             |> logLine (sprintf "%s puts %s to sleep" actor.Name t.Name)
           | _ -> w
@@ -333,13 +332,21 @@ module Sim =
         (fun e ->
           { e with
               Goal = None
+              Path = []
               Destination = None
               Casting = None })
         w
 
     | MoveTo(actorId, dest) ->
       match tryEntity actorId w with
-      | Some e when canAct e -> mapEntity actorId (fun x -> { x with Goal = Some dest }) w
+      | Some e when canAct e ->
+        // Re-issuing the same goal must not throw away a planned route, or a
+        // caller that repeats orders every tick would replan every tick.
+        mapEntity
+          actorId
+          (fun x ->
+            if x.Goal = Some dest then x else { x with Goal = Some dest; Path = [] })
+          w
       | _ -> w
 
     | UseAbility(actorId, abilityName, targetId) ->
@@ -419,6 +426,7 @@ module Sim =
         elif isSleeping e then
           { e with
               Goal = None
+              Path = []
               Destination = None
               MoveTicksLeft = ticks 0 }
         else
@@ -437,34 +445,45 @@ module Sim =
                   MoveTicksTotal = ticks 0 })
       w
 
-  /// Begin stepping toward a goal, one tile at a time. Greedy: no pathfinding,
-  /// which is slice 2's A*.
+  /// Begin stepping toward a goal. A* plans the route once and the entity walks
+  /// it, re-planning only when the route runs out or its next step is taken.
+  /// Re-planning for every mover on every tick is the expensive way to do this.
   let stepToward (e: Entity) (dest: Pos) (w: World) : Entity =
     if e.Pos = dest then
       { e with
           Goal = None
-          Destination = None }
+          Destination = None
+          Path = [] }
     elif e.Destination.IsSome then
       e
     else
-      let dx = sign (dest.X - e.Pos.X)
-      let dy = sign (dest.Y - e.Pos.Y)
+      // Walls are A*'s business, not the blocker's.
+      let taken p = claimedByOther w e.Id p
 
-      let candidates =
-        [ { X = e.Pos.X + dx; Y = e.Pos.Y + dy }
-          { X = e.Pos.X + dx; Y = e.Pos.Y }
-          { X = e.Pos.X; Y = e.Pos.Y + dy } ]
+      // A route whose next step is now occupied is stale: drop it and replan.
+      let planned =
+        match e.Path with
+        | next :: _ when taken next -> []
+        | kept -> kept
 
-      match
-        candidates
-        |> List.tryFind (fun p -> Grid.isFloor w.Grid p && not (claimedByOther w e.Id p))
-      with
-      | Some next ->
-        { e with
-            Destination = Some next
-            MoveTicksLeft = e.MoveTicksPerTile
-            MoveTicksTotal = e.MoveTicksPerTile }
-      | None -> e
+      let route =
+        if List.isEmpty planned then
+          (Path.astar w.Grid taken e.Pos dest).Path
+        else
+          planned
+
+      match route with
+      | [] -> { e with Path = [] }
+      | next :: rest ->
+        if taken next then
+          // Someone is standing on the only step; wait rather than shove.
+          { e with Path = [] }
+        else
+          { e with
+              Path = rest
+              Destination = Some next
+              MoveTicksLeft = e.MoveTicksPerTile
+              MoveTicksTotal = e.MoveTicksPerTile }
 
   /// Stepped as a fold rather than a map, so two entities cannot claim the same
   /// tile in one tick.
@@ -635,12 +654,27 @@ module Sim =
             |> List.tryPick id
 
           match choice with
-          | Some(ability, targetId) -> startOrResolve m targetId ability w
+          | Some(ability, targetId) ->
+            // Committed to an action: stand still and stop planning.
+            startOrResolve m targetId ability w
+            |> mapEntity m.Id (fun e ->
+              { e with
+                  Goal = None
+                  Path = [] })
           | None ->
             if not (inMelee m target) then
-              mapEntity m.Id (fun e -> { e with Goal = Some target.Pos }) w
+              mapEntity
+                m.Id
+                (fun e ->
+                  if e.Goal = Some target.Pos then
+                    e
+                  else
+                    { e with
+                        Goal = Some target.Pos
+                        Path = [] })
+                w
             else
-              w)
+              mapEntity m.Id (fun e -> { e with Goal = None; Path = [] }) w)
 
   /// A Mob that drops too low calls its neighbours in.
   let callForHelp (w: World) =

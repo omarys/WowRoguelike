@@ -8,11 +8,14 @@
   <!--
     Compile order IS the dependency graph (Q14a).
     Domain.fs holds types and zero logic; nothing may depend on a file above it.
+    Heap and Path sit below Sim because the search knows nothing about Entities.
   -->
   <ItemGroup>
     <Compile Include="Domain.fs" />
     <Compile Include="Rng.fs" />
     <Compile Include="Content.fs" />
+    <Compile Include="Heap.fs" />
+    <Compile Include="Path.fs" />
     <Compile Include="Sim.fs" />
     <Compile Include="Dump.fs" />
     <Compile Include="Bench.fs" />

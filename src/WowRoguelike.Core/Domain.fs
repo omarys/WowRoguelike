@@ -181,6 +181,10 @@ type Entity =
     /// Where the entity has been told to go. Party only; Hostiles re-derive a
     /// goal from their target every tick.
     Goal: Pos option
+    /// Remaining tiles of the current route toward Goal, nearest step first.
+    /// Recomputed by A* only when it runs out or is invalidated, because
+    /// re-planning every tick for every mover is the expensive way (Q26a).
+    Path: Pos list
     Auras: Aura list
     Casting: Cast option
     Cooldowns: Map<string, int<tick>>

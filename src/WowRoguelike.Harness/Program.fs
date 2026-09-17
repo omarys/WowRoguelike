@@ -65,6 +65,13 @@ let private bench () =
   for n in [ 100; 250; 500 ] do
     printfn "%s" (Bench.report (sprintf "synthetic, %d hostiles" n) 2000 (Bench.synthetic n 1UL))
 
+  printfn ""
+  printfn "%s" (Bench.concaveReport ())
+  printfn "%s" (Bench.compareSearches 50)
+
+  for n in [ 10000; 100000 ] do
+    printfn "%s" (Bench.compareHeaps n)
+
 [<EntryPoint>]
 let main argv =
   match argv |> Array.toList with

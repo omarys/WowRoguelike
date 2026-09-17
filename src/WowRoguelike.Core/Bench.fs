@@ -206,3 +206,152 @@ module Bench =
       (List.length w.Entities)
       perTick
       (1000.0 / perTick)
+
+  // =========================================================================
+  // Search and heap fixtures (Q2c / Q26a)
+  // =========================================================================
+
+  /// A room with a closed cup in the middle and the goal outside it. Greedy
+  /// walks into the bottom of the cup and stops; a real search walks out the top
+  /// and the whole way around.
+  let concaveMap =
+    [ "######################"
+      "#....................#"
+      "#....#..........#....#"
+      "#....#..........#....#"
+      "#....#..........#....#"
+      "#....#..........#....#"
+      "#....############....#"
+      "#....................#"
+      "######################" ]
+
+  let concaveStart = { X = 11; Y = 3 }
+  let concaveGoal = { X = 11; Y = 7 }
+
+  /// The same room run through all three searches, so the difference between
+  /// them is a number rather than an opinion.
+  let concaveReport () =
+    let g = Grid.ofRows concaveMap
+    let nothing (_: Pos) = false
+    let a = Path.astar g nothing concaveStart concaveGoal
+    let d = Path.dijkstra g nothing concaveStart concaveGoal
+    let gr = Path.greedy g nothing concaveStart concaveGoal
+
+    let reach (r: Path.Result) = if List.isEmpty r.Path then "no path" else string (List.length r.Path)
+
+    sprintf
+      "cup room: A* %s steps in %d expansions | Dijkstra %s steps in %d | greedy %s in %d"
+      (reach a)
+      a.Expanded
+      (reach d)
+      d.Expanded
+      (reach gr)
+      gr.Expanded
+
+  /// A grid with walls scattered at roughly `density` percent, with the corners
+  /// forced open so that a route usually exists.
+  let randomMap (width: int) (height: int) (density: int) (seed: uint64) : Grid =
+    let g = Grid.create width height
+    let mutable rng = Rng.streamsOf seed
+
+    for y in 1 .. height - 2 do
+      for x in 1 .. width - 2 do
+        let v, r = Rng.drawCombat 0 99 rng
+        rng <- r
+
+        if v < density then
+          g.Walls.[y * width + x] <- true
+
+    for p in [ { X = 1; Y = 1 }; { X = width - 2; Y = height - 2 } ] do
+      g.Walls.[p.Y * width + p.X] <- false
+
+    g
+
+  /// Average expansions across random rooms. The A*-versus-Dijkstra ratio is the
+  /// heuristic's value made visible, and the disagreement count is the
+  /// optimality check: A* must never return a more expensive route.
+  let compareSearches (maps: int) : string =
+    let mutable astarExpand = 0
+    let mutable dijkstraExpand = 0
+    let mutable greedySteps = 0
+    let mutable found = 0
+    let mutable greedyFound = 0
+    let mutable disagree = 0
+
+    for i in 1..maps do
+      let g = randomMap 24 16 22 (900UL + uint64 i)
+      let start = { X = 1; Y = 1 }
+      let goal = { X = 22; Y = 14 }
+      let nothing (_: Pos) = false
+
+      let a = Path.astar g nothing start goal
+      let d = Path.dijkstra g nothing start goal
+      let gr = Path.greedy g nothing start goal
+
+      astarExpand <- astarExpand + a.Expanded
+      dijkstraExpand <- dijkstraExpand + d.Expanded
+      greedySteps <- greedySteps + gr.Expanded
+
+      if not (List.isEmpty a.Path) then
+        found <- found + 1
+
+        if Path.pathCost start a.Path <> Path.pathCost start d.Path then
+          disagree <- disagree + 1
+
+      if not (List.isEmpty gr.Path) then
+        greedyFound <- greedyFound + 1
+
+    sprintf
+      "%d random rooms: A* %d nodes (%.1f/room), Dijkstra %d (%.1f/room, %.2fx A*), greedy reached %d/%d (%d steps), A*/Dijkstra cost disagreements %d"
+      maps
+      astarExpand
+      (float astarExpand / float maps)
+      dijkstraExpand
+      (float dijkstraExpand / float maps)
+      (float dijkstraExpand / float (max 1 astarExpand))
+      greedyFound
+      found
+      greedySteps
+      disagree
+
+  /// The hand-rolled heap against the BCL's, over one workload.
+  let compareHeaps (count: int) : string =
+    let priorities =
+      Array.init count (fun i -> int ((int64 i * 2654435761L) % 1000000L))
+
+    let sw = Stopwatch.StartNew()
+    let mine = MinHeap<int, int>()
+
+    for p in priorities do
+      mine.Push(p, p)
+
+    let popped = System.Collections.Generic.List<int>()
+    let mutable go = true
+
+    while go do
+      match mine.Pop() with
+      | Some(p, _) -> popped.Add p
+      | None -> go <- false
+
+    let mineMs = sw.Elapsed.TotalMilliseconds
+
+    let ordered =
+      popped |> Seq.toList = (popped |> Seq.toList |> List.sort)
+
+    let sw2 = Stopwatch.StartNew()
+    let bcl = System.Collections.Generic.PriorityQueue<int, int>()
+
+    for p in priorities do
+      bcl.Enqueue(p, p)
+
+    while bcl.Count > 0 do
+      bcl.Dequeue() |> ignore
+
+    let bclMs = sw2.Elapsed.TotalMilliseconds
+
+    sprintf
+      "heap n=%d: hand-rolled %.2f ms (pops in order: %b), BCL PriorityQueue %.2f ms"
+      count
+      mineMs
+      ordered
+      bclMs
