@@ -7,7 +7,7 @@ let private usage () =
   printfn "sim fingerprint [seed]      canonical state text for golden-replay comparison"
   printfn "sim bench                   time the tick loop at several entity counts"
   printfn "sim profile                 split the tick cost into search frequency and search internals"
-  printfn "sim diagnose                bucket Sim.step cost across a fight and dump the worst tick"
+  printfn "sim diagnose                bucket SimTick.step cost across a fight and dump the worst tick"
   printfn "sim runs [n] [maxTicks]     run n seeds and summarise outcomes"
 
 let private nth (args: string list) (i: int) = args |> List.tryItem i
@@ -31,7 +31,7 @@ let private intOf (args: string list) (i: int) (fallback: int) =
 let private demo (seed: uint64) (maxTicks: int) =
   let w = Bench.runEncounter seed maxTicks
 
-  printfn "seed=%d tick=%d outcome=%A" seed w.Tick (Sim.outcome w)
+  printfn "seed=%d tick=%d outcome=%A" seed w.Tick (SimState.outcome w)
   printfn ""
   printfn "--- combat log (oldest first) ---"
   printfn "%s" (Dump.log w)
@@ -43,7 +43,7 @@ let private runs (n: int) (maxTicks: int) =
   let results =
     [ 1UL .. uint64 n ] |> List.map (fun s -> Bench.runEncounter s maxTicks)
 
-  let count o = results |> List.filter (fun w -> Sim.outcome w = o) |> List.length
+  let count o = results |> List.filter (fun w -> SimState.outcome w = o) |> List.length
   let cleared = count EncounterCleared
   let wiped = count PartyWiped
 

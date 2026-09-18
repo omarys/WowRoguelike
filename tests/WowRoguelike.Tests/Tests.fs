@@ -113,24 +113,24 @@ let ``rolls stay inside their inclusive range`` (lo: int) (span: int) =
 let ``a challenger below the melee margin does not take aggro`` () =
   // 1099 vs 1000 is under 10%.
   let w = arena 1000 1099 { X = 7; Y = 5 }
-  Assert.Equal<EntityId option>(Some(EntityId 1), Sim.resolveTarget (mobOf w) w)
+  Assert.Equal<EntityId option>(Some(EntityId 1), SimState.resolveTarget (mobOf w) w)
 
 [<Fact>]
 let ``a challenger past the melee margin takes aggro`` () =
   // 1101 vs 1000 is over 10%, and 7,5 is adjacent to the Mob.
   let w = arena 1000 1101 { X = 7; Y = 5 }
-  Assert.Equal<EntityId option>(Some(EntityId 2), Sim.resolveTarget (mobOf w) w)
+  Assert.Equal<EntityId option>(Some(EntityId 2), SimState.resolveTarget (mobOf w) w)
 
 [<Fact>]
 let ``a challenger below the ranged margin does not take aggro`` () =
   // 1150 is over 10% but under 30%, and this DPS is far away.
   let w = arena 1000 1150 { X = 18; Y = 5 }
-  Assert.Equal<EntityId option>(Some(EntityId 1), Sim.resolveTarget (mobOf w) w)
+  Assert.Equal<EntityId option>(Some(EntityId 1), SimState.resolveTarget (mobOf w) w)
 
 [<Fact>]
 let ``a challenger past the ranged margin takes aggro`` () =
   let w = arena 1000 1301 { X = 18; Y = 5 }
-  Assert.Equal<EntityId option>(Some(EntityId 2), Sim.resolveTarget (mobOf w) w)
+  Assert.Equal<EntityId option>(Some(EntityId 2), SimState.resolveTarget (mobOf w) w)
 
 /// The Tank stance is what makes the role work, and the margin is the reason
 /// 5x threat is enough rather than merely necessary.
@@ -138,8 +138,8 @@ let ``a challenger past the ranged margin takes aggro`` () =
 let ``the tank stance multiplies threat generation`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
   let tank = w.Entities |> List.find (fun e -> e.Id = EntityId 1)
-  let w = Sim.addThreat (EntityId 100) tank 10 w
-  Assert.Equal<int>(50, Sim.threatOf (EntityId 1) (mobOf w))
+  let w = SimState.addThreat (EntityId 100) tank 10 w
+  Assert.Equal<int>(50, SimState.threatOf (EntityId 1) (mobOf w))
 
 [<Fact>]
 let ``mobs never accumulate threat against each other`` () =
@@ -192,21 +192,21 @@ let ``an interrupt cancels an interruptible cast and locks it out`` () =
   let w = casterWorld Content.lightningBolt
 
   let w =
-    Sim.applyCommand
+    SimState.applyCommand
       { ApplyAt = ticks 1
         Kind = UseAbility(EntityId 3, "Kick", EntityId 100) }
       w
 
   let mob = mobOf w
   Assert.True(mob.Casting.IsNone)
-  Assert.Equal<int<tick>>(Sim.interruptLockout, lockoutOf mob)
+  Assert.Equal<int<tick>>(SimState.interruptLockout, lockoutOf mob)
 
 [<Fact>]
 let ``an interrupt cannot cancel a cast that is not interruptible`` () =
   let w = casterWorld Content.serpentForm
 
   let w =
-    Sim.applyCommand
+    SimState.applyCommand
       { ApplyAt = ticks 1
         Kind = UseAbility(EntityId 3, "Kick", EntityId 100) }
       w
@@ -216,10 +216,10 @@ let ``an interrupt cannot cancel a cast that is not interruptible`` () =
 [<Fact>]
 let ``damage wakes a sleeper`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
-  let w = Sim.mapEntity (EntityId 2) (fun e -> { e with Auras = [ Sleeping(secTicks 15.0) ] }) w
-  Assert.True(Sim.isSleeping (w.Entities |> List.find (fun e -> e.Id = EntityId 2)))
-  let w = Sim.dealDamage (EntityId 2) 1 w
-  Assert.False(Sim.isSleeping (w.Entities |> List.find (fun e -> e.Id = EntityId 2)))
+  let w = SimState.mapEntity (EntityId 2) (fun e -> { e with Auras = [ Sleeping(secTicks 15.0) ] }) w
+  Assert.True(SimState.isSleeping (w.Entities |> List.find (fun e -> e.Id = EntityId 2)))
+  let w = SimState.dealDamage (EntityId 2) 1 w
+  Assert.False(SimState.isSleeping (w.Entities |> List.find (fun e -> e.Id = EntityId 2)))
 
 /// Moves are cancelled while asleep, so sleeping a member actually removes them.
 [<Fact>]
@@ -227,28 +227,28 @@ let ``a sleeping entity does not move`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
 
   let w =
-    Sim.applyCommand
+    SimState.applyCommand
       { ApplyAt = ticks 1
         Kind = MoveTo(EntityId 2, { X = 18; Y = 5 }) }
       w
 
-  let w = Sim.mapEntity (EntityId 2) (fun e -> { e with Auras = [ Sleeping(secTicks 15.0) ] }) w
+  let w = SimState.mapEntity (EntityId 2) (fun e -> { e with Auras = [ Sleeping(secTicks 15.0) ] }) w
   let before = (w.Entities |> List.find (fun e -> e.Id = EntityId 2)).Pos
-  let w = Sim.run 30 w
+  let w = SimTick.run 30 w
   let after = (w.Entities |> List.find (fun e -> e.Id = EntityId 2)).Pos
   Assert.Equal<Pos>(before, after)
 
 [<Fact>]
 let ``serpent form blocks casting`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
-  let w = Sim.mapEntity (EntityId 1) (fun e -> { e with Auras = [ SerpentForm(secTicks 10.0, 25) ] }) w
-  Assert.False(Sim.canCast (w.Entities |> List.find (fun e -> e.Id = EntityId 1)))
+  let w = SimState.mapEntity (EntityId 1) (fun e -> { e with Auras = [ SerpentForm(secTicks 10.0, 25) ] }) w
+  Assert.False(SimState.canCast (w.Entities |> List.find (fun e -> e.Id = EntityId 1)))
 
 [<Fact>]
 let ``serpent form adds physical damage to swings`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
-  let w = Sim.mapEntity (EntityId 2) (fun e -> { e with Auras = [ SerpentForm(secTicks 10.0, 25) ] }) w
-  Assert.Equal<int>(25, Sim.serpentBonus (w.Entities |> List.find (fun e -> e.Id = EntityId 2)))
+  let w = SimState.mapEntity (EntityId 2) (fun e -> { e with Auras = [ SerpentForm(secTicks 10.0, 25) ] }) w
+  Assert.Equal<int>(25, SimState.serpentBonus (w.Entities |> List.find (fun e -> e.Id = EntityId 2)))
 
 // ===========================================================================
 // Determinism and golden replay (ADR-0001 / Q25a)
@@ -260,7 +260,7 @@ let private record (seed: uint64) (n: int) : Command list list * World =
       List.rev acc, w
     else
       let cmds = Bench.autoPilot w
-      loop (Sim.step cmds w) (remaining - 1) (cmds :: acc)
+      loop (SimTick.step cmds w) (remaining - 1) (cmds :: acc)
 
   loop (Content.gully seed) n []
 
@@ -275,7 +275,7 @@ let ``the same seed and commands produce the same state`` () =
 [<Fact>]
 let ``a recorded session replays exactly`` () =
   let cmds, live = record 11UL 500
-  let replayed = cmds |> List.fold (fun w c -> Sim.step c w) (Content.gully 11UL)
+  let replayed = cmds |> List.fold (fun w c -> SimTick.step c w) (Content.gully 11UL)
   Assert.Equal(Dump.fingerprint live, Dump.fingerprint replayed)
 
 [<Fact>]
@@ -304,7 +304,7 @@ let ``generation places anacondra in one of four spots`` () =
 // ===========================================================================
 
 let private noSharedTiles (w: World) =
-  let living = w.Entities |> List.filter Sim.alive
+  let living = w.Entities |> List.filter SimState.alive
   let tiles = living |> List.map (fun e -> e.Pos)
   List.length tiles = (tiles |> List.distinct |> List.length)
 
@@ -316,7 +316,7 @@ let ``no two living entities ever share a tile`` (seed: int) =
   let rec loop (w: World) (n: int) =
     if n <= 0 then true
     elif not (noSharedTiles w) then false
-    else loop (Sim.step (Bench.autoPilot w) w) (n - 1)
+    else loop (SimTick.step (Bench.autoPilot w) w) (n - 1)
 
   loop (Content.gully (seed + 1UL)) 400
 
@@ -330,7 +330,7 @@ let ``no two living entities ever share a tile`` (seed: int) =
 [<Fact>]
 let ``resource pools end the fights that used to stalemate`` () =
   for seed in [ 26UL; 36UL; 98UL ] do
-    Assert.Equal(Outcome.EncounterCleared, Sim.outcome (Bench.runEncounter seed 5000))
+    Assert.Equal(Outcome.EncounterCleared, SimState.outcome (Bench.runEncounter seed 5000))
 
 /// A* is wired into movement, not merely available as a library: this order is
 /// unreachable by the greedy stepper the previous slice shipped.
@@ -355,12 +355,12 @@ let ``a party member ordered across the cup room walks around the wall`` () =
       Log = [] }
 
   let w =
-    Sim.applyCommand
+    SimState.applyCommand
       { ApplyAt = ticks 1
         Kind = MoveTo(EntityId 1, Bench.concaveGoal) }
       w
 
-  let w = Sim.run 400 w
+  let w = SimTick.run 400 w
   Assert.Equal<Pos>(Bench.concaveGoal, (w.Entities |> List.head).Pos)
 
 [<Property>]
@@ -374,7 +374,7 @@ let ``health stays within zero and maximum`` (seed: int) =
 [<Property>]
 let ``the tick counter advances by exactly one per step`` (n: int) =
   let n = abs n % 200
-  let w = Sim.run n (Content.gully 1UL)
+  let w = SimTick.run n (Content.gully 1UL)
   w.Tick = ticks n
 
 // ===========================================================================
@@ -385,7 +385,7 @@ let ``the tick counter advances by exactly one per step`` (n: int) =
 let ``resolving an ability spends its resource`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
   let before = (w.Entities |> List.find (fun e -> e.Id = EntityId 1)).Resource
-  let w = Sim.resolveAbility (EntityId 1) (EntityId 100) Content.heroicStrike w
+  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.heroicStrike w
   let after = (w.Entities |> List.find (fun e -> e.Id = EntityId 1)).Resource
   Assert.Equal<int>(before - Content.heroicStrike.ResourceCost, after)
 
@@ -397,7 +397,7 @@ let ``an interrupted cast spends no resource`` () =
   let before = (mobOf w).Resource
 
   let w =
-    Sim.applyCommand
+    SimState.applyCommand
       { ApplyAt = ticks 1
         Kind = UseAbility(EntityId 3, "Kick", EntityId 100) }
       w
@@ -409,35 +409,35 @@ let ``an interrupted cast spends no resource`` () =
 let ``an ability that cannot be afforded is refused`` () =
   let w =
     arena 0 0 { X = 7; Y = 5 }
-    |> Sim.mapEntity (EntityId 1) (fun e -> { e with Resource = 0 })
+    |> SimState.mapEntity (EntityId 1) (fun e -> { e with Resource = 0 })
 
   let w =
-    Sim.applyCommand
+    SimState.applyCommand
       { ApplyAt = ticks 1
         Kind = UseAbility(EntityId 1, "Heroic Strike", EntityId 100) }
       w
 
   let mob = mobOf w
   Assert.Equal<int>(10000, mob.Health)
-  Assert.Equal<int>(0, Sim.threatOf (EntityId 1) mob)
+  Assert.Equal<int>(0, SimState.threatOf (EntityId 1) mob)
 
 /// This is the whole reason a fight can end: mob healing is finite.
 [<Fact>]
 let ``mobs do not regenerate resource`` () =
   let w =
     arena 0 0 { X = 7; Y = 5 }
-    |> Sim.mapEntity (EntityId 100) (fun e -> { e with Resource = 50 })
+    |> SimState.mapEntity (EntityId 100) (fun e -> { e with Resource = 50 })
 
-  let w = Sim.run 200 w
+  let w = SimTick.run 200 w
   Assert.Equal<int>(50, (mobOf w).Resource)
 
 [<Fact>]
 let ``party resource regenerates`` () =
   let w =
     arena 0 0 { X = 7; Y = 5 }
-    |> Sim.mapEntity (EntityId 1) (fun e -> { e with Resource = 0 })
+    |> SimState.mapEntity (EntityId 1) (fun e -> { e with Resource = 0 })
 
-  let w = Sim.run 50 w
+  let w = SimTick.run 50 w
   let tank = w.Entities |> List.find (fun e -> e.Id = EntityId 1)
   Assert.Equal<int>(50 * tank.ResourceRegenPerTick, tank.Resource)
 
@@ -626,7 +626,7 @@ let ``line of sight is symmetric`` (seed: int) =
     sample |> List.forall (fun b -> Path.lineOfSight g a b = Path.lineOfSight g b a))
 
 /// A blocked caster next to its target must still be able to act, which is what
-/// the melee exemption in `Sim.canReach` rests on.
+/// the melee exemption in `SimState.canReach` rests on.
 [<Property>]
 let ``adjacent tiles always see each other`` (seed: int) =
   let g = Bench.randomMap 20 14 25 (uint64 (abs seed) + 4UL)
@@ -678,12 +678,12 @@ let ``a move order onto a wall never leaves the entity inside it`` () =
 
   // (1,2) is a wall.
   let w =
-    Sim.applyCommand
+    SimState.applyCommand
       { ApplyAt = ticks 1
         Kind = MoveTo(EntityId 1, { X = 1; Y = 2 }) }
       w
 
-  let w = Sim.run 100 w
+  let w = SimTick.run 100 w
   let solo = w.Entities |> List.head
 
   Assert.True(

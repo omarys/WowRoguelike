@@ -22,10 +22,10 @@ module Bench =
     ready e abilityName
     && (e.Abilities
         |> List.tryFind (fun a -> a.Name = abilityName)
-        |> Option.exists (Sim.canAfford e))
+        |> Option.exists (SimState.canAfford e))
 
-  // Reach is deliberately not re-implemented here. Bench uses Sim.withinRange and
-  // Sim.canReach so that the melee exemption from line of sight cannot drift out
+  // Reach is deliberately not re-implemented here. Bench uses SimState.withinRange and
+  // SimState.canReach so that the melee exemption from line of sight cannot drift out
   // of sync with the Core.
 
   /// Drives the Party headlessly so benchmarks and golden replays have input.
@@ -35,14 +35,14 @@ module Bench =
   /// entry point can reach it without referencing MonoGame.
   let autoPilot (w: World) : Command list =
     let at = w.Tick + ticks 1
-    let hostiles = Sim.aliveHostiles w
-    let party = Sim.aliveParty w
+    let hostiles = SimState.aliveHostiles w
+    let party = SimState.aliveParty w
 
     // Only members who can actually start something get orders. Re-issuing a
     // cast mid-cast is a queueing policy, not a player action.
     let actors =
       party
-      |> List.filter (fun e -> e.Casting.IsNone && not (Sim.isSleeping e))
+      |> List.filter (fun e -> e.Casting.IsNone && not (SimState.isSleeping e))
 
     let role r = actors |> List.tryFind (fun e -> e.Role = Some r)
     let tank = role Tank
@@ -66,14 +66,14 @@ module Bench =
       | Some t, Some f ->
         // Pull anything that has torn aggro off the Tank.
         let thief =
-          Sim.aliveHostiles w
-          |> List.tryFind (fun h -> h.Engaged && h.Target <> Some t.Id && Sim.canReach 8 t h w)
+          SimState.aliveHostiles w
+          |> List.tryFind (fun h -> h.Engaged && h.Target <> Some t.Id && SimState.canReach 8 t h w)
 
         match thief with
         | Some h when has t "Taunt" && canUse t "Taunt" -> cmd t (UseAbility(t.Id, "Taunt", h.Id))
-        | _ when Sim.withinRange 1 t f && canUse t "Heroic Strike" ->
+        | _ when SimState.withinRange 1 t f && canUse t "Heroic Strike" ->
           cmd t (UseAbility(t.Id, "Heroic Strike", f.Id))
-        | _ when not (Sim.withinRange 1 t f) -> cmd t (MoveTo(t.Id, f.Pos))
+        | _ when not (SimState.withinRange 1 t f) -> cmd t (MoveTo(t.Id, f.Pos))
         | _ -> []
       | _ -> []
 
@@ -83,14 +83,14 @@ module Bench =
       | Some h ->
         let wounded =
           party
-          |> List.filter (fun e -> Sim.healthPct e < 70)
-          |> List.sortBy Sim.healthPct
+          |> List.filter (fun e -> SimState.healthPct e < 70)
+          |> List.sortBy SimState.healthPct
           |> List.tryHead
 
         match wounded with
-        | Some target when Sim.canReach 8 h target w && canUse h "Lesser Heal" ->
+        | Some target when SimState.canReach 8 h target w && canUse h "Lesser Heal" ->
           cmd h (UseAbility(h.Id, "Lesser Heal", target.Id))
-        | Some target when Sim.canReach 8 h target w -> []
+        | Some target when SimState.canReach 8 h target w -> []
         | Some target -> cmd h (MoveTo(h.Id, target.Pos))
         | None -> []
 
@@ -100,16 +100,16 @@ module Bench =
       | Some r ->
         // The Party's only interrupt is melee range, so closing is the job.
         let caster =
-          Sim.aliveHostiles w
+          SimState.aliveHostiles w
           |> List.tryFind (fun h ->
             h.Casting |> Option.exists (fun c -> c.Ability.Interruptible))
 
         match caster with
-        | Some c when canUse r "Kick" && Sim.withinRange 1 r c -> cmd r (UseAbility(r.Id, "Kick", c.Id))
-        | Some c when not (Sim.withinRange 1 r c) -> cmd r (MoveTo(r.Id, c.Pos))
+        | Some c when canUse r "Kick" && SimState.withinRange 1 r c -> cmd r (UseAbility(r.Id, "Kick", c.Id))
+        | Some c when not (SimState.withinRange 1 r c) -> cmd r (MoveTo(r.Id, c.Pos))
         | _ ->
           match focus with
-          | Some f when not (Sim.withinRange 1 r f) -> cmd r (MoveTo(r.Id, f.Pos))
+          | Some f when not (SimState.withinRange 1 r f) -> cmd r (MoveTo(r.Id, f.Pos))
           | _ -> []
 
     let rangedCmds =
@@ -125,8 +125,8 @@ module Bench =
             |> List.tryFind (fun a -> canUse e a.Name)
 
           match shot with
-          | Some a when Sim.canReach a.Range e f w -> cmd e (UseAbility(e.Id, a.Name, f.Id))
-          | _ when not (Sim.withinRange 8 e f) -> cmd e (MoveTo(e.Id, f.Pos))
+          | Some a when SimState.canReach a.Range e f w -> cmd e (UseAbility(e.Id, a.Name, f.Id))
+          | _ when not (SimState.withinRange 8 e f) -> cmd e (MoveTo(e.Id, f.Pos))
           | _ -> [])
 
     tankCmds @ healerCmds @ interruptCmds @ rangedCmds
@@ -134,10 +134,10 @@ module Bench =
   /// Play the encounter to a conclusion, or to `maxTicks`.
   let runEncounter (seed: uint64) (maxTicks: int) : World =
     let rec loop (w: World) (remaining: int) =
-      if remaining <= 0 || Sim.outcome w <> Running then
+      if remaining <= 0 || SimState.outcome w <> Running then
         w
       else
-        loop (Sim.step (autoPilot w) w) (remaining - 1)
+        loop (SimTick.step (autoPilot w) w) (remaining - 1)
 
     loop (Content.gully seed) maxTicks
 
@@ -201,12 +201,12 @@ module Bench =
     let mutable world = w
 
     for _ in 1..warmup do
-      world <- Sim.step [] world
+      world <- SimTick.step [] world
 
     let sw = Stopwatch.StartNew()
 
     for _ in 1..ticksToRun do
-      world <- Sim.step [] world
+      world <- SimTick.step [] world
 
     sw.Stop()
     sw.Elapsed.TotalMilliseconds / float ticksToRun
@@ -377,26 +377,26 @@ module Bench =
   // =========================================================================
 
   /// How many entities want to move, and how many will therefore run a search
-  /// this tick. `Sim.stepToward` replans exactly when a goal is set and either the
+  /// this tick. `SimTick.stepToward` replans exactly when a goal is set and either the
   /// stored path is empty or its next tile has been taken, so the second number
   /// is A* calls per tick.
   let searchPressure (w: World) =
     let movers =
-      w.Entities |> List.filter (fun e -> Sim.alive e && e.Goal.IsSome)
+      w.Entities |> List.filter (fun e -> SimState.alive e && e.Goal.IsSome)
 
     let planning =
       movers
       |> List.filter (fun e ->
         match e.Path with
         | [] -> true
-        | next :: _ -> Sim.claimedByOther w e.Id next)
+        | next :: _ -> SimState.claimedByOther w e.Id next)
 
     List.length movers, List.length planning
 
   /// The tick cost of a driven fight, split into the scripted player's share and
-  /// `Sim.step`'s.
+  /// `SimTick.step`'s.
   ///
-  /// Timing `Sim.step []` on a fight instead measures its aftermath: with no input
+  /// Timing `SimTick.step []` on a fight instead measures its aftermath: with no input
   /// the Priest stops healing, the Party dies, the world resolves, and every
   /// subsequent tick is nearly free. Splitting the two also says whether a cost
   /// belongs to the harness fixture or to the simulation, so a problem is not
@@ -406,7 +406,7 @@ module Bench =
     let warmup = min 50 (ticks / 10)
 
     for _ in 1..warmup do
-      w <- Sim.step (autoPilot w) w
+      w <- SimTick.step (autoPilot w) w
 
     let clock = Stopwatch()
     let mutable pilotMs = 0.0
@@ -414,19 +414,19 @@ module Bench =
     let mutable live = 0
 
     for _ in 1..(ticks - warmup) do
-      if Sim.outcome w = Running then
+      if SimState.outcome w = Running then
         clock.Restart()
         let commands = autoPilot w
         pilotMs <- pilotMs + clock.Elapsed.TotalMilliseconds
         clock.Restart()
-        w <- Sim.step commands w
+        w <- SimTick.step commands w
         stepMs <- stepMs + clock.Elapsed.TotalMilliseconds
         live <- live + 1
 
     let n = float (max 1 live)
 
     sprintf
-      "seed %d over %d ticks: autopilot %.4f ms/tick, Sim.step %.4f ms/tick"
+      "seed %d over %d ticks: autopilot %.4f ms/tick, SimTick.step %.4f ms/tick"
       seed
       live
       (pilotMs / n)
@@ -438,7 +438,7 @@ module Bench =
   /// goal is reachable only if some neighbour of it is free. When a Party clusters
   /// into a corner pocket there is no such neighbour, the search fails, and a
   /// failed search expands the whole reachable component instead of stopping
-  /// early. `Sim.stepToward` then throws the empty path away and repeats the same
+  /// early. `SimTick.stepToward` then throws the empty path away and repeats the same
   /// doomed search on the very next tick.
   let searchFailureCost (runs: int) : string =
     let g = (Content.gully 1UL).Grid
@@ -475,7 +475,7 @@ module Bench =
       sealedExpansions
       (sealedMs / openMs)
 
-  /// `Sim.step` cost bucketed across a fight, with A* call counts alongside so the
+  /// `SimTick.step` cost bucketed across a fight, with A* call counts alongside so the
   /// two can be correlated rather than assumed related.
   ///
   /// Spread cost means a per-tick rule is expensive everywhere. Concentrated cost
@@ -484,7 +484,7 @@ module Bench =
     let mutable w = Content.gully seed
 
     for _ in 1..50 do
-      w <- Sim.step (autoPilot w) w
+      w <- SimTick.step (autoPilot w) w
 
     let sb = System.Text.StringBuilder()
     let clock = Stopwatch()
@@ -496,11 +496,11 @@ module Bench =
     let mutable worstWorld = w
 
     for _ in 1..(ticks - 50) do
-      if Sim.outcome w = Running then
+      if SimState.outcome w = Running then
         let _, replans = searchPressure w
         let commands = autoPilot w
         clock.Restart()
-        w <- Sim.step commands w
+        w <- SimTick.step commands w
         let ms = clock.Elapsed.TotalMilliseconds
         bucketMs <- bucketMs + ms
         bucketReplans <- bucketReplans + replans
@@ -540,10 +540,10 @@ module Bench =
     let planning = ResizeArray<int>()
     let mutable started = 0
 
-    while started < ticks && Sim.outcome w = Running do
+    while started < ticks && SimState.outcome w = Running do
       let _, replans = searchPressure w
       planning.Add replans
-      w <- Sim.step (autoPilot w) w
+      w <- SimTick.step (autoPilot w) w
       started <- started + 1
 
     let sorted = planning |> Seq.sort |> Seq.toArray

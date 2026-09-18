@@ -16,7 +16,8 @@
     <Compile Include="Content.fs" />
     <Compile Include="Heap.fs" />
     <Compile Include="Path.fs" />
-    <Compile Include="Sim.fs" />
+    <Compile Include="SimState.fs" />
+    <Compile Include="SimTick.fs" />
     <Compile Include="Dump.fs" />
     <Compile Include="Bench.fs" />
   </ItemGroup>

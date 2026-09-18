@@ -41,7 +41,7 @@ module private Parse =
     let t = line.Trim().Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
 
     let abilityName (actorId: EntityId) (k: string) =
-      match Sim.tryEntity actorId w with
+      match SimState.tryEntity actorId w with
       | Some e -> e.Abilities |> List.tryFind (fun a -> key a.Name = k) |> Option.map (fun a -> a.Name)
       | None -> None
 
@@ -136,11 +136,11 @@ type RoguelikeGame() as this =
     | _ -> (float e.Pos.X, float e.Pos.Y)
 
   let entityColour (e: Entity) =
-    if not (Sim.alive e) then
+    if not (SimState.alive e) then
       Color(70, 70, 75)
-    elif Sim.isSleeping e then
+    elif SimState.isSleeping e then
       Color(120, 120, 30)
-    elif Sim.isShifted e then
+    elif SimState.isShifted e then
       Color(150, 60, 180)
     elif e.Faction = Party then
       match e.Role with
@@ -211,7 +211,7 @@ type RoguelikeGame() as this =
         { ApplyAt = world.Tick + ticks 1
           Kind = kind })
 
-    world <- Sim.step commands world
+    world <- SimTick.step commands world
 
   do
     graphics.PreferredBackBufferWidth <- columns * tile + 24
@@ -319,7 +319,7 @@ type RoguelikeGame() as this =
       let size = if e.Faction = Party then 22 else 20
       let colour = entityColour e
 
-      if Sim.alive e then
+      if SimState.alive e then
         spriteBatch.Draw(
           disc,
           Rectangle(cx - size / 2, cy - size / 2, size, size),

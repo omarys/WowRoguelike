@@ -62,7 +62,7 @@ module Dump =
   /// Canonical state. Two Worlds with the same text are the same World.
   let world (w: World) =
     let sb = StringBuilder()
-    sb.AppendLine(sprintf "tick=%d outcome=%s" w.Tick (string (Sim.outcome w))) |> ignore
+    sb.AppendLine(sprintf "tick=%d outcome=%s" w.Tick (string (SimState.outcome w))) |> ignore
     sb.AppendLine(sprintf "rng gen=%d combat=%d" w.Rng.Generation.Value w.Rng.Combat.Value)
     |> ignore
 
