@@ -8,11 +8,6 @@ module Dump =
 
   open System.Text
 
-  let auraText =
-    function
-    | Sleeping r -> sprintf "sleep(%d)" r
-    | SerpentForm(r, b) -> sprintf "serpent(%d,+%d)" r b
-
   let private pairs (m: Map<'k, 'v>) (fmt: 'k -> 'v -> string) =
     m |> Map.toList |> List.sortBy fst |> List.map (fun (k, v) -> fmt k v) |> String.concat ","
 
@@ -51,7 +46,7 @@ module Dump =
       (point e.Goal)
       (List.length e.Path)
       cast
-      (e.Auras |> List.map auraText |> String.concat ",")
+      (e.Auras |> List.map Aura.describe |> String.concat ",")
       (pairs e.Cooldowns (fun k v -> sprintf "%s:%d" k v))
       (pairs e.Threat (fun k v -> sprintf "%s:%d" (entityIdText k) v))
       optionId

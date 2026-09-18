@@ -250,6 +250,31 @@ let ``serpent form adds physical damage to swings`` () =
   let w = SimState.mapEntity (EntityId 2) (fun e -> { e with Auras = [ SerpentForm(secTicks 10.0, 25) ] }) w
   Assert.Equal<int>(25, SimState.serpentBonus (w.Entities |> List.find (fun e -> e.Id = EntityId 2)))
 
+/// The sourced rule is *any* hostile action, not only damage. Unreachable while
+/// Druid's Slumber only ever targets the Party, but it becomes reachable the
+/// moment a Mob can be slept.
+[<Fact>]
+let ``an interrupt wakes a sleeper`` () =
+  let w =
+    casterWorld Content.lightningBolt
+    |> SimState.mapEntity (EntityId 100) (fun e ->
+      { e with Auras = [ Sleeping(secTicks 15.0) ] })
+
+  Assert.True(SimState.isSleeping (mobOf w))
+  let w = SimState.resolveAbility (EntityId 3) (EntityId 100) Content.kick w
+  Assert.False(SimState.isSleeping (mobOf w))
+
+[<Fact>]
+let ``a taunt wakes a sleeper`` () =
+  let w =
+    arena 0 0 { X = 7; Y = 5 }
+    |> SimState.mapEntity (EntityId 100) (fun e ->
+      { e with Auras = [ Sleeping(secTicks 15.0) ] })
+
+  Assert.True(SimState.isSleeping (mobOf w))
+  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.taunt w
+  Assert.False(SimState.isSleeping (mobOf w))
+
 // ===========================================================================
 // Determinism and golden replay (ADR-0001 / Q25a)
 // ===========================================================================

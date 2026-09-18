@@ -125,6 +125,62 @@ type Aura =
   /// Serpent Form: extra physical damage, and no casting while shifted.
   | SerpentForm of remaining: int<tick> * bonusDamage: int
 
+/// Every case of `Aura` is matched in exactly one place — here. Everywhere else
+/// asks this module a question, so adding an aura breaks compilation in this
+/// module and nowhere else, rather than silently defaulting at six call sites.
+module Aura =
+
+  /// One Tick of ageing. None when the aura has run out.
+  let advance =
+    function
+    | Sleeping remaining ->
+      if remaining > ticks 1 then Some(Sleeping(remaining - ticks 1)) else None
+    | SerpentForm(remaining, bonus) ->
+      if remaining > ticks 1 then
+        Some(SerpentForm(remaining - ticks 1, bonus))
+      else
+        None
+
+  let describe =
+    function
+    | Sleeping remaining -> sprintf "sleep(%d)" remaining
+    | SerpentForm(remaining, bonus) -> sprintf "serpent(%d,+%d)" remaining bonus
+
+  let isSleeping =
+    function
+    | Sleeping _ -> true
+    | SerpentForm _ -> false
+
+  let isSerpentForm =
+    function
+    | Sleeping _ -> false
+    | SerpentForm _ -> true
+
+  /// True when this aura stops its holder acting at all.
+  let preventsActing =
+    function
+    | Sleeping _ -> true
+    | SerpentForm _ -> false
+
+  /// True when this aura stops its holder casting.
+  let preventsCasting =
+    function
+    | Sleeping _ -> true
+    | SerpentForm _ -> true
+
+  /// Extra physical damage added to each swing.
+  let bonusDamage =
+    function
+    | Sleeping _ -> 0
+    | SerpentForm(_, bonus) -> bonus
+
+  /// True when a hostile action against the holder ends this aura. Druid's
+  /// Slumber is woken by any hostile action, not only by damage.
+  let endsOnHostileAction =
+    function
+    | Sleeping _ -> true
+    | SerpentForm _ -> false
+
 /// The closed vocabulary of mechanics an Ability can have (Q28b). Adding a new
 /// *mechanic* means adding a case here; adding a new *ability* means writing a
 /// record in Content.fs and no code at all.

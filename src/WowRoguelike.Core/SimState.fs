@@ -86,20 +86,18 @@ module SimState =
 
   // -- auras ----------------------------------------------------------------
 
-  let isSleeping (e: Entity) =
-    e.Auras |> List.exists (function Sleeping _ -> true | _ -> false)
+  let isSleeping (e: Entity) = e.Auras |> List.exists Aura.isSleeping
 
-  let isShifted (e: Entity) =
-    e.Auras |> List.exists (function SerpentForm _ -> true | _ -> false)
+  let isShifted (e: Entity) = e.Auras |> List.exists Aura.isSerpentForm
 
-  let serpentBonus (e: Entity) =
-    e.Auras
-    |> List.tryPick (function SerpentForm(_, bonus) -> Some bonus | _ -> None)
-    |> Option.defaultValue 0
+  let serpentBonus (e: Entity) = e.Auras |> List.sumBy Aura.bonusDamage
 
   /// Being shifted locks out casting, which is the whole cost of Serpent Form.
-  let canCast (e: Entity) = not (isSleeping e) && not (isShifted e) && e.Casting.IsNone
-  let canAct (e: Entity) = alive e && not (isSleeping e)
+  let canCast (e: Entity) =
+    not (e.Auras |> List.exists Aura.preventsCasting) && e.Casting.IsNone
+
+  let canAct (e: Entity) =
+    alive e && not (e.Auras |> List.exists Aura.preventsActing)
   let canAfford (e: Entity) (ability: Ability) = e.Resource >= ability.ResourceCost
 
   // -- threat ---------------------------------------------------------------
@@ -160,6 +158,16 @@ module SimState =
 
   let mapAll (f: Entity -> Entity) (w: World) = { w with Entities = w.Entities |> List.map f }
 
+  /// Any hostile action wakes a sleeper — the sourced rule — so an interrupt or
+  /// a taunt ends a sleep as surely as damage does.
+  let wake (targetId: EntityId) (w: World) =
+    mapEntity
+      targetId
+      (fun t ->
+        { t with
+            Auras = t.Auras |> List.filter (fun a -> not (Aura.endsOnHostileAction a)) })
+      w
+
   /// Add threat to one Mob, scaled by the *generating* entity's multiplier.
   /// Only the Party generates threat; a Mob healing or hitting generates none.
   let addThreat (mobId: EntityId) (source: Entity) (amount: int) (w: World) =
@@ -185,8 +193,8 @@ module SimState =
       let share = effective * 5000 / 10000 / List.length observers
       observers |> List.fold (fun acc m -> addThreat m.Id healer share acc) w
 
-  /// Any hostile action wakes a sleeper, so damage is what removes Sleeping.
-  /// A corpse stops moving and stops casting, so it interpolates nowhere.
+  /// Damage wakes a sleeper, as does any other hostile action — see `wake`. A
+  /// corpse stops moving and stops casting, so it interpolates nowhere.
   let dealDamage (targetId: EntityId) (amount: int) (w: World) =
     mapEntity
       targetId
@@ -195,7 +203,7 @@ module SimState =
 
         { t with
             Health = hp
-            Auras = t.Auras |> List.filter (function Sleeping _ -> false | _ -> true)
+            Auras = t.Auras |> List.filter (fun a -> not (Aura.endsOnHostileAction a))
             Casting = if hp = 0 then None else t.Casting
             Goal = if hp = 0 then None else t.Goal
             Path = if hp = 0 then [] else t.Path
@@ -271,6 +279,7 @@ module SimState =
               { e with
                   Casting = None
                   Cooldowns = e.Cooldowns |> Map.add cancelled interruptLockout })
+            |> wake targetId
             |> logLine (sprintf "%s interrupts %s's %s" actor.Name t.Name cancelled)
           | Some t ->
             w |> logLine (sprintf "%s fails to interrupt %s" actor.Name t.Name)
@@ -282,7 +291,9 @@ module SimState =
             w
             |> mapEntity targetId (fun e ->
               { e with
-                  Auras = Sleeping duration :: e.Auras
+                  Auras =
+                    Sleeping duration
+                    :: (e.Auras |> List.filter (fun a -> not (Aura.isSleeping a)))
                   Casting = None
                   Goal = None
                   Path = []
@@ -297,7 +308,7 @@ module SimState =
             { e with
                 Auras =
                   SerpentForm(duration, bonus)
-                  :: (e.Auras |> List.filter (function SerpentForm _ -> false | _ -> true)) })
+                  :: (e.Auras |> List.filter (fun a -> not (Aura.isSerpentForm a))) })
           |> logLine (sprintf "%s shifts into serpent form" actor.Name)
 
         | Shapeshift(Humanoid, _, _) -> w
@@ -313,6 +324,7 @@ module SimState =
                   ForcedTarget = Some actorId
                   Engaged = true
                   Threat = mob.Threat |> Map.add actorId (max highest (threatOf actorId mob)) })
+            |> wake targetId
             |> logLine (sprintf "%s taunts %s" actor.Name m.Name)
           | _ -> w)
 

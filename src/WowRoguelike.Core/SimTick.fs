@@ -12,18 +12,10 @@ module SimTick =
   // Per-tick phases
   // =========================================================================
 
-  /// Auras tick down; anything at zero falls off.
+  /// Auras age, and anything that runs out falls off. The ageing rule for each
+  /// kind lives in `Aura.advance`, which is the one place that matches every case.
   let advanceAuras (w: World) =
-    mapAll
-      (fun e ->
-        { e with
-            Auras =
-              e.Auras
-              |> List.choose (function
-                | Sleeping r when r > ticks 1 -> Some(Sleeping(r - ticks 1))
-                | SerpentForm(r, b) when r > ticks 1 -> Some(SerpentForm(r - ticks 1, b))
-                | _ -> None) })
-      w
+    mapAll (fun e -> { e with Auras = e.Auras |> List.choose Aura.advance }) w
 
   let advanceCooldowns (w: World) =
     mapAll
