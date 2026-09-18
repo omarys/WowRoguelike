@@ -6,6 +6,7 @@ let private usage () =
   printfn "sim demo [seed] [maxTicks]  play the encounter with the scripted party, show the log"
   printfn "sim fingerprint [seed]      canonical state text for golden-replay comparison"
   printfn "sim bench                   time the tick loop at several entity counts"
+  printfn "sim profile                 split the tick cost into search frequency and search internals"
   printfn "sim runs [n] [maxTicks]     run n seeds and summarise outcomes"
 
 let private nth (args: string list) (i: int) = args |> List.tryItem i
@@ -59,11 +60,25 @@ let private runs (n: int) (maxTicks: int) =
 
 let private bench () =
   printfn "%-28s %s" "fixture" "result"
-  printfn "%s" (Bench.report "encounter, scripted party" 2000 (Bench.runEncounter 1UL 200))
-  printfn "%s" (Bench.report "encounter, idle" 2000 (Content.gully 1UL))
 
-  for n in [ 100; 250; 500 ] do
-    printfn "%s" (Bench.report (sprintf "synthetic, %d hostiles" n) 2000 (Bench.synthetic n 1UL))
+  // Sample sizes are explicit per fixture, because a tick's cost is both steeply
+  // superlinear in entity count and non-stationary within a fight: the pull phase
+  // does nearly all the pathfinding and the settled phase does almost none. A
+  // window small enough to be cheap is a window that only sees one of the two,
+  // so each number below is only meaningful next to its own sample size.
+  let report label ticks w = printfn "%s" (Bench.report label ticks w)
+
+  // The encounter is measured with the autopilot driving it. `Bench.report`
+  // steps a world with no input, which for a fight measures the corpse pile it
+  // collapses into rather than the fight.
+  //
+  // Several seeds, because identical-length fights differ wildly in cost: the
+  // figure below is not one number, it is a distribution over seeds.
+  for seed in [ 1UL; 2UL; 3UL; 4UL; 5UL ] do
+    printfn "%s" (Bench.fightSplitCost seed 3000)
+  report "synthetic, 100 hostiles" 300 (Bench.synthetic 100 1UL)
+  report "synthetic, 250 hostiles" 60 (Bench.synthetic 250 1UL)
+  report "synthetic, 500 hostiles" 20 (Bench.synthetic 500 1UL)
 
   printfn ""
   printfn "%s" (Bench.concaveReport ())
@@ -89,6 +104,36 @@ let main argv =
     0
   | [ "bench" ] ->
     bench ()
+    0
+  | [ "profile" ] ->
+    let gully = (Content.gully 1UL).Grid
+    let dense = Bench.randomMap 24 16 22 7000UL
+
+    // Per-seed, because identical-length fights differ by 40x and the only thing
+    // that varies between them is where Anacondra stands.
+    for seed in [ 1UL; 2UL; 3UL; 4UL; 5UL ] do
+      let boss =
+        (Content.gully seed).Entities
+        |> List.find (fun e -> e.Name = "Lady Anacondra")
+
+      printfn
+        "seed %d, anacondra at %2d,%-2d  %s"
+        seed
+        boss.Pos.X
+        boss.Pos.Y
+        (Bench.pressureProfile seed 4000)
+
+    printfn ""
+    printfn "%s" (Bench.searchCost "22x13 encounter gully" gully (Bench.samplePairs gully 200) 200)
+
+    printfn
+      "%s"
+      (Bench.searchCost
+        "24x16 random, 22%% walls"
+        dense
+        (Bench.samplePairs dense 200)
+        200)
+
     0
   | "runs" :: rest ->
     runs (intOf rest 0 20) (intOf rest 1 2000)

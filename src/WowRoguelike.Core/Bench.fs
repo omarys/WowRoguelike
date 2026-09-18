@@ -26,6 +26,11 @@ module Bench =
 
   let private within (r: int) (a: Entity) (b: Entity) = Pos.chebyshev a.Pos b.Pos <= r
 
+  /// The same reach rule the Core uses, including its melee exemption. Without
+  /// it the scripted player orders spells through walls and just fills the log.
+  let private canReach (r: int) (a: Entity) (b: Entity) (w: World) =
+    within r a b && (r <= 1 || Path.lineOfSight w.Grid a.Pos b.Pos)
+
   /// Drives the Party headlessly so benchmarks and golden replays have input.
   ///
   /// This is NOT game AI. The Party is commanded directly by the player (Q5a);
@@ -65,7 +70,7 @@ module Bench =
         // Pull anything that has torn aggro off the Tank.
         let thief =
           Sim.aliveHostiles w
-          |> List.tryFind (fun h -> h.Engaged && h.Target <> Some t.Id && within 8 t h)
+          |> List.tryFind (fun h -> h.Engaged && h.Target <> Some t.Id && canReach 8 t h w)
 
         match thief with
         | Some h when has t "Taunt" && canUse t "Taunt" -> cmd t (UseAbility(t.Id, "Taunt", h.Id))
@@ -86,9 +91,9 @@ module Bench =
           |> List.tryHead
 
         match wounded with
-        | Some target when within 8 h target && canUse h "Lesser Heal" ->
+        | Some target when canReach 8 h target w && canUse h "Lesser Heal" ->
           cmd h (UseAbility(h.Id, "Lesser Heal", target.Id))
-        | Some target when within 8 h target -> []
+        | Some target when canReach 8 h target w -> []
         | Some target -> cmd h (MoveTo(h.Id, target.Pos))
         | None -> []
 
@@ -123,7 +128,7 @@ module Bench =
             |> List.tryFind (fun a -> canUse e a.Name)
 
           match shot with
-          | Some a when within a.Range e f -> cmd e (UseAbility(e.Id, a.Name, f.Id))
+          | Some a when canReach a.Range e f w -> cmd e (UseAbility(e.Id, a.Name, f.Id))
           | _ when not (within 8 e f) -> cmd e (MoveTo(e.Id, f.Pos))
           | _ -> [])
 
@@ -210,14 +215,16 @@ module Bench =
     sw.Elapsed.TotalMilliseconds / float ticksToRun
 
   let report (label: string) (ticksToRun: int) (w: World) : string =
-    let perTick = timeStep ticksToRun 50 w
+    // Warm up on a quarter of the sample, so the measured loop dominates.
+    let perTick = timeStep ticksToRun (max 1 (ticksToRun / 4)) w
 
     sprintf
-      "%-28s entities=%4d  %9.4f ms/tick  %10.0f ticks/sec"
+      "%-28s entities=%4d  %9.4f ms/tick  %10.0f ticks/sec  (%d ticks)"
       label
       (List.length w.Entities)
       perTick
       (1000.0 / perTick)
+      ticksToRun
 
   // =========================================================================
   // Search and heap fixtures (Q2c / Q26a)
@@ -367,3 +374,177 @@ module Bench =
       mineMs
       ordered
       bclMs
+
+  // =========================================================================
+  // Decomposing the tick cost (task 11)
+  // =========================================================================
+
+  /// Cost per tick of a *driven* fight.
+  ///
+  /// Timing `Sim.step []` on a fight instead measures its aftermath: with no
+  /// input the Priest stops healing, the Party dies, the world resolves, and every
+  /// subsequent tick is nearly free. That is why the old "encounter" figures read
+  /// as two orders of magnitude cheaper than the search cost they supposedly
+  /// contained.
+  let fightCost (seed: uint64) (ticks: int) : string =
+    let mutable w = Content.gully seed
+    // A short warmup only. Warming up for a quarter of the budget silently
+    // measures the settled endgame, where almost nothing paths.
+    let warmup = min 50 (ticks / 10)
+
+    for _ in 1..warmup do
+      w <- Sim.step (autoPilot w) w
+
+    let from = int w.Tick
+    let sw = Stopwatch.StartNew()
+    let mutable live = 0
+
+    for _ in 1..(ticks - warmup) do
+      if Sim.outcome w = Running then
+        w <- Sim.step (autoPilot w) w
+        live <- live + 1
+
+    sw.Stop()
+
+    sprintf
+      "driven fight: %.4f ms/tick over %d live ticks (ticks %d..%d), %A"
+      (sw.Elapsed.TotalMilliseconds / float (max 1 live))
+      live
+      from
+      (int w.Tick)
+      (Sim.outcome w)
+
+  /// The same fight, split into the scripted player's cost and `Sim.step`'s.
+  ///
+  /// `fightCost` times both together. If these two disagree with it, the cost is
+  /// in the harness fixture rather than in the simulation, and chasing the Core
+  /// would be chasing the wrong thing.
+  let fightSplitCost (seed: uint64) (ticks: int) : string =
+    let mutable w = Content.gully seed
+    let warmup = min 50 (ticks / 10)
+
+    for _ in 1..warmup do
+      w <- Sim.step (autoPilot w) w
+
+    let clock = Stopwatch()
+    let mutable pilotMs = 0.0
+    let mutable stepMs = 0.0
+    let mutable live = 0
+
+    for _ in 1..(ticks - warmup) do
+      if Sim.outcome w = Running then
+        clock.Restart()
+        let commands = autoPilot w
+        pilotMs <- pilotMs + clock.Elapsed.TotalMilliseconds
+        clock.Restart()
+        w <- Sim.step commands w
+        stepMs <- stepMs + clock.Elapsed.TotalMilliseconds
+        live <- live + 1
+
+    let n = float (max 1 live)
+
+    sprintf
+      "seed %d over %d ticks: autopilot %.4f ms/tick, Sim.step %.4f ms/tick"
+      seed
+      live
+      (pilotMs / n)
+      (stepMs / n)
+
+  /// How many entities want to move, and how many will therefore run a search
+  /// this tick. `Sim.stepToward` replans exactly when a goal is set and either the
+  /// stored path is empty or its next tile has been taken, so the second number
+  /// is A* calls per tick.
+  let private searchPressure (w: World) =
+    let movers =
+      w.Entities |> List.filter (fun e -> Sim.alive e && e.Goal.IsSome)
+
+    let planning =
+      movers
+      |> List.filter (fun e ->
+        match e.Path with
+        | [] -> true
+        | next :: _ -> Sim.claimedByOther w e.Id next)
+
+    List.length movers, List.length planning
+
+  /// Search pressure sampled every tick across a whole fight. The spread in these
+  /// numbers is why per-tick cost is not one number: a long sample averages the
+  /// pull phase against the settled phase, and a short one may see only one of
+  /// them.
+  let pressureProfile (seed: uint64) (ticks: int) : string =
+    let mutable w = Content.gully seed
+    let planning = ResizeArray<int>()
+    let mutable started = 0
+
+    while started < ticks && Sim.outcome w = Running do
+      let _, replans = searchPressure w
+      planning.Add replans
+      w <- Sim.step (autoPilot w) w
+      started <- started + 1
+
+    let sorted = planning |> Seq.sort |> Seq.toArray
+
+    let at percentile =
+      if Array.isEmpty sorted then
+        0
+      else
+        sorted.[min (Array.length sorted - 1) (percentile * Array.length sorted / 100)]
+
+    let mean =
+      if Array.isEmpty sorted then 0.0 else Array.averageBy float sorted
+
+    sprintf
+      "fight pressure, %d ticks: A* calls/tick mean %.2f, p50 %d, p95 %d, max %d"
+      started
+      mean
+      (at 50)
+      (at 95)
+      (at 100)
+
+  /// Evenly-ish spread pairs of floor tiles for a search benchmark.
+  let samplePairs (g: Grid) (count: int) =
+    let floor = Grid.tiles g |> Seq.filter (Grid.isFloor g) |> Seq.toArray
+
+    [ for i in 0..count - 1 ->
+        let a = floor.[i * 7 % floor.Length]
+        let b = floor.[i * 13 % floor.Length]
+        if a = b then a, floor.[(i + 1) % floor.Length] else a, b ]
+
+  /// Time the search with no game around it. This is the "internals" half of the
+  /// cost, and it is independent of how often the search is called.
+  ///
+  /// Measure it on the grid you actually care about. An open dungeon room expands
+  /// far fewer nodes than a dense random map, so a figure taken from the wrong
+  /// grid is off by an order of magnitude — which is exactly how an earlier
+  /// version of this benchmark claimed A* cost more per tick than the whole fight
+  /// measured.
+  let searchCost (label: string) (grid: Grid) (pairs: (Pos * Pos) list) (runsPer: int) : string =
+    let nothing (_: Pos) = false
+
+    for (a, b) in pairs do
+      Path.astar grid nothing a b |> ignore
+
+    let sw = Stopwatch.StartNew()
+    let mutable expansions = 0
+    let mutable found = 0
+    let mutable calls = 0
+
+    for _ in 1..runsPer do
+      for (a, b) in pairs do
+        let r = Path.astar grid nothing a b
+        expansions <- expansions + r.Expanded
+
+        if not (List.isEmpty r.Path) then
+          found <- found + 1
+
+        calls <- calls + 1
+
+    sw.Stop()
+
+    sprintf
+      "%-28s %8.4f ms/search  %7.1f expansions/search  %d calls, %d unreachable"
+      label
+      (sw.Elapsed.TotalMilliseconds / float calls)
+      (float expansions / float calls)
+      calls
+      (calls - found)

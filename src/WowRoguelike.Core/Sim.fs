@@ -52,6 +52,13 @@ module Sim =
   let withinRange (range: int) (a: Entity) (b: Entity) =
     Pos.chebyshev a.Pos b.Pos <= range
 
+  /// Distance alone is not reach: nothing at range can be hit through a wall.
+  /// Melee is deliberately exempt, so something standing beside you is always
+  /// hittable and a blocked caster cannot freeze next to its target.
+  let canReach (range: int) (actor: Entity) (target: Entity) (w: World) =
+    withinRange range actor target
+    && (range <= 1 || Path.lineOfSight w.Grid actor.Pos target.Pos)
+
   /// A tile is taken if someone stands on it *or* is already stepping into it,
   /// otherwise two entities claim the same tile in the same tick.
   let claimedByOther (w: World) (self: EntityId) (p: Pos) =
@@ -293,11 +300,11 @@ module Sim =
   // Commands
   // =========================================================================
 
-  let private allyInNeed (actor: Entity) (w: World) =
+  let private allyInNeed (actor: Entity) (ability: Ability) (w: World) =
     let pool = if actor.Faction = Party then aliveParty w else aliveHostiles w
 
     pool
-    |> List.filter (fun e -> e.Health < e.MaxHealth)
+    |> List.filter (fun e -> e.Health < e.MaxHealth && canReach ability.Range actor e w)
     |> List.sortBy healthPct
     |> List.tryHead
     |> Option.map (fun e -> e.Id)
@@ -307,9 +314,9 @@ module Sim =
     | Self -> if ability.Effects |> List.isEmpty then None else Some actor.Id
     | Enemy ->
       match currentTarget actor w with
-      | Some t when withinRange ability.Range actor t -> Some t.Id
+      | Some t when canReach ability.Range actor t w -> Some t.Id
       | _ -> None
-    | Ally -> allyInNeed actor w
+    | Ally -> allyInNeed actor ability w
 
   let private startOrResolve (actor: Entity) (targetId: EntityId) (ability: Ability) (w: World) : World =
     let w =
@@ -391,7 +398,7 @@ module Sim =
                     | Self -> t.Id = actor.Id
                     | Enemy -> t.Faction <> actor.Faction
                     | Ally -> t.Faction = actor.Faction)
-                && (ability.TargetKind = Self || withinRange ability.Range actor t)
+                && (ability.TargetKind = Self || canReach ability.Range actor t w)
 
             if not targetOk then
               w
@@ -565,11 +572,11 @@ module Sim =
       let target =
         if e.Faction = Party then
           aliveHostiles w
-          |> List.filter (fun t -> t.Engaged && withinRange attack.Range e t)
+          |> List.filter (fun t -> t.Engaged && canReach attack.Range e t w)
           |> List.sortBy (fun t -> Pos.chebyshev e.Pos t.Pos)
           |> List.tryHead
         else
-          currentTarget e w |> Option.filter (fun t -> withinRange attack.Range e t)
+          currentTarget e w |> Option.filter (fun t -> canReach attack.Range e t w)
 
       // Extra physical damage from Serpent Form lands on every swing.
       let bonus = serpentBonus e
@@ -668,7 +675,7 @@ module Sim =
 
               damageAbility
               |> Option.filter (fun a ->
-                ready a && canCast m && withinRange a.Range m target)
+                ready a && canCast m && canReach a.Range m target w)
               |> Option.map (fun a -> a, target.Id)
 
               // Shift only once the target has closed to melee.

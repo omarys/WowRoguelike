@@ -562,3 +562,81 @@ let ``a star expands no more nodes than dijkstra`` (seed: int) =
   let a = Path.astar g allowAll pathStart goal
   let d = Path.dijkstra g allowAll pathStart goal
   a.Expanded <= d.Expanded
+
+// ===========================================================================
+// Line of sight
+// ===========================================================================
+
+[<Fact>]
+let ``line of sight is clear across an open room`` () =
+  let g = Grid.ofRows [ "#####"; "#...#"; "#...#"; "#####" ]
+  Assert.True(Path.lineOfSight g { X = 1; Y = 1 } { X = 3; Y = 2 })
+
+[<Fact>]
+let ``a wall directly between two tiles blocks sight`` () =
+  let g =
+    Grid.ofRows [ "#####"; "#...#"; "#.#.#"; "#...#"; "#####" ]
+
+  Assert.False(Path.lineOfSight g { X = 1; Y = 2 } { X = 3; Y = 2 })
+
+[<Fact>]
+let ``a wall beside the line does not block sight`` () =
+  let g =
+    Grid.ofRows [ "#####"; "#...#"; "#.#.#"; "#...#"; "#####" ]
+
+  Assert.True(Path.lineOfSight g { X = 1; Y = 1 } { X = 1; Y = 3 })
+
+/// The real encounter's pillars sit at x=5,6 and x=15,16 on rows 3,4 and 8,9.
+/// This is the bug that motivated the work: Druids lightning-bolting the Party
+/// through them.
+[<Fact>]
+let ``the encounter pillars block across but not around`` () =
+  let g = (Content.gully 1UL).Grid
+  Assert.False(Path.lineOfSight g { X = 4; Y = 3 } { X = 7; Y = 3 })
+  Assert.True(Path.lineOfSight g { X = 4; Y = 2 } { X = 7; Y = 2 })
+
+/// Endpoints are never consulted, so a Mob standing in a doorway with walls on
+/// both sides is not blind, and nothing on a tile ever blinds itself.
+[<Fact>]
+let ``line of sight does not consult the endpoints`` () =
+  let g = Grid.ofRows [ "#.#" ]
+  Assert.True(Path.lineOfSight g { X = 0; Y = 0 } { X = 2; Y = 0 })
+
+/// The reason sight is tested in both directions rather than one: on this map
+/// the forward line slips past a corner and the reverse line does not, so a
+/// single-direction test would give whoever ran second an advantage.
+[<Fact>]
+let ``sight does not slip diagonally past a corner`` () =
+  let g =
+    Grid.ofRows [ "######"; "#.#..#"; "#....#"; "#....#"; "#....#"; "######" ]
+
+  // From 1,1 the line steps diagonally into 2,2, whose upper neighbour is a wall.
+  Assert.False(Path.lineOfSight g { X = 1; Y = 1 } { X = 4; Y = 4 })
+  // One row lower there is no such corner.
+  Assert.True(Path.lineOfSight g { X = 1; Y = 2 } { X = 4; Y = 4 })
+
+[<Property>]
+let ``line of sight is symmetric`` (seed: int) =
+  let g = Bench.randomMap 20 14 25 (uint64 (abs seed) + 3UL)
+  let floor = Grid.tiles g |> Seq.filter (Grid.isFloor g) |> Seq.toList
+  let sample = [ for i in 0..12 -> List.item (i * 7 % List.length floor) floor ]
+
+  sample
+  |> List.forall (fun a ->
+    sample |> List.forall (fun b -> Path.lineOfSight g a b = Path.lineOfSight g b a))
+
+/// A blocked caster next to its target must still be able to act, which is what
+/// the melee exemption in `Sim.canReach` rests on.
+[<Property>]
+let ``adjacent tiles always see each other`` (seed: int) =
+  let g = Bench.randomMap 20 14 25 (uint64 (abs seed) + 4UL)
+
+  Grid.tiles g
+  |> Seq.filter (Grid.isFloor g)
+  |> Seq.forall (fun a ->
+    [ -1..1 ]
+    |> List.forall (fun dx ->
+      [ -1..1 ]
+      |> List.forall (fun dy ->
+        let b = Pos.move dx dy a
+        (dx = 0 && dy = 0) || not (Grid.isFloor g b) || Path.lineOfSight g a b)))

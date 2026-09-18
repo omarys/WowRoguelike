@@ -166,3 +166,65 @@ module Path =
 
     { Path = (if current = goal then List.rev trail else [])
       Expanded = steps }
+
+  /// Walk a Bresenham line from `a` towards `b`, testing every tile strictly
+  /// between them. Reports false as soon as something blocks.
+  ///
+  /// Both endpoints are excluded, so an entity never blocks its own line —
+  /// otherwise anything standing in a doorway would be permanently unhittable.
+  /// A diagonal step additionally requires both of its orthogonal neighbours to
+  /// be open, matching `neighbours`, so sight does not slip between two
+  /// diagonally adjacent pillars either.
+  let private lineClear (passable: Pos -> bool) (a: Pos) (b: Pos) =
+    let dx = abs (b.X - a.X)
+    let dy = abs (b.Y - a.Y)
+    let sx = sign (b.X - a.X)
+    let sy = sign (b.Y - a.Y)
+    let mutable err = dx - dy
+    let mutable x = a.X
+    let mutable y = a.Y
+    let mutable ok = true
+    // Bresenham terminates by construction; the guard is here because this
+    // runs inside the tick and a hang is worse than a wrong answer.
+    let mutable guard = 0
+    let limit = dx + dy + 2
+
+    while ok && (x <> b.X || y <> b.Y) && guard < limit do
+      guard <- guard + 1
+      let previousX = x
+      let previousY = y
+      let e2 = 2 * err
+
+      if e2 > -dy then
+        err <- err - dy
+        x <- x + sx
+
+      if e2 < dx then
+        err <- err + dx
+        y <- y + sy
+
+      let arrived = x = b.X && y = b.Y
+
+      if not arrived then
+        if not (passable { X = x; Y = y }) then
+          ok <- false
+        elif
+          x <> previousX
+          && y <> previousY
+          && (not (passable { X = x; Y = previousY })
+              || not (passable { X = previousX; Y = y }))
+        then
+          ok <- false
+
+    ok
+
+  /// Point-to-point line of sight. Both directions must be clear, which makes
+  /// symmetry a property of the construction rather than something to hope for:
+  /// naive Bresenham picks a different cell on exact diagonal ties depending on
+  /// which end you start from, so testing one direction alone gives you a caster
+  /// who can see you while you cannot see it back.
+  ///
+  /// Entities deliberately do not block sight, so only walls are consulted.
+  let lineOfSight (g: Grid) (a: Pos) (b: Pos) =
+    let passable p = Grid.isFloor g p
+    a = b || (lineClear passable a b && lineClear passable b a)
