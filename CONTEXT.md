@@ -75,3 +75,7 @@ _Avoid_: channel, windup, delay
 **Interruptible**:
 A Cast that an interrupt ability can stop, cancelling it before it resolves.
 _Avoid_: cancellable, breakable
+
+**Resource**:
+The pool an ability is paid for from when it resolves. Running out is what ends a fight; a caster with an empty pool can only melee.
+_Avoid_: mana, energy, rage, power

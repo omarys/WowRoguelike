@@ -16,6 +16,14 @@ module Bench =
   let private has (e: Entity) (abilityName: string) =
     e.Abilities |> List.exists (fun a -> a.Name = abilityName)
 
+  /// Off cooldown and affordable. Affordability matters now: a caster that keeps
+  /// ordering spells while dry just fills the log.
+  let private canUse (e: Entity) (abilityName: string) =
+    ready e abilityName
+    && (e.Abilities
+        |> List.tryFind (fun a -> a.Name = abilityName)
+        |> Option.exists (Sim.canAfford e))
+
   let private within (r: int) (a: Entity) (b: Entity) = Pos.chebyshev a.Pos b.Pos <= r
 
   /// Drives the Party headlessly so benchmarks and golden replays have input.
@@ -60,8 +68,8 @@ module Bench =
           |> List.tryFind (fun h -> h.Engaged && h.Target <> Some t.Id && within 8 t h)
 
         match thief with
-        | Some h when has t "Taunt" && ready t "Taunt" -> cmd t (UseAbility(t.Id, "Taunt", h.Id))
-        | _ when within 1 t f && has t "Heroic Strike" && ready t "Heroic Strike" ->
+        | Some h when has t "Taunt" && canUse t "Taunt" -> cmd t (UseAbility(t.Id, "Taunt", h.Id))
+        | _ when within 1 t f && canUse t "Heroic Strike" ->
           cmd t (UseAbility(t.Id, "Heroic Strike", f.Id))
         | _ when not (within 1 t f) -> cmd t (MoveTo(t.Id, f.Pos))
         | _ -> []
@@ -78,7 +86,9 @@ module Bench =
           |> List.tryHead
 
         match wounded with
-        | Some target when within 8 h target -> cmd h (UseAbility(h.Id, "Lesser Heal", target.Id))
+        | Some target when within 8 h target && canUse h "Lesser Heal" ->
+          cmd h (UseAbility(h.Id, "Lesser Heal", target.Id))
+        | Some target when within 8 h target -> []
         | Some target -> cmd h (MoveTo(h.Id, target.Pos))
         | None -> []
 
@@ -93,8 +103,7 @@ module Bench =
             h.Casting |> Option.exists (fun c -> c.Ability.Interruptible))
 
         match caster with
-        | Some c when has r "Kick" && ready r "Kick" && within 1 r c ->
-          cmd r (UseAbility(r.Id, "Kick", c.Id))
+        | Some c when canUse r "Kick" && within 1 r c -> cmd r (UseAbility(r.Id, "Kick", c.Id))
         | Some c when not (within 1 r c) -> cmd r (MoveTo(r.Id, c.Pos))
         | _ ->
           match focus with
@@ -111,7 +120,7 @@ module Bench =
           let shot =
             e.Abilities
             |> List.filter (fun a -> a.TargetKind = Enemy && a.Range > 1)
-            |> List.tryFind (fun a -> ready e a.Name)
+            |> List.tryFind (fun a -> canUse e a.Name)
 
           match shot with
           | Some a when within a.Range e f -> cmd e (UseAbility(e.Id, a.Name, f.Id))
@@ -145,12 +154,14 @@ module Bench =
     let tap = { Min = 1; Max = 2; Ticks = secTicks 1.0; Range = 1 }
     let forever = 100000000
 
+    // Resource is made effectively infinite here too, so the fixture measures a
+    // steady state instead of drifting as casters run dry.
     let party =
-      [ Content.hero 1 "Tank" Tank forever tap 50000 [ Content.heroicStrike; Content.taunt ] { X = 1; Y = 1 }
-        Content.hero 2 "Healer" Healer forever tap 10000 [ Content.lesserHeal ] { X = 1; Y = 2 }
-        Content.hero 3 "Rogue" Dps forever tap 10000 [ Content.kick ] { X = 1; Y = 3 }
-        Content.hero 4 "Mage" Dps forever tap 10000 [ Content.fireball ] { X = 2; Y = 1 }
-        Content.hero 5 "Hunter" Dps forever tap 10000 [ Content.arcaneShot ] { X = 2; Y = 2 } ]
+      [ Content.hero 1 "Tank" Tank forever forever tap 50000 [ Content.heroicStrike; Content.taunt ] { X = 1; Y = 1 }
+        Content.hero 2 "Healer" Healer forever forever tap 10000 [ Content.lesserHeal ] { X = 1; Y = 2 }
+        Content.hero 3 "Rogue" Dps forever forever tap 10000 [ Content.kick ] { X = 1; Y = 3 }
+        Content.hero 4 "Mage" Dps forever forever tap 10000 [ Content.fireball ] { X = 2; Y = 1 }
+        Content.hero 5 "Hunter" Dps forever forever tap 10000 [ Content.arcaneShot ] { X = 2; Y = 2 } ]
 
     let mobs =
       [ for i in 0 .. hostileCount - 1 ->
@@ -161,6 +172,7 @@ module Bench =
             Content.mob
               (100 + i)
               "Synthetic"
+              forever
               forever
               (Some tap)
               [ Content.lightningBolt; Content.healingTouch; Content.druidsSlumber; Content.serpentForm ]

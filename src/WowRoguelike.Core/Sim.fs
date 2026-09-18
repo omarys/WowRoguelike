@@ -75,6 +75,7 @@ module Sim =
   /// Being shifted locks out casting, which is the whole cost of Serpent Form.
   let canCast (e: Entity) = not (isSleeping e) && not (isShifted e) && e.Casting.IsNone
   let canAct (e: Entity) = alive e && not (isSleeping e)
+  let canAfford (e: Entity) (ability: Ability) = e.Resource >= ability.ResourceCost
 
   // -- threat ---------------------------------------------------------------
 
@@ -192,12 +193,19 @@ module Sim =
   let private nameOf (id: EntityId) (w: World) =
     tryEntity id w |> Option.map (fun e -> e.Name) |> Option.defaultValue "?"
 
-  /// Resolve one ability's effects against one target.
+  /// Resolve one ability's effects against one target. The resource is spent
+  /// here, on resolution, so an interrupted cast costs nothing.
   let resolveAbility (actorId: EntityId) (targetId: EntityId) (ability: Ability) (w0: World) : World =
     match tryEntity actorId w0 with
     | None -> w0
     | Some actor ->
       let targetName = nameOf targetId w0
+
+      let w0 =
+        mapEntity
+          actorId
+          (fun e -> { e with Resource = max 0 (e.Resource - ability.ResourceCost) })
+          w0
 
       (w0, ability.Effects)
       ||> List.fold (fun w effect ->
@@ -360,7 +368,9 @@ module Sim =
           let onCooldown =
             actor.Cooldowns |> Map.tryFind ability.Name |> Option.defaultValue (ticks 0) > ticks 0
 
-          if onCooldown then
+          if not (canAfford actor ability) then
+            w |> logLine (sprintf "%s: not enough resource for %s" actor.Name ability.Name)
+          elif onCooldown then
             w |> logLine (sprintf "%s: %s on cooldown" actor.Name ability.Name)
           elif ability.CastTicks > ticks 0 && not (canCast actor) then
             // Already casting is not a failure worth logging: it is the caller's
@@ -414,6 +424,19 @@ module Sim =
               e.Cooldowns
               |> Map.map (fun _ r -> r - ticks 1)
               |> Map.filter (fun _ r -> r > ticks 0) })
+      w
+
+  /// Resource accumulates. Mob regeneration is zero, and that is the entire
+  /// reason a fight can now end: a Druid of the Fang can afford four Healing
+  /// Touches and then it is spent.
+  let advanceResource (w: World) =
+    mapAll
+      (fun e ->
+        if not (alive e) then
+          e
+        else
+          { e with
+              Resource = min e.MaxResource (e.Resource + e.ResourceRegenPerTick) })
       w
 
   /// One tile of progress. A moving entity loses its cast — and a sleeping one
@@ -622,6 +645,7 @@ module Sim =
 
           let ready (a: Ability) =
             (m.Cooldowns |> Map.tryFind a.Name |> Option.defaultValue (ticks 0)) <= ticks 0
+            && canAfford m a
 
           let healAbility = byEffect (function Heal _ -> true | _ -> false)
           let sleepAbility = byEffect (function Sleep _ -> true | _ -> false)
@@ -724,6 +748,7 @@ module Sim =
     w
     |> fun w -> (w, due) ||> List.fold (fun w c -> applyCommand c w)
     |> advanceCooldowns
+    |> advanceResource
     |> advanceAuras
     |> advanceMovement
     |> advanceCasts

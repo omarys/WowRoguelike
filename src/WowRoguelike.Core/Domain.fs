@@ -140,6 +140,7 @@ type Ability =
     /// Zero means instant.
     CastTicks: int<tick>
     CooldownTicks: int<tick>
+    ResourceCost: int
     Interruptible: bool
     /// In tiles. 1 is melee; a mob at range 1 is "within melee range" for the
     /// threat margins.
@@ -188,6 +189,13 @@ type Entity =
     Auras: Aura list
     Casting: Cast option
     Cooldowns: Map<string, int<tick>>
+    /// One resource for everyone. WoW splits this into mana, rage and energy; a
+    /// single pool is the lazy correct choice until the distinction itself
+    /// changes gameplay. Spent when an ability resolves rather than when it
+    /// starts, so an interrupted cast costs nothing.
+    Resource: int
+    MaxResource: int
+    ResourceRegenPerTick: int
     Abilities: Ability list
     AutoAttack: AutoAttack option
     SwingTicksLeft: int<tick>

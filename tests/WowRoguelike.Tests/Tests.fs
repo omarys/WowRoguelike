@@ -14,13 +14,13 @@ let private arena (tankThreat: int) (dpsThreat: int) (dpsPos: Pos) : World =
   let slow = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
 
   let tank =
-    Content.hero 1 "Tank" Tank 1000 slow 50000 [] { X = 5; Y = 5 }
+    Content.hero 1 "Tank" Tank 1000 1000 slow 50000 [ Content.heroicStrike ] { X = 5; Y = 5 }
 
   let dps =
-    Content.hero 2 "Dps" Dps 1000 slow 10000 [] dpsPos
+    Content.hero 2 "Dps" Dps 1000 1000 slow 10000 [] dpsPos
 
   let mob =
-    Content.mob 100 "Mob" 10000 (Some slow) [] None { X = 6; Y = 5 }
+    Content.mob 100 "Mob" 10000 1000 (Some slow) [] None { X = 6; Y = 5 }
 
   let mob =
     { mob with
@@ -159,10 +159,10 @@ let private casterWorld (ability: Ability) : World =
   let slow = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
 
   let rogue =
-    Content.hero 3 "Rogue" Dps 1000 slow 10000 [ Content.kick ] { X = 5; Y = 5 }
+    Content.hero 3 "Rogue" Dps 1000 1000 slow 10000 [ Content.kick ] { X = 5; Y = 5 }
 
   let mob =
-    Content.mob 100 "Caster" 10000 (Some slow) [ ability ] None { X = 6; Y = 5 }
+    Content.mob 100 "Caster" 10000 1000 (Some slow) [ ability ] None { X = 6; Y = 5 }
 
   let mob =
     { mob with
@@ -320,30 +320,17 @@ let ``no two living entities ever share a tile`` (seed: int) =
 
   loop (Content.gully (seed + 1UL)) 400
 
-/// KNOWN ISSUE, pinned rather than hidden. Roughly 6% of seeds (7 of 120) do not
-/// resolve: the Party cannot out-damage three Mobs alternating Healing Touch
-/// (195-243 each, 10 second cooldown, ~66 HPS) against roughly 45-50 party HPS,
-/// so the fight is a permanent stalemate and the tick loop is unbounded.
+/// KNOWN ISSUE, now fixed, kept as the regression guard. Before resource pools
+/// existed, 7 of 120 seeds never resolved: the Party could not out-damage three
+/// Mobs alternating Healing Touch (roughly 66 HPS against 45-50 party HPS) and
+/// nothing in the model ever ran out.
 ///
-/// The root cause is that nothing in the model runs out — not the casters'
-/// healing, and not the Party's damage. That is a design gap, not a coding bug,
-/// and it becomes a real assertion the moment fights have a way to finish: a mana
-/// pool for casters, an enrage timer, or healing that cannot outpace focused
-/// damage.
+/// Mobs do not regenerate resource, so their healing is finite. These are the
+/// seeds that used to run forever.
 [<Fact>]
-let ``a minority of seeds stalemate, and they are pinned`` () =
-  let outcomeOf seed = Sim.outcome (Bench.runEncounter seed 3000)
-
-  // Pinned examples, so movement in either direction is visible rather than
-  // silent.
-  Assert.Equal(Outcome.Running, outcomeOf 26UL)
-  Assert.Equal(Outcome.Running, outcomeOf 36UL)
-
-  // The great majority still finish, which is what keeps this a known gap
-  // rather than a broken model.
-  let seeds = [ 1UL..40UL ]
-  let cleared = seeds |> List.filter (fun s -> outcomeOf s = EncounterCleared) |> List.length
-  Assert.True(cleared >= 36, sprintf "expected most seeds to clear, got %d/40" cleared)
+let ``resource pools end the fights that used to stalemate`` () =
+  for seed in [ 26UL; 36UL; 98UL ] do
+    Assert.Equal(Outcome.EncounterCleared, Sim.outcome (Bench.runEncounter seed 5000))
 
 /// A* is wired into movement, not merely available as a library: this order is
 /// unreachable by the greedy stepper the previous slice shipped.
@@ -357,6 +344,7 @@ let ``a party member ordered across the cup room walks around the wall`` () =
             1
             "Solo"
             Dps
+            1000
             1000
             { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
             10000
@@ -388,6 +376,70 @@ let ``the tick counter advances by exactly one per step`` (n: int) =
   let n = abs n % 200
   let w = Sim.run n (Content.gully 1UL)
   w.Tick = ticks n
+
+// ===========================================================================
+// Resource
+// ===========================================================================
+
+[<Fact>]
+let ``resolving an ability spends its resource`` () =
+  let w = arena 0 0 { X = 7; Y = 5 }
+  let before = (w.Entities |> List.find (fun e -> e.Id = EntityId 1)).Resource
+  let w = Sim.resolveAbility (EntityId 1) (EntityId 100) Content.heroicStrike w
+  let after = (w.Entities |> List.find (fun e -> e.Id = EntityId 1)).Resource
+  Assert.Equal<int>(before - Content.heroicStrike.ResourceCost, after)
+
+/// Resource is spent on resolution, not on the attempt, so an interrupted cast
+/// costs nothing.
+[<Fact>]
+let ``an interrupted cast spends no resource`` () =
+  let w = casterWorld Content.lightningBolt
+  let before = (mobOf w).Resource
+
+  let w =
+    Sim.applyCommand
+      { ApplyAt = ticks 1
+        Kind = UseAbility(EntityId 3, "Kick", EntityId 100) }
+      w
+
+  Assert.Equal<int>(before, (mobOf w).Resource)
+  Assert.True((mobOf w).Casting.IsNone)
+
+[<Fact>]
+let ``an ability that cannot be afforded is refused`` () =
+  let w =
+    arena 0 0 { X = 7; Y = 5 }
+    |> Sim.mapEntity (EntityId 1) (fun e -> { e with Resource = 0 })
+
+  let w =
+    Sim.applyCommand
+      { ApplyAt = ticks 1
+        Kind = UseAbility(EntityId 1, "Heroic Strike", EntityId 100) }
+      w
+
+  let mob = mobOf w
+  Assert.Equal<int>(10000, mob.Health)
+  Assert.Equal<int>(0, Sim.threatOf (EntityId 1) mob)
+
+/// This is the whole reason a fight can end: mob healing is finite.
+[<Fact>]
+let ``mobs do not regenerate resource`` () =
+  let w =
+    arena 0 0 { X = 7; Y = 5 }
+    |> Sim.mapEntity (EntityId 100) (fun e -> { e with Resource = 50 })
+
+  let w = Sim.run 200 w
+  Assert.Equal<int>(50, (mobOf w).Resource)
+
+[<Fact>]
+let ``party resource regenerates`` () =
+  let w =
+    arena 0 0 { X = 7; Y = 5 }
+    |> Sim.mapEntity (EntityId 1) (fun e -> { e with Resource = 0 })
+
+  let w = Sim.run 50 w
+  let tank = w.Entities |> List.find (fun e -> e.Id = EntityId 1)
+  Assert.Equal<int>(50 * tank.ResourceRegenPerTick, tank.Resource)
 
 // ===========================================================================
 // A* and the heap (Q2c / Q26a)

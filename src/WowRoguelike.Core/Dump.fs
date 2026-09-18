@@ -35,7 +35,7 @@ module Dump =
     let forcedId = e.ForcedTarget |> Option.map entityIdText |> Option.defaultValue "-"
 
     sprintf
-      "%d %-18s %-7s %2d,%-2d hp=%d/%d dest=%s move=%d/%d goal=%s path=%d cast=%s auras=[%s] cd=[%s] threat=[%s] target=%s forced=%s engaged=%b called=%b"
+      "%d %-18s %-7s %2d,%-2d hp=%d/%d res=%d/%d dest=%s move=%d/%d goal=%s path=%d cast=%s auras=[%s] cd=[%s] threat=[%s] target=%s forced=%s engaged=%b called=%b"
       id
       e.Name
       (if e.Faction = Party then "party" else "hostile")
@@ -43,6 +43,8 @@ module Dump =
       e.Pos.Y
       e.Health
       e.MaxHealth
+      e.Resource
+      e.MaxResource
       (point e.Destination)
       e.MoveTicksLeft
       e.MoveTicksTotal

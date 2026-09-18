@@ -166,7 +166,16 @@ type RoguelikeGame() as this =
         |> String.concat "  "
 
       Console.WriteLine(
-        sprintf "%-3d %-18s %-7s %4d/%-4d %s" (let (EntityId i) = e.Id in i) e.Name role e.Health e.MaxHealth keys
+        sprintf
+          "%-3d %-18s %-7s hp %4d/%-4d res %4d/%-4d %s"
+          (let (EntityId i) = e.Id in i)
+          e.Name
+          role
+          e.Health
+          e.MaxHealth
+          e.Resource
+          e.MaxResource
+          keys
       )
 
     Console.WriteLine()
@@ -319,6 +328,9 @@ type RoguelikeGame() as this =
 
         bar (cx - 14) (cy - size / 2 - 7) 28 4 (float e.Health / float e.MaxHealth)
           (if e.Faction = Party then Color(90, 220, 110) else Color(220, 90, 90))
+
+        if e.MaxResource > 0 then
+          bar (cx - 14) (cy - size / 2 - 11) 28 2 (float e.Resource / float e.MaxResource) (Color(90, 150, 230))
 
         if e.Casting.IsSome then
           bar (cx - 14) (cy + size / 2 + 2) 28 3 1.0 (Color(240, 200, 90))
