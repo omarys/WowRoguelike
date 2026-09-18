@@ -78,9 +78,10 @@ module Path =
       { Path = []
         Expanded = 0 }
     else
-      // The goal is always enterable, so a route to a tile somebody is standing
-      // on still exists and the mover can walk up to it.
-      let passable p = p = goal || (Grid.isFloor g p && not (blocked p))
+      // The goal may be occupied by whatever is standing on it, so it is exempt
+      // from the blocker — but it must still be a floor tile. Exempting it from
+      // the floor check as well let a move order path an entity into a wall.
+      let passable p = Grid.isFloor g p && (p = goal || not (blocked p))
 
       let openList = MinHeap<int, Pos>()
       openList.Push(heuristic start goal, start)

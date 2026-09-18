@@ -640,3 +640,53 @@ let ``adjacent tiles always see each other`` (seed: int) =
       |> List.forall (fun dy ->
         let b = Pos.move dx dy a
         (dx = 0 && dy = 0) || not (Grid.isFloor g b) || Path.lineOfSight g a b)))
+
+/// The goal exemption is about occupancy, not about walls. Exempting the goal from
+/// the floor check as well let a `move` order path a member into a pillar, which
+/// breaks the one-entity-per-tile invariant the occupancy design rests on.
+[<Fact>]
+let ``a star refuses a goal that is a wall`` () =
+  let g =
+    Grid.ofRows [ "#####"; "#...#"; "#.#.#"; "#...#"; "#####" ]
+
+  let wall = { X = 2; Y = 2 }
+  Assert.True(Grid.isWall g wall)
+  Assert.True(List.isEmpty (Path.astar g allowAll { X = 1; Y = 1 } wall).Path)
+
+[<Fact>]
+let ``a move order onto a wall never leaves the entity inside it`` () =
+  let g =
+    Grid.ofRows [ "#####"; "#...#"; "##.##"; "#...#"; "#####" ]
+
+  let w =
+    { Tick = ticks 0
+      Grid = g
+      Entities =
+        [ Content.hero
+            1
+            "Solo"
+            Dps
+            1000
+            1000
+            { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
+            10000
+            []
+            { X = 1; Y = 1 } ]
+      Pending = []
+      Rng = Rng.streamsOf 1UL
+      Log = [] }
+
+  // (1,2) is a wall.
+  let w =
+    Sim.applyCommand
+      { ApplyAt = ticks 1
+        Kind = MoveTo(EntityId 1, { X = 1; Y = 2 }) }
+      w
+
+  let w = Sim.run 100 w
+  let solo = w.Entities |> List.head
+
+  Assert.True(
+    Grid.isFloor w.Grid solo.Pos,
+    sprintf "ended on a wall at %d,%d" solo.Pos.X solo.Pos.Y
+  )
