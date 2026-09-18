@@ -7,6 +7,7 @@ let private usage () =
   printfn "sim fingerprint [seed]      canonical state text for golden-replay comparison"
   printfn "sim bench                   time the tick loop at several entity counts"
   printfn "sim profile                 split the tick cost into search frequency and search internals"
+  printfn "sim diagnose                bucket Sim.step cost across a fight and dump the worst tick"
   printfn "sim runs [n] [maxTicks]     run n seeds and summarise outcomes"
 
 let private nth (args: string list) (i: int) = args |> List.tryItem i
@@ -104,6 +105,15 @@ let main argv =
     0
   | [ "bench" ] ->
     bench ()
+    0
+  | [ "diagnose" ] ->
+    printfn "%s" (Bench.searchFailureCost 200)
+    printfn ""
+
+    for seed in [ 1UL; 2UL ] do
+      printfn "=== seed %d ===" seed
+      printfn "%s" (Bench.stepProfile seed 1200 100)
+
     0
   | [ "profile" ] ->
     let gully = (Content.gully 1UL).Grid

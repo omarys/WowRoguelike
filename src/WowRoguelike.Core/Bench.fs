@@ -379,6 +379,23 @@ module Bench =
   // Decomposing the tick cost (task 11)
   // =========================================================================
 
+  /// How many entities want to move, and how many will therefore run a search
+  /// this tick. `Sim.stepToward` replans exactly when a goal is set and either the
+  /// stored path is empty or its next tile has been taken, so the second number
+  /// is A* calls per tick.
+  let searchPressure (w: World) =
+    let movers =
+      w.Entities |> List.filter (fun e -> Sim.alive e && e.Goal.IsSome)
+
+    let planning =
+      movers
+      |> List.filter (fun e ->
+        match e.Path with
+        | [] -> true
+        | next :: _ -> Sim.claimedByOther w e.Id next)
+
+    List.length movers, List.length planning
+
   /// Cost per tick of a *driven* fight.
   ///
   /// Timing `Sim.step []` on a fight instead measures its aftermath: with no
@@ -450,22 +467,104 @@ module Bench =
       (pilotMs / n)
       (stepMs / n)
 
-  /// How many entities want to move, and how many will therefore run a search
-  /// this tick. `Sim.stepToward` replans exactly when a goal is set and either the
-  /// stored path is empty or its next tile has been taken, so the second number
-  /// is A* calls per tick.
-  let private searchPressure (w: World) =
-    let movers =
-      w.Entities |> List.filter (fun e -> Sim.alive e && e.Goal.IsSome)
+  /// The cost of a search that cannot succeed, against one that can.
+  ///
+  /// A Mob aims at its target's tile, which its target is standing on, so the
+  /// goal is reachable only if some neighbour of it is free. When a Party clusters
+  /// into a corner pocket there is no such neighbour, the search fails, and a
+  /// failed search expands the whole reachable component instead of stopping
+  /// early. `Sim.stepToward` then throws the empty path away and repeats the same
+  /// doomed search on the very next tick.
+  let searchFailureCost (runs: int) : string =
+    let g = (Content.gully 1UL).Grid
+    let start = { X = 18; Y = 10 }
+    let goal = { X = 1; Y = 6 }
 
-    let planning =
-      movers
-      |> List.filter (fun e ->
-        match e.Path with
-        | [] -> true
-        | next :: _ -> Sim.claimedByOther w e.Id next)
+    // Seal every neighbour of the goal. (0,y) is already the map border.
+    let box =
+      [ { X = 1; Y = 5 }
+        { X = 2; Y = 5 }
+        { X = 2; Y = 6 }
+        { X = 2; Y = 7 }
+        { X = 1; Y = 7 } ]
 
-    List.length movers, List.length planning
+    let measure (blocked: Pos -> bool) =
+      Path.astar g blocked start goal |> ignore
+      let sw = Stopwatch.StartNew()
+      let mutable expansions = 0
+
+      for _ in 1..runs do
+        expansions <- expansions + (Path.astar g blocked start goal).Expanded
+
+      sw.Stop()
+      sw.Elapsed.TotalMilliseconds / float runs, float expansions / float runs
+
+    let openMs, openExpansions = measure (fun _ -> false)
+    let sealedMs, sealedExpansions = measure (fun p -> List.contains p box)
+
+    sprintf
+      "same grid, same endpoints: reachable goal %.4f ms / %.0f expansions | sealed goal %.4f ms / %.0f expansions (%.1fx)"
+      openMs
+      openExpansions
+      sealedMs
+      sealedExpansions
+      (sealedMs / openMs)
+
+  /// `Sim.step` cost bucketed across a fight, with A* call counts alongside so the
+  /// two can be correlated rather than assumed related.
+  ///
+  /// Spread cost means a per-tick rule is expensive everywhere. Concentrated cost
+  /// means one episode is, and the state at that tick is the thing to read.
+  let stepProfile (seed: uint64) (ticks: int) (bucket: int) : string =
+    let mutable w = Content.gully seed
+
+    for _ in 1..50 do
+      w <- Sim.step (autoPilot w) w
+
+    let sb = System.Text.StringBuilder()
+    let clock = Stopwatch()
+    let mutable bucketMs = 0.0
+    let mutable bucketReplans = 0
+    let mutable bucketStart = int w.Tick
+    let mutable worstMs = 0.0
+    let mutable worstTick = 0
+    let mutable worstWorld = w
+
+    for _ in 1..(ticks - 50) do
+      if Sim.outcome w = Running then
+        let _, replans = searchPressure w
+        let commands = autoPilot w
+        clock.Restart()
+        w <- Sim.step commands w
+        let ms = clock.Elapsed.TotalMilliseconds
+        bucketMs <- bucketMs + ms
+        bucketReplans <- bucketReplans + replans
+
+        if ms > worstMs then
+          worstMs <- ms
+          worstTick <- int w.Tick
+          worstWorld <- w
+
+        if (int w.Tick - bucketStart) >= bucket then
+          sb.AppendLine(
+            sprintf
+              "  ticks %4d-%4d  %8.4f ms/tick  %5.2f A* calls/tick"
+              bucketStart
+              (int w.Tick)
+              (bucketMs / float (int w.Tick - bucketStart))
+              (float bucketReplans / float (int w.Tick - bucketStart))
+          )
+          |> ignore
+
+          bucketMs <- 0.0
+          bucketReplans <- 0
+          bucketStart <- int w.Tick
+
+    sb.AppendLine(sprintf "worst single tick: %d at %.4f ms" worstTick worstMs)
+    |> ignore
+
+    sb.Append(Dump.world worstWorld) |> ignore
+    sb.ToString()
 
   /// Search pressure sampled every tick across a whole fight. The spread in these
   /// numbers is why per-tick cost is not one number: a long sample averages the
