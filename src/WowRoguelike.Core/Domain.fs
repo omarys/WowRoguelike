@@ -186,6 +186,10 @@ type Entity =
     /// Recomputed by A* only when it runs out or is invalidated, because
     /// re-planning every tick for every mover is the expensive way (Q26a).
     Path: Pos list
+    /// Ticks to wait before attempting another search for the current Goal.
+    /// Without it an unreachable goal costs a full-component search every tick,
+    /// forever (see task 16).
+    StallTicks: int<tick>
     Auras: Aura list
     Casting: Cast option
     Cooldowns: Map<string, int<tick>>

@@ -66,6 +66,26 @@ module Sim =
     |> List.exists (fun e ->
       alive e && e.Id <> self && (e.Pos = p || e.Destination = Some p))
 
+  /// A free tile to stand on next to `spot`, preferring the one nearest the mover.
+  ///
+  /// This exists because aiming A* at a tile somebody is standing on is a goal
+  /// that usually cannot be reached: the goal tile itself is allowed, but the
+  /// corner rule blocks the diagonals around it, so once a Party clusters against
+  /// a wall there is no route at all. A* then expands the whole reachable
+  /// component before failing, and the failure repeats every tick (task 16).
+  ///
+  /// `Path.neighbours` applies the same corner rule, so a tile it returns is one
+  /// the mover can genuinely step onto.
+  let approachTile (mover: Entity) (spot: Pos) (w: World) : Pos option =
+    Path.neighbours
+      (fun p -> Grid.isFloor w.Grid p && not (claimedByOther w mover.Id p))
+      spot
+    |> List.sortBy (fun p -> Pos.chebyshev mover.Pos p)
+    |> List.tryHead
+
+  /// How long to wait before retrying a goal that produced no route.
+  let pathRetryBackoff = secTicks 1.0
+
   // -- auras ----------------------------------------------------------------
 
   let isSleeping (e: Entity) =
@@ -181,6 +201,7 @@ module Sim =
             Casting = if hp = 0 then None else t.Casting
             Goal = if hp = 0 then None else t.Goal
             Path = if hp = 0 then [] else t.Path
+            StallTicks = if hp = 0 then ticks 0 else t.StallTicks
             Destination = if hp = 0 then None else t.Destination
             MoveTicksLeft = if hp = 0 then ticks 0 else t.MoveTicksLeft
             MoveTicksTotal = if hp = 0 then ticks 0 else t.MoveTicksTotal })
@@ -267,6 +288,7 @@ module Sim =
                   Casting = None
                   Goal = None
                   Path = []
+                  StallTicks = ticks 0
                   Destination = None })
             |> logLine (sprintf "%s puts %s to sleep" actor.Name t.Name)
           | _ -> w
@@ -349,18 +371,36 @@ module Sim =
               Goal = None
               Path = []
               Destination = None
-              Casting = None })
+              Casting = None
+              StallTicks = ticks 0 })
         w
 
     | MoveTo(actorId, dest) ->
       match tryEntity actorId w with
       | Some e when canAct e ->
+        // You cannot stand where somebody already is. Line the mover up beside
+        // the tile instead of handing A* a goal it can never reach.
+        let goal =
+          if
+            w.Entities
+            |> List.exists (fun o -> alive o && o.Id <> actorId && o.Pos = dest)
+          then
+            approachTile e dest w |> Option.defaultValue dest
+          else
+            dest
+
         // Re-issuing the same goal must not throw away a planned route, or a
         // caller that repeats orders every tick would replan every tick.
         mapEntity
           actorId
           (fun x ->
-            if x.Goal = Some dest then x else { x with Goal = Some dest; Path = [] })
+            if x.Goal = Some goal then
+              x
+            else
+              { x with
+                  Goal = Some goal
+                  Path = []
+                  StallTicks = ticks 0 })
           w
       | _ -> w
 
@@ -457,6 +497,7 @@ module Sim =
           { e with
               Goal = None
               Path = []
+              StallTicks = ticks 0
               Destination = None
               MoveTicksLeft = ticks 0 }
         else
@@ -483,9 +524,14 @@ module Sim =
       { e with
           Goal = None
           Destination = None
-          Path = [] }
+          Path = []
+          StallTicks = ticks 0 }
     elif e.Destination.IsSome then
       e
+    elif e.StallTicks > ticks 0 then
+      // A previous attempt at this goal found no route. Waiting is what makes a
+      // doomed search cost one search per backoff instead of one per tick.
+      { e with StallTicks = e.StallTicks - ticks 1 }
     else
       // Walls are A*'s business, not the blocker's.
       let taken p = claimedByOther w e.Id p
@@ -503,17 +549,22 @@ module Sim =
           planned
 
       match route with
-      | [] -> { e with Path = [] }
+      | [] ->
+        { e with
+            Path = []
+            StallTicks = pathRetryBackoff }
       | next :: rest ->
         if taken next then
-          // Someone is standing on the only step; wait rather than shove.
-          { e with Path = [] }
+          { e with
+              Path = []
+              StallTicks = pathRetryBackoff }
         else
           { e with
               Path = rest
               Destination = Some next
               MoveTicksLeft = e.MoveTicksPerTile
-              MoveTicksTotal = e.MoveTicksPerTile }
+              MoveTicksTotal = e.MoveTicksPerTile
+              StallTicks = ticks 0 }
 
   /// Stepped as a fold rather than a map, so two entities cannot claim the same
   /// tile in one tick.
@@ -691,21 +742,59 @@ module Sim =
             |> mapEntity m.Id (fun e ->
               { e with
                   Goal = None
-                  Path = [] })
+                  Path = []
+                  StallTicks = ticks 0 })
           | None ->
-            if not (inMelee m target) then
+            if inMelee m target then
+              // Already in reach; no reason to move.
               mapEntity
                 m.Id
                 (fun e ->
-                  if e.Goal = Some target.Pos then
-                    e
-                  else
-                    { e with
-                        Goal = Some target.Pos
-                        Path = [] })
+                  { e with
+                      Goal = None
+                      Path = []
+                      StallTicks = ticks 0 })
                 w
             else
-              mapEntity m.Id (fun e -> { e with Goal = None; Path = [] }) w)
+              // Close on a tile beside the target, never on the target's own
+              // tile, which it is standing on and which is therefore usually
+              // unreachable. Keep the tile it is already heading for while that
+              // stays valid, so a target shifting by one tile does not throw away
+              // a planned route and replan from scratch.
+              let keep =
+                match m.Goal with
+                | Some g when
+                  Pos.chebyshev g target.Pos <= 1
+                  && Grid.isFloor w.Grid g
+                  && not (claimedByOther w m.Id g)
+                  ->
+                  Some g
+                | _ -> None
+
+              match keep |> Option.orElse (approachTile m target.Pos w) with
+              | Some spot ->
+                mapEntity
+                  m.Id
+                  (fun e ->
+                    if e.Goal = Some spot then
+                      e
+                    else
+                      { e with
+                          Goal = Some spot
+                          Path = []
+                          StallTicks = ticks 0 })
+                  w
+              | None ->
+                // Nowhere to stand beside it; hold rather than pay for a search
+                // that cannot succeed.
+                mapEntity
+                  m.Id
+                  (fun e ->
+                    { e with
+                        Goal = None
+                        Path = []
+                        StallTicks = ticks 0 })
+                  w)
 
   /// A Mob that drops too low calls its neighbours in.
   let callForHelp (w: World) =
