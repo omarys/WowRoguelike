@@ -57,16 +57,28 @@ module Path =
   /// Walk the cameFrom chain back to the start. Returns the tiles *after* the
   /// start through the goal, which is what a mover wants: it is already standing
   /// on the first tile.
-  let private reconstruct (cameFrom: Map<Pos, Pos>) (goal: Pos) =
-    let rec loop acc p =
-      match cameFrom |> Map.tryFind p with
-      | Some prev -> loop (p :: acc) prev
-      | None -> p :: acc
+  /// Walk the flat cameFrom array back from the goal, returning the tiles after
+  /// the start through the goal. A cameFrom of -1 marks the start.
+  let private walkBack (cameFrom: int[]) (width: int) (goalIndex: int) =
+    if goalIndex < 0 then
+      []
+    else
+      let mutable acc = []
+      let mutable current = goalIndex
 
-    loop [] goal |> List.tail
+      while cameFrom.[current] >= 0 do
+        acc <- { X = current % width; Y = current / width } :: acc
+        current <- cameFrom.[current]
+
+      acc
 
   /// The one search. A* and Dijkstra differ only in the heuristic, which is why
   /// they are the same function.
+  ///
+  /// State is three flat arrays indexed by tile rather than a Map and a Set keyed
+  /// by Pos. The grid is already a flat array, so this removes a persistent-map
+  /// lookup and its allocation from every relaxation — which at roughly nine
+  /// microseconds per expansion was the dominant cost of a long search (task 13).
   let private search
     (heuristic: Pos -> Pos -> int)
     (g: Grid)
@@ -83,43 +95,51 @@ module Path =
       // the floor check as well let a move order path an entity into a wall.
       let passable p = Grid.isFloor g p && (p = goal || not (blocked p))
 
-      let openList = MinHeap<int, Pos>()
-      openList.Push(heuristic start goal, start)
+      let width = g.Width
+      let index (p: Pos) = p.Y * width + p.X
+      let goalIndex = index goal
 
-      let mutable best = Map.ofList [ start, 0 ]
-      let mutable cameFrom = Map.empty
-      let mutable closed = Set.empty
+      let best = Array.create (width * g.Height) System.Int32.MaxValue
+      let cameFrom = Array.create (width * g.Height) -1
+      let closed = Array.create (width * g.Height) false
+
+      // Priority is the estimated total cost; the value is the tile index.
+      let openList = MinHeap<int, int>()
+      best.[index start] <- 0
+      openList.Push(heuristic start goal, index start)
+
       let mutable expanded = 0
-      let mutable result = None
+      let mutable found = false
 
-      while result.IsNone && not openList.IsEmpty do
+      while not found && not openList.IsEmpty do
         match openList.Pop() with
         | None -> ()
         | Some(_, current) ->
-          if Set.contains current closed then
+          if closed.[current] then
             // A stale entry: a shorter route to this tile was already expanded.
             ()
-          elif current = goal then
-            result <- Some(reconstruct cameFrom goal)
+          elif current = goalIndex then
+            found <- true
           else
-            closed <- Set.add current closed
+            closed.[current] <- true
             expanded <- expanded + 1
-            let gCurrent = best |> Map.find current
+            let currentPos = { X = current % width; Y = current / width }
+            let gCurrent = best.[current]
 
-            for n in neighbours passable current do
-              if not (Set.contains n closed) then
-                let tentative = gCurrent + stepCost current n
+            for n in neighbours passable currentPos do
+              let nIndex = index n
 
-                match best |> Map.tryFind n with
-                | Some known when known <= tentative -> ()
-                | _ ->
-                  best <- best |> Map.add n tentative
-                  cameFrom <- cameFrom |> Map.add n current
+              if not closed.[nIndex] then
+                let tentative = gCurrent + stepCost currentPos n
+
+                if tentative < best.[nIndex] then
+                  best.[nIndex] <- tentative
+                  cameFrom.[nIndex] <- current
                   // Re-pushing an improved node is cheaper than supporting
                   // decrease-key, and the stale-entry check above covers it.
-                  openList.Push(tentative + heuristic n goal, n)
+                  openList.Push(tentative + heuristic n goal, nIndex)
 
-      { Path = result |> Option.defaultValue []
+      { Path = walkBack cameFrom width (if found then goalIndex else -1)
         Expanded = expanded }
 
   let astar (g: Grid) (blocked: (Pos -> bool)) (start: Pos) (goal: Pos) : Result =
