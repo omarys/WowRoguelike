@@ -554,6 +554,90 @@ let ``a star and dijkstra agree on cost`` (seed: int) =
   && (List.isEmpty a.Path
       || Path.pathCost pathStart a.Path = Path.pathCost pathStart d.Path)
 
+// ===========================================================================
+// Dungeon generation (Q21)
+// ===========================================================================
+
+let private layoutOf (seed: int) (salt: uint64) = Dungeon.layout (uint64 (abs seed) + salt)
+
+/// The layout is connected by construction, so this is the test that says the
+/// construction is right.
+[<Property>]
+let ``a generated dungeon is fully connected`` (seed: int) =
+  let plan = layoutOf seed 1UL
+  Dungeon.isConnected plan.Grid plan.Entrance
+
+[<Property>]
+let ``generated rooms are large enough for an encounter`` (seed: int) =
+  let plan = layoutOf seed 2UL
+
+  plan.Rooms
+  |> List.forall (fun r ->
+    Room.width r >= Dungeon.minRoomSize && Room.height r >= Dungeon.minRoomSize)
+
+/// Rooms must not touch, or the Dungeon is one open blob and the corridors that
+/// make it read as a dungeon stop existing.
+[<Property>]
+let ``generated rooms do not touch each other`` (seed: int) =
+  let plan = layoutOf seed 3UL
+
+  plan.Rooms
+  |> List.pairwise
+  |> List.forall (fun (a, b) -> not (Room.tooClose 0 a b))
+
+/// The boss is the farthest room by path length, not by straight line. That
+/// distinction is the reason this uses a flood fill rather than arithmetic.
+[<Property>]
+let ``the boss room is the farthest room from the entrance`` (seed: int) =
+  let plan = layoutOf seed 4UL
+  let distances = Dungeon.floodFill plan.Grid plan.Entrance
+
+  let distanceOf (r: Room) =
+    let c = Room.centre r
+    distances.[c.Y * plan.Grid.Width + c.X]
+
+  distanceOf plan.BossRoom = (plan.Rooms |> List.map distanceOf |> List.max)
+
+[<Fact>]
+let ``a generated dungeon deploys a party and a fight on floor tiles`` () =
+  let w = Content.dungeon 1UL
+
+  Assert.Equal(5, w.Entities |> List.filter (fun e -> e.Faction = Party) |> List.length)
+
+  Assert.True(
+    w.Entities |> List.filter (fun e -> e.Faction = Hostile) |> List.length >= 6
+  )
+
+  for e in w.Entities do
+    Assert.True(
+      Grid.isFloor w.Grid e.Pos,
+      sprintf "%s spawned in a wall at %d,%d" e.Name e.Pos.X e.Pos.Y
+    )
+
+  let tiles = w.Entities |> List.map (fun e -> e.Pos)
+  Assert.Equal(List.length tiles, tiles |> List.distinct |> List.length)
+
+/// The one-entity-per-tile invariant has to hold in a generated Dungeon too,
+/// where corridors are two tiles wide and the crowding is real.
+[<Property>]
+let ``no two living entities share a tile in a generated dungeon`` (seed: int) =
+  let rec loop (w: World) n =
+    if n <= 0 then true
+    elif not (noSharedTiles w) then false
+    else loop (SimTick.step (Bench.autoPilot w) w) (n - 1)
+
+  loop (Content.dungeon (uint64 (abs seed) + 1UL)) 300
+
+/// Acceptance: the scripted party can finish a Run it has never seen before.
+[<Fact>]
+let ``the scripted party can clear a generated dungeon`` () =
+  let rec loop (w: World) n =
+    if n <= 0 || SimState.outcome w <> Running then w
+    else loop (SimTick.step (Bench.autoPilot w) w) (n - 1)
+
+  let w = loop (Content.dungeon 1UL) 6000
+  Assert.Equal<Outcome>(EncounterCleared, SimState.outcome w)
+
 /// The heuristic's whole value, asserted rather than admired.
 [<Property>]
 let ``a star expands no more nodes than dijkstra`` (seed: int) =

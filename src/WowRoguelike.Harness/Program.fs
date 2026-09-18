@@ -8,6 +8,7 @@ let private usage () =
   printfn "sim bench                   time the tick loop at several entity counts"
   printfn "sim profile                 split the tick cost into search frequency and search internals"
   printfn "sim diagnose                bucket SimTick.step cost across a fight and dump the worst tick"
+  printfn "sim dungeon [seed]          generate a floorplan and render it as ASCII"
   printfn "sim runs [n] [maxTicks]     run n seeds and summarise outcomes"
 
 let private nth (args: string list) (i: int) = args |> List.tryItem i
@@ -105,6 +106,12 @@ let main argv =
     0
   | [ "bench" ] ->
     bench ()
+    0
+  | "dungeon" :: rest ->
+    let plan = Dungeon.layout (seedOf rest 1UL)
+    printfn "%s" (Dungeon.describe plan)
+    printfn "connected: %b" (Dungeon.isConnected plan.Grid plan.Entrance)
+    printfn "%s" (Dungeon.render plan)
     0
   | [ "diagnose" ] ->
     printfn "%s" (Bench.searchFailureCost 200)

@@ -62,6 +62,13 @@ module Grid =
       Height = height
       Walls = Array.create (width * height) false }
 
+  /// A grid that is entirely wall, for generation to carve rooms and corridors
+  /// out of.
+  let createSolid width height =
+    let g = create width height
+    Array.fill g.Walls 0 g.Walls.Length true
+    g
+
   let inBounds (g: Grid) (p: Pos) =
     p.X >= 0 && p.Y >= 0 && p.X < g.Width && p.Y < g.Height
 
@@ -266,3 +273,70 @@ type World =
     /// Newest first. Excluded from fingerprints because it is derivable from
     /// the state; included in dumps because it is what a human reads.
     Log: string list }
+
+// ===========================================================================
+// Dungeon layout
+// ===========================================================================
+
+/// An axis-aligned rectangle of tiles, inclusive of both corners.
+[<Struct>]
+type Room =
+  { Left: int
+    Top: int
+    Right: int
+    Bottom: int }
+
+module Room =
+
+  let width (r: Room) = r.Right - r.Left + 1
+  let height (r: Room) = r.Bottom - r.Top + 1
+  let centre (r: Room) = { X = (r.Left + r.Right) / 2; Y = (r.Top + r.Bottom) / 2 }
+
+  let contains (r: Room) (p: Pos) =
+    p.X >= r.Left && p.X <= r.Right && p.Y >= r.Top && p.Y <= r.Bottom
+
+  /// True when the rooms overlap, or come closer than `margin` tiles on both axes.
+  let tooClose (margin: int) (a: Room) (b: Room) =
+    a.Left - margin <= b.Right
+    && b.Left - margin <= a.Right
+    && a.Top - margin <= b.Bottom
+    && b.Top - margin <= a.Bottom
+
+  /// Tiles inset by one, so anything spawned in a room is not against its wall.
+  let interior (r: Room) =
+    seq {
+      for y in r.Top + 1 .. r.Bottom - 1 do
+        for x in r.Left + 1 .. r.Right - 1 do
+          yield { X = x; Y = y }
+    }
+
+/// What a fight is, which the floorplan decides by position: Trash along the
+/// route, a MiniBoss partway, the Boss at the end.
+type EncounterKind =
+  | Trash
+  | MiniBoss
+  | Boss
+
+/// Something an EncounterTemplate can ask to have spawned.
+type EncounterMember =
+  | DruidOfTheFang
+  | Raptor
+  | LadyAnacondra
+  | LordSerpentis
+
+/// A fight as data: what to put in a room, and how much room it needs. The
+/// floorplan is generated; the fights are authored (Q21b).
+type EncounterTemplate =
+  { Name: string
+    Kind: EncounterKind
+    MinWidth: int
+    MinHeight: int
+    Members: EncounterMember list }
+
+/// A generated Dungeon floorplan, plus the rooms that matter for placing fights.
+type Layout =
+  { Grid: Grid
+    Rooms: Room list
+    Entrance: Pos
+    /// Farthest from the Entrance by path length, not by straight line.
+    BossRoom: Room }

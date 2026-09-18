@@ -13,6 +13,7 @@
   <ItemGroup>
     <Compile Include="Domain.fs" />
     <Compile Include="Rng.fs" />
+    <Compile Include="Dungeon.fs" />
     <Compile Include="Content.fs" />
     <Compile Include="Heap.fs" />
     <Compile Include="Path.fs" />

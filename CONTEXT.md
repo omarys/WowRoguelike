@@ -43,6 +43,14 @@ _Avoid_: reinforcement, spawn, extra
 A Mob that ends a Dungeon, with multiple Phases and mechanics that cannot be ignored.
 _Avoid_: elite, final boss
 
+**MiniBoss**:
+A Boss-strength Mob that sits partway along a Dungeon's route rather than at its end, so a Run meets one before it meets the Boss.
+_Avoid_: sub-boss, rare elite
+
+**Room**:
+A rectangular block of tiles in a Dungeon's floorplan, joined to other Rooms by corridors. Rooms are rectangular because the fights are authored against room-shaped space.
+_Avoid_: chamber, area
+
 **Phase**:
 A distinct segment of a Boss fight with its own mechanic set, entered by a transition rather than by a timer alone.
 _Avoid_: stage, mode

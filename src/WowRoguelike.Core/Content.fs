@@ -18,6 +18,8 @@ namespace WowRoguelike.Core
 ///     Anacondra's spawn      "always appears in the first cave of the Caverns,
 ///                            but spawns in one of four locations around the
 ///                            room"  [Warcraft Wiki, Lady Anacondra]
+///     Lord Serpentis         one of the four Fanglords; his kit here is the
+///                            Druid of the Fang kit, not a separate sourced one
 ///
 ///   NOT sourced — placeholders, first knobs to turn against real data:
 ///     Lightning Bolt damage range (spells 9532 / 20295)
@@ -288,8 +290,15 @@ module Content =
     { mob id "Raptor" 380 0 (Some { Min = 20; Max = 28; Ticks = secTicks 1.8; Range = 1 }) [] (Some 20) pos with
         MoveTicksPerTile = secTicks 0.3 }
 
-  let private ladyAnacondra pos =
-    mob 8 "Lady Anacondra" 900 600 (Some { Min = 14; Max = 20; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos
+  let private ladyAnacondra id pos =
+    mob id "Lady Anacondra" 900 600 (Some { Min = 14; Max = 20; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos
+
+  /// Lord Serpentis, last of the four Fanglords, reusing the Druid of the Fang
+  /// kit rather than inventing one. Mutanus the Devourer is the real final boss of
+  /// Wailing Caverns, but his fight is a summoning event with no sourced numbers,
+  /// so he is deliberately not stood in for here.
+  let private lordSerpentis id pos =
+    mob id "Lord Serpentis" 1200 600 (Some { Min = 16; Max = 24; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos
 
   /// Build the Screaming Gully encounter. The only randomness at generation is
   /// which of Anacondra's four positions she takes, drawn from the Generation
@@ -308,7 +317,7 @@ module Content =
         druidOfTheFang 6 { X = 7; Y = 6 }
         raptor 7 { X = 9; Y = 3 }
         raptor 9 { X = 9; Y = 9 }
-        ladyAnacondra spawn
+        ladyAnacondra 8 spawn
         druidOfTheFang 10 guardA
         druidOfTheFang 11 guardB ]
 
@@ -317,4 +326,143 @@ module Content =
       Entities = entities
       Pending = []
       Rng = rng
+      Log = [] }
+
+  // =========================================================================
+  // Encounter templates, and a whole generated Dungeon (Q21)
+  // =========================================================================
+
+  /// The fights a generated Dungeon places. The floorplan is generated; these are
+  /// authored, because the hand-tuned part of this game is the fight, not where
+  /// the walls sit (Q21b).
+  let private druidPull =
+    { Name = "Druids of the Fang"
+      Kind = Trash
+      MinWidth = 8
+      MinHeight = 7
+      Members = [ DruidOfTheFang; DruidOfTheFang; Raptor ] }
+
+  let private raptorNest =
+    { Name = "Raptor nest"
+      Kind = Trash
+      MinWidth = 7
+      MinHeight = 7
+      Members = [ Raptor; Raptor ] }
+
+  let private anacondraEncounter =
+    { Name = "Lady Anacondra"
+      Kind = MiniBoss
+      MinWidth = 9
+      MinHeight = 8
+      Members = [ LadyAnacondra; DruidOfTheFang; DruidOfTheFang ] }
+
+  let private serpentisEncounter =
+    { Name = "Lord Serpentis"
+      Kind = Boss
+      MinWidth = 9
+      MinHeight = 8
+      Members = [ LordSerpentis; DruidOfTheFang; DruidOfTheFang ] }
+
+  let trashTemplates = [ druidPull; raptorNest ]
+  let miniBossTemplate = anacondraEncounter
+  let bossTemplate = serpentisEncounter
+
+  let templateFor (kind: EncounterKind) =
+    match kind with
+    | Trash -> trashTemplates
+    | MiniBoss -> [ miniBossTemplate ]
+    | Boss -> [ bossTemplate ]
+
+  let private fits (room: Room) (template: EncounterTemplate) =
+    Room.width room >= template.MinWidth && Room.height room >= template.MinHeight
+
+  let private mobFor (member': EncounterMember) (id: int) (pos: Pos) : Entity =
+    match member' with
+    | DruidOfTheFang -> druidOfTheFang id pos
+    | Raptor -> raptor id pos
+    | LadyAnacondra -> ladyAnacondra id pos
+    | LordSerpentis -> lordSerpentis id pos
+
+  /// Build a Run's World: a generated floorplan with authored fights placed into
+  /// it. Generation happens once, at Run creation, and draws only from the
+  /// Generation stream (Q21f), so nothing generated can shift a combat roll.
+  ///
+  /// Fight placement is by position on the route: the Boss goes in the room
+  /// farthest from the entrance by path length, the MiniBoss partway along, and
+  /// Trash everywhere in between (Q21e).
+  let dungeon (seed: uint64) : World =
+    let layout, generation = Dungeon.generate (Rng.stream seed Rng.GenerationStream)
+
+    let occupied = System.Collections.Generic.HashSet<Pos>()
+    let mutable nextId = 6
+
+    let takeId () =
+      let id = nextId
+      nextId <- nextId + 1
+      id
+
+    let freeTiles (room: Room) =
+      Room.interior room
+      |> Seq.filter (fun p -> not (occupied.Contains p))
+      |> Seq.toList
+
+    let place (member': EncounterMember) (pos: Pos) =
+      occupied.Add pos |> ignore
+      mobFor member' (takeId ()) pos
+
+    // The Party enters at the Dungeon's entrance, on free tiles of that room.
+    let entranceRoom =
+      layout.Rooms |> List.find (fun r -> Room.contains r layout.Entrance)
+
+    let partyTiles = freeTiles entranceRoom |> List.truncate 5
+
+    let party =
+      List.map2 (fun (e: Entity) p -> { e with Pos = p }) [ warrior; priest; rogue; mage; hunter ] partyTiles
+
+    for p in partyTiles do
+      occupied.Add p |> ignore
+
+    let distances = Dungeon.floodFill layout.Grid layout.Entrance
+
+    let distanceOf (r: Room) =
+      let c = Room.centre r
+      distances.[c.Y * layout.Grid.Width + c.X]
+
+    let route = layout.Rooms |> List.sortBy distanceOf
+    let midIndex = max 1 (List.length route / 2)
+    let mutable mobs: Entity list = []
+
+    route
+    |> List.iteri (fun i room ->
+      let kind =
+        if room = layout.BossRoom then Boss
+        elif i = midIndex then MiniBoss
+        else Trash
+
+      let candidates = templateFor kind |> List.filter (fits room)
+
+      // A room too small for its template gets nothing rather than a crash, and
+      // the ASCII renderer shows the empty room.
+      if not (List.isEmpty candidates) then
+        let template =
+          if kind = Trash then
+            List.item (i % List.length candidates) candidates
+          else
+            List.head candidates
+
+        let tiles = freeTiles room
+
+        template.Members
+        |> List.iteri (fun j member' ->
+          match List.tryItem j tiles with
+          | Some pos -> mobs <- mobs @ [ place member' pos ]
+          | None -> ()))
+
+    { Tick = ticks 0
+      Grid = layout.Grid
+      Entities = party @ mobs
+      Pending = []
+      Rng =
+        { Generation = generation
+          Combat = Rng.stream seed Rng.CombatStream }
       Log = [] }
