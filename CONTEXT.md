@@ -30,7 +30,10 @@ _Avoid_: minions
 
 **Pull**:
 The set of Mobs engaged as one unit, and the act of engaging them.
-_Avoid_: encounter, pack, group
+_Avoid_: pack, group
+
+**Encounter**:
+The whole fight one area of a Dungeon is built around, from first engagement until everything in it is dead: a sequence of Pulls and their Adds, resolved as one outcome.
 
 **Add**:
 A Mob that joins a Pull after it has started, rather than one engaged at its start.
@@ -48,7 +51,7 @@ _Avoid_: stage, mode
 
 **Tick**:
 One fixed advance of the simulation. The only unit of time the simulation knows about; everything else — cooldowns, DoTs, casts — is counted in Ticks.
-_Avoid_: frame, update, turn, step
+_Avoid_: frame, update, turn, step (as a noun; "to step" is the verb)
 
 **Party**:
 The player's characters. Every member is commanded directly by the player; there is no companion AI.

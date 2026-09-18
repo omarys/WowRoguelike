@@ -45,7 +45,6 @@ type Pos = { X: int; Y: int }
 
 module Pos =
   let chebyshev (a: Pos) (b: Pos) = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
-  let manhattan (a: Pos) (b: Pos) = abs (a.X - b.X) + abs (a.Y - b.Y)
   let move (dx: int) (dy: int) (p: Pos) = { X = p.X + dx; Y = p.Y + dy }
 
 type Grid =
@@ -131,7 +130,7 @@ type Effect =
   | Taunt
 
 type TargetKind =
-  | Enemy
+  | Foe
   | Ally
   | Self
 

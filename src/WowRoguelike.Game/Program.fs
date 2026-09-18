@@ -10,12 +10,12 @@ open WowRoguelike.Core
 /// What the player can ask for. The speed controls never touch the Core — they
 /// decide how many times the Shell calls `step`, which is what keeps a replay
 /// exact at any speed (ADR-0001).
-type private Input =
+type private ShellRequest =
   | Pause
   | Resume
   | SetSpeed of float
-  | StepOnce
-  | ShowRoster
+  | TickOnce
+  | ShowParty
   | ShowState
   | Issue of CommandKind
 
@@ -37,7 +37,7 @@ module private Parse =
 
   /// Parsed against the live World on the render thread, so the Core is only
   /// ever read from one thread.
-  let parse (w: World) (line: string) : Input option =
+  let parse (w: World) (line: string) : ShellRequest option =
     let t = line.Trim().Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
 
     let abilityName (actorId: EntityId) (k: string) =
@@ -49,8 +49,8 @@ module private Parse =
     | [||] -> None
     | [| "pause" |] -> Some Pause
     | [| "resume" |] -> Some Resume
-    | [| "step" |] -> Some StepOnce
-    | [| "roster" |] -> Some ShowRoster
+    | [| "step" |] -> Some TickOnce
+    | [| "party" |] -> Some ShowParty
     | [| "state" |] -> Some ShowState
     | [| "speed"; n |] ->
       match Double.TryParse n with
@@ -81,7 +81,7 @@ type RoguelikeGame() as this =
   /// Ceiling on ticks per rendered frame. Without it a slow frame becomes a
   /// longer frame, which is the classic spiral. Falling behind in real time is
   /// correct; dropping Ticks would break determinism (ADR-0001).
-  let maxStepsPerFrame = 4
+  let maxTicksPerFrame = 4
 
   let mutable spriteBatch: SpriteBatch = null
   let mutable pixel: Texture2D = null
@@ -150,7 +150,7 @@ type RoguelikeGame() as this =
     else
       Color(210, 80, 80)
 
-  let printRoster () =
+  let printParty () =
     Console.WriteLine()
     Console.WriteLine("id  name               role    hp        abilities (key to type)")
 
@@ -269,8 +269,8 @@ type RoguelikeGame() as this =
       | Some(SetSpeed v) ->
         ticksPerSecond <- max 0.0 (min 20.0 v)
         Console.WriteLine(sprintf "[speed %.1fHz]" ticksPerSecond)
-      | Some StepOnce -> runOnce <- true
-      | Some ShowRoster -> printRoster ()
+      | Some TickOnce -> runOnce <- true
+      | Some ShowParty -> printParty ()
       | Some ShowState ->
         Console.WriteLine()
         Console.WriteLine(Dump.world world)
@@ -285,14 +285,14 @@ type RoguelikeGame() as this =
       // consumes, and pause is simply zero Ticks per second.
       accumulator <- accumulator + gameTime.ElapsedGameTime.TotalSeconds * ticksPerSecond
 
-      let mutable steps = 0
+      let mutable advanced = 0
 
-      while accumulator >= 1.0 && steps < maxStepsPerFrame do
+      while accumulator >= 1.0 && advanced < maxTicksPerFrame do
         accumulator <- accumulator - 1.0
         advance ()
-        steps <- steps + 1
+        advanced <- advanced + 1
 
-      if accumulator > float maxStepsPerFrame then
+      if accumulator > float maxTicksPerFrame then
         accumulator <- 0.0
 
     flushNewLogLines ()
@@ -354,7 +354,7 @@ module Program =
     Console.WriteLine "  <actor> <target> <abilitykey> use an ability, e.g. `3 8 kick`"
     Console.WriteLine "  pause | resume | step         speed control, 0 to 20Hz (space, period)"
     Console.WriteLine "  speed <n>                     set ticks per second, 0..20"
-    Console.WriteLine "  roster | state                list entities | dump canonical state"
+    Console.WriteLine "  party | state                list entities | dump canonical state"
 
     game.Run()
     0

@@ -33,8 +33,6 @@ module Sim =
   let tryEntity (id: EntityId) (w: World) = w.Entities |> List.tryFind (fun e -> e.Id = id)
 
   let alive (e: Entity) = e.Health > 0
-  let party (w: World) = w.Entities |> List.filter (fun e -> e.Faction = Party)
-  let hostiles (w: World) = w.Entities |> List.filter (fun e -> e.Faction = Hostile)
   let aliveParty (w: World) = w.Entities |> List.filter (fun e -> e.Faction = Party && alive e)
 
   let aliveHostiles (w: World) =
@@ -334,7 +332,7 @@ module Sim =
   let private usableTarget (actor: Entity) (ability: Ability) (w: World) =
     match ability.TargetKind with
     | Self -> if ability.Effects |> List.isEmpty then None else Some actor.Id
-    | Enemy ->
+    | Foe ->
       match currentTarget actor w with
       | Some t when canReach ability.Range actor t w -> Some t.Id
       | _ -> None
@@ -436,7 +434,7 @@ module Sim =
                 alive t
                 && (match ability.TargetKind with
                     | Self -> t.Id = actor.Id
-                    | Enemy -> t.Faction <> actor.Faction
+                    | Foe -> t.Faction <> actor.Faction
                     | Ally -> t.Faction = actor.Faction)
                 && (ability.TargetKind = Self || canReach ability.Range actor t w)
 

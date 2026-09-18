@@ -56,11 +56,6 @@ module Rng =
       let d, s' = below (hi - lo + 1) s
       lo + d, s'
 
-  /// Draw a bool that is true with probability `pct` percent.
-  let chance (pct: int) (s: RngState) : bool * RngState =
-    let d, s' = below 100 s
-    d < pct, s'
-
   /// Draw from one stream, leaving the other alone. The caller passes the
   /// stream selector so a new Combat draw can never shift Generation.
   let drawCombat (lo: int) (hi: int) (rng: RngStreams) : int * RngStreams =

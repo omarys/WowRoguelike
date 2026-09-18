@@ -15,6 +15,9 @@ namespace WowRoguelike.Core
 ///     Threat                 aggro switches at +10% threat within melee range
 ///                            or +30% outside it; damage 1.0x, effective
 ///                            healing 0.5x, tank stances 5.0x
+///     Anacondra's spawn      "always appears in the first cave of the Caverns,
+///                            but spawns in one of four locations around the
+///                            room"  [Warcraft Wiki, Lady Anacondra]
 ///
 ///   NOT sourced — placeholders, first knobs to turn against real data:
 ///     Lightning Bolt damage range (spells 9532 / 20295)
@@ -62,7 +65,7 @@ module Content =
       ResourceCost = 60
       Interruptible = true
       Range = 8
-      TargetKind = Enemy
+      TargetKind = Foe
       Effects = [ Damage(28, 42) ] }
 
   let healingTouch =
@@ -92,7 +95,7 @@ module Content =
       ResourceCost = 80
       Interruptible = true
       Range = 8
-      TargetKind = Enemy
+      TargetKind = Foe
       Effects = [ Sleep(secTicks 15.0) ] }
 
   // -- Party abilities ------------------------------------------------------
@@ -104,7 +107,7 @@ module Content =
       ResourceCost = 50
       Interruptible = false
       Range = 8
-      TargetKind = Enemy
+      TargetKind = Foe
       Effects = [ Taunt ] }
 
   let heroicStrike =
@@ -114,7 +117,7 @@ module Content =
       ResourceCost = 100
       Interruptible = false
       Range = 1
-      TargetKind = Enemy
+      TargetKind = Foe
       Effects = [ Damage(22, 30) ] }
 
   let lesserHeal =
@@ -136,7 +139,7 @@ module Content =
       ResourceCost = 75
       Interruptible = false
       Range = 1
-      TargetKind = Enemy
+      TargetKind = Foe
       Effects = [ Interrupt ] }
 
   let fireball =
@@ -146,7 +149,7 @@ module Content =
       ResourceCost = 120
       Interruptible = true
       Range = 8
-      TargetKind = Enemy
+      TargetKind = Foe
       Effects = [ Damage(48, 66) ] }
 
   let arcaneShot =
@@ -156,7 +159,7 @@ module Content =
       ResourceCost = 90
       Interruptible = false
       Range = 8
-      TargetKind = Enemy
+      TargetKind = Foe
       Effects = [ Damage(26, 34) ] }
 
   // =========================================================================

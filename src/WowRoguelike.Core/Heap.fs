@@ -64,6 +64,3 @@ type MinHeap<'p, 'v when 'p: comparison>() =
           i <- best
 
       Some top
-
-  /// The entries currently held, in heap order. For tests and debugging only.
-  member _.Entries = List.ofSeq items

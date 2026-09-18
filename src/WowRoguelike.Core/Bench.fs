@@ -24,12 +24,9 @@ module Bench =
         |> List.tryFind (fun a -> a.Name = abilityName)
         |> Option.exists (Sim.canAfford e))
 
-  let private within (r: int) (a: Entity) (b: Entity) = Pos.chebyshev a.Pos b.Pos <= r
-
-  /// The same reach rule the Core uses, including its melee exemption. Without
-  /// it the scripted player orders spells through walls and just fills the log.
-  let private canReach (r: int) (a: Entity) (b: Entity) (w: World) =
-    within r a b && (r <= 1 || Path.lineOfSight w.Grid a.Pos b.Pos)
+  // Reach is deliberately not re-implemented here. Bench uses Sim.withinRange and
+  // Sim.canReach so that the melee exemption from line of sight cannot drift out
+  // of sync with the Core.
 
   /// Drives the Party headlessly so benchmarks and golden replays have input.
   ///
@@ -70,13 +67,13 @@ module Bench =
         // Pull anything that has torn aggro off the Tank.
         let thief =
           Sim.aliveHostiles w
-          |> List.tryFind (fun h -> h.Engaged && h.Target <> Some t.Id && canReach 8 t h w)
+          |> List.tryFind (fun h -> h.Engaged && h.Target <> Some t.Id && Sim.canReach 8 t h w)
 
         match thief with
         | Some h when has t "Taunt" && canUse t "Taunt" -> cmd t (UseAbility(t.Id, "Taunt", h.Id))
-        | _ when within 1 t f && canUse t "Heroic Strike" ->
+        | _ when Sim.withinRange 1 t f && canUse t "Heroic Strike" ->
           cmd t (UseAbility(t.Id, "Heroic Strike", f.Id))
-        | _ when not (within 1 t f) -> cmd t (MoveTo(t.Id, f.Pos))
+        | _ when not (Sim.withinRange 1 t f) -> cmd t (MoveTo(t.Id, f.Pos))
         | _ -> []
       | _ -> []
 
@@ -91,9 +88,9 @@ module Bench =
           |> List.tryHead
 
         match wounded with
-        | Some target when canReach 8 h target w && canUse h "Lesser Heal" ->
+        | Some target when Sim.canReach 8 h target w && canUse h "Lesser Heal" ->
           cmd h (UseAbility(h.Id, "Lesser Heal", target.Id))
-        | Some target when canReach 8 h target w -> []
+        | Some target when Sim.canReach 8 h target w -> []
         | Some target -> cmd h (MoveTo(h.Id, target.Pos))
         | None -> []
 
@@ -108,11 +105,11 @@ module Bench =
             h.Casting |> Option.exists (fun c -> c.Ability.Interruptible))
 
         match caster with
-        | Some c when canUse r "Kick" && within 1 r c -> cmd r (UseAbility(r.Id, "Kick", c.Id))
-        | Some c when not (within 1 r c) -> cmd r (MoveTo(r.Id, c.Pos))
+        | Some c when canUse r "Kick" && Sim.withinRange 1 r c -> cmd r (UseAbility(r.Id, "Kick", c.Id))
+        | Some c when not (Sim.withinRange 1 r c) -> cmd r (MoveTo(r.Id, c.Pos))
         | _ ->
           match focus with
-          | Some f when not (within 1 r f) -> cmd r (MoveTo(r.Id, f.Pos))
+          | Some f when not (Sim.withinRange 1 r f) -> cmd r (MoveTo(r.Id, f.Pos))
           | _ -> []
 
     let rangedCmds =
@@ -124,12 +121,12 @@ module Bench =
         | Some f ->
           let shot =
             e.Abilities
-            |> List.filter (fun a -> a.TargetKind = Enemy && a.Range > 1)
+            |> List.filter (fun a -> a.TargetKind = Foe && a.Range > 1)
             |> List.tryFind (fun a -> canUse e a.Name)
 
           match shot with
-          | Some a when canReach a.Range e f w -> cmd e (UseAbility(e.Id, a.Name, f.Id))
-          | _ when not (within 8 e f) -> cmd e (MoveTo(e.Id, f.Pos))
+          | Some a when Sim.canReach a.Range e f w -> cmd e (UseAbility(e.Id, a.Name, f.Id))
+          | _ when not (Sim.withinRange 8 e f) -> cmd e (MoveTo(e.Id, f.Pos))
           | _ -> [])
 
     tankCmds @ healerCmds @ interruptCmds @ rangedCmds
@@ -396,46 +393,14 @@ module Bench =
 
     List.length movers, List.length planning
 
-  /// Cost per tick of a *driven* fight.
+  /// The tick cost of a driven fight, split into the scripted player's share and
+  /// `Sim.step`'s.
   ///
-  /// Timing `Sim.step []` on a fight instead measures its aftermath: with no
-  /// input the Priest stops healing, the Party dies, the world resolves, and every
-  /// subsequent tick is nearly free. That is why the old "encounter" figures read
-  /// as two orders of magnitude cheaper than the search cost they supposedly
-  /// contained.
-  let fightCost (seed: uint64) (ticks: int) : string =
-    let mutable w = Content.gully seed
-    // A short warmup only. Warming up for a quarter of the budget silently
-    // measures the settled endgame, where almost nothing paths.
-    let warmup = min 50 (ticks / 10)
-
-    for _ in 1..warmup do
-      w <- Sim.step (autoPilot w) w
-
-    let from = int w.Tick
-    let sw = Stopwatch.StartNew()
-    let mutable live = 0
-
-    for _ in 1..(ticks - warmup) do
-      if Sim.outcome w = Running then
-        w <- Sim.step (autoPilot w) w
-        live <- live + 1
-
-    sw.Stop()
-
-    sprintf
-      "driven fight: %.4f ms/tick over %d live ticks (ticks %d..%d), %A"
-      (sw.Elapsed.TotalMilliseconds / float (max 1 live))
-      live
-      from
-      (int w.Tick)
-      (Sim.outcome w)
-
-  /// The same fight, split into the scripted player's cost and `Sim.step`'s.
-  ///
-  /// `fightCost` times both together. If these two disagree with it, the cost is
-  /// in the harness fixture rather than in the simulation, and chasing the Core
-  /// would be chasing the wrong thing.
+  /// Timing `Sim.step []` on a fight instead measures its aftermath: with no input
+  /// the Priest stops healing, the Party dies, the world resolves, and every
+  /// subsequent tick is nearly free. Splitting the two also says whether a cost
+  /// belongs to the harness fixture or to the simulation, so a problem is not
+  /// chased in the wrong place.
   let fightSplitCost (seed: uint64) (ticks: int) : string =
     let mutable w = Content.gully seed
     let warmup = min 50 (ticks / 10)
