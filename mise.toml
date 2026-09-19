@@ -1,2 +1,56 @@
+# Dev and build dependencies, and the tasks that drive them.
+#
+# Pinned to the `10` major rather than "latest": the projects target net10.0, so
+# a major bump would silently install a runtime the build cannot use.
 [tools]
-dotnet = "latest"
+dotnet = "10"
+pre-commit = "latest"
+
+[env]
+# Keep the SDK out of the system-wide lookup path. Without this a plain `dotnet`
+# resolves against /usr/lib64/dotnet, which ships .NET 8 only, and every run
+# fails with "You must install or update .NET". mise sets this for the `dotnet`
+# tool already; it is stated here so the requirement is visible in the repo.
+DOTNET_MULTILEVEL_LOOKUP = "0"
+
+[tasks.build]
+description = "Build the whole solution in Release"
+run = "dotnet build WowRoguelike.slnx -c Release --nologo"
+
+[tasks.test]
+description = "Run the test suite"
+run = "dotnet test tests/WowRoguelike.Tests/WowRoguelike.Tests.fsproj --nologo -v q"
+
+[tasks.run]
+description = "Play the game (MonoGame window, commands typed on stdin)"
+run = "dotnet run --project src/WowRoguelike.Game"
+
+# The headless harness. Everything below runs in Release: Debug timings are
+# meaningless, and the benchmark numbers are only comparable in Release.
+[tasks.sim]
+description = "Run the headless harness; pass args, e.g. `mise run sim -- runs 120 4000`"
+run = "dotnet run --project src/WowRoguelike.Harness -c Release --"
+
+[tasks.runs]
+description = "Outcome distribution over 120 seeds — the behavioural regression signal"
+run = "dotnet run --project src/WowRoguelike.Harness -c Release -- runs 120 4000"
+
+[tasks.dungeon]
+description = "Generate a floorplan and render it as ASCII; pass a seed to vary it"
+run = "dotnet run --project src/WowRoguelike.Harness -c Release -- dungeon"
+
+[tasks.bench]
+description = "Tick cost, search cost, and the hand-rolled heap against the BCL's"
+run = "dotnet run --project src/WowRoguelike.Harness -c Release -- bench"
+
+[tasks.diagnose]
+description = "Per-bucket tick cost, and the cost of a search that cannot succeed"
+run = "dotnet run --project src/WowRoguelike.Harness -c Release -- diagnose"
+
+[tasks.hooks]
+description = "Install the git hooks (run once after cloning)"
+run = "pre-commit install --install-hooks && pre-commit install --hook-type pre-push"
+
+[tasks.hooks-run]
+description = "Run every hook against the whole tree"
+run = "pre-commit run --all-files"

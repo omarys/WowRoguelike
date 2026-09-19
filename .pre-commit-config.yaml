@@ -1,0 +1,53 @@
+# Install with: mise run hooks
+#
+# Two speeds, deliberately. Building is ~6s and catches compile errors and new
+# warnings on every commit; the test suite is ~12s and runs on push. Putting the
+# suite in pre-commit would make every commit slow enough to reach for
+# `--no-verify`, which is worse than not having the hook.
+#
+# There is no CI here, so these hooks are the only automated check. Keep them
+# working.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-yaml
+      # WoW asset extraction was considered and rejected; this is the guard that
+      # keeps a multi-megabyte export from being committed by accident.
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+      # The .fsproj compile order IS the dependency graph, so a malformed
+      # project file is a real failure rather than a formatting nit.
+      - id: check-xml
+
+  - repo: local
+    hooks:
+      - id: dotnet-build
+        name: dotnet build (Release, zero warnings)
+        entry: dotnet build WowRoguelike.slnx -c Release -v q --nologo
+        language: system
+        pass_filenames: false
+        files: \.(fs|fsproj|slnx)$
+
+      # Not `dotnet test` alone: the suite proves the invariants hold, but only
+      # `runs 120 4000` proves the game still behaves. Kept off pre-commit
+      # because it is slow, and on pre-push because a broken push is worse.
+      - id: dotnet-test
+        name: dotnet test
+        entry: dotnet test tests/WowRoguelike.Tests/WowRoguelike.Tests.fsproj --nologo -v q
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        files: \.(fs|fsproj)$
+
+      - id: sim-runs
+        name: sim runs (120 seeds still resolve)
+        entry: dotnet src/WowRoguelike.Harness/bin/Release/net10.0/sim.dll runs 120 4000
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        files: \.(fs|fsproj)$

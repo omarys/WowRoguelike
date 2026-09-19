@@ -64,30 +64,61 @@ everything else asks it a question. Keep it that way — slice 4 adds aura kinds
 ## 4. How to run things
 
 ```bash
-dotnet test tests/WowRoguelike.Tests/WowRoguelike.Tests.fsproj   # 60 tests, ~12s
-dotnet build WowRoguelike.slnx -c Release                        # use Release for anything timed
-
-sim=$(pwd)/src/WowRoguelike.Harness/bin/Release/net10.0/sim.dll
-dotnet $sim runs 120 4000     # outcome distribution over seeds — THE regression signal
-dotnet $sim demo 1 2000       # one fight, with the combat log
-dotnet $sim dungeon 1         # generate a floorplan and render it as ASCII
-dotnet $sim bench             # tick cost, search cost, heap comparison
-dotnet $sim diagnose          # per-bucket tick cost + search-failure cost
-dotnet $sim fingerprint 1     # canonical state text
-
-dotnet run --project src/WowRoguelike.Game    # the game; type `party`, then e.g. `3 8 kick`
+mise run build      # solution in Release
+mise run test       # 60 tests, ~12s
+mise run runs       # outcome distribution over 120 seeds — THE regression signal
+mise run sim -- runs 120 4000      # or any harness subcommand
+mise run dungeon    # generate a floorplan and render it as ASCII
+mise run bench      # tick cost, search cost, heap comparison
+mise run diagnose   # per-bucket tick cost + search-failure cost
+mise run run        # play the game; type `party`, then e.g. `3 8 kick`
 ```
 
-**Gotcha:** the apphost at `src/WowRoguelike.Game/bin/.../WowRoguelike.Game` picks
-up the system's .NET 8 at `/usr/lib64/dotnet` and dies. Use `dotnet run` or
-`dotnet <dll>`, which use mise's .NET 10.
+`mise.toml` declares the dev dependencies (`dotnet` pinned to the 10 major,
+`pre-commit`) and the tasks above. Prefer `mise run` over raw `dotnet`: the tasks
+pin Release configuration, which matters because Debug timings are meaningless.
+
+The equivalents, if you are not using mise:
+
+```bash
+dotnet test tests/WowRoguelike.Tests/WowRoguelike.Tests.fsproj
+dotnet build WowRoguelike.slnx -c Release
+sim=$(pwd)/src/WowRoguelike.Harness/bin/Release/net10.0/sim.dll
+dotnet $sim runs 120 4000
+dotnet run --project src/WowRoguelike.Game
+```
+
+**Gotcha:** `DOTNET_ROOT` must point at the mise-managed SDK
+(`/home/omary/.local/share/mise/dotnet-root`), which `mise.toml` arranges. With it
+unset, *any* invocation — including the apphost — resolves against
+`/usr/lib64/dotnet`, which ships .NET 8 only, and fails with "You must install or
+update .NET". Run `mise exec --` (or just have mise active) if you see that.
 
 **Read `sim runs 120 4000` output as a fingerprint.** The known-good line at this
 commit is `cleared=120 wiped=0 unresolved=0 median-ticks=1331 min=1116 max=2248`.
 A refactor that changes it changed behaviour. This is how the Sim split was proven
-to be a pure refactor rather than asserted to be one.
+to be a pure refactor rather than asserted to be one. `mise run runs` runs exactly
+this, and the pre-push hook runs it automatically.
 
-## 5. Hard-won knowledge — do not re-litigate these
+## 5. Hooks — the only automated check
+
+There is no CI. `.pre-commit-config.yaml` is it, so keep it working.
+
+```bash
+mise run hooks      # once after cloning: installs pre-commit and pre-push hooks
+mise run hooks-run  # every hook against the whole tree
+```
+
+Split by cost on purpose: **pre-commit** runs formatting and `dotnet build` (~6s,
+catches compile errors and new warnings); **pre-push** adds `dotnet test` and
+`sim runs 120 4000` (~1min). Putting the suite in pre-commit would make committing
+slow enough that someone reaches for `--no-verify`, which is worse than not having
+the hook at all.
+
+The `sim runs` hook is the one that matters most: the test suite proves the
+invariants hold, but only the seed sweep proves the game still behaves.
+
+## 6. Hard-won knowledge — do not re-litigate these
 
 These cost real time. Each is recorded in a commit body; the summary here is so
 you do not repeat the investigation.
@@ -120,7 +151,7 @@ player and separates the fixture's cost from `SimTick.step`'s. Sample windows ar
 printed alongside every number because cost is non-stationary within a fight and
 varies ~50× between seeds at identical fight lengths.
 
-## 6. Backlog — four open items
+## 7. Backlog — four open items
 
 - **#20 Extract a named-field Entity builder.** `Content.hero`/`Content.mob` take
   8–9 positional args and repeat ~28 identical record fields, so a new Entity
@@ -138,7 +169,7 @@ varies ~50× between seeds at identical fight lengths.
 - **#12 A\* replanning policy** — premise falsified at encounter scale. Only
   relevant to the synthetic 500-entity fixture, which nobody ships.
 
-## 7. Next major work: slice 4, boss phases
+## 8. Next major work: slice 4, boss phases
 
 `Phase` is in the glossary but has **no implementation**. Slice 4 is the last
 piece of game work before the loop has an ending. It needs decisions before code —
@@ -161,7 +192,7 @@ put the frontier to the user rather than guessing. The open questions are:
 a summoning event with no sourced numbers; he is deliberately not stood in for,
 and `Content.fs` says so.
 
-## 8. Working agreements established this session
+## 9. Working agreements established this session
 
 - **Ponytail mode is active** (level: full). Laziest solution that works; deletion
   over addition; no unrequested abstractions; mark deliberate simplifications with
@@ -182,11 +213,11 @@ and `Content.fs` says so.
   modern Adventure Guide differs (e.g. Druid's Slumber is 15s in Classic, 6s in
   retail).
 
-## 9. Suggested skills for the next agent
+## 10. Suggested skills for the next agent
 
 Call the **Skill** tool for these, in this order:
 
-1. **`grilling`** — for slice 4's decisions. The five questions in §7 are a design
+1. **`grilling`** — for slice 4's decisions. The five questions in §8 are a design
    frontier; work them in rounds, one round of the whole frontier at a time, with a
    recommended answer each. This is how slices 1–3 were specified.
 2. **`domain-modeling`** — slice 4 will introduce Phase vocabulary, and possibly
@@ -208,7 +239,7 @@ reported `model_verification_failed` on both children (expected
 `opencode-go/glm-5.3-flash:high`, observed `deepseek-v4.1-flash`), so child model
 attestation is unresolved and worth checking before trusting a delegated result.
 
-## 10. Things deliberately left alone
+## 11. Things deliberately left alone
 
 - **The Warrior dies in several seeds** (`hp=0/900` on seeds 1 and 98) and no wipe
   has ever been observed in 120 runs. If the tank dies most runs but the party
