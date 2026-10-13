@@ -1,0 +1,14 @@
+schema: spec-driven
+openlore:
+  version: 1.2.0
+  generatedAt: 2026-10-13T16:07:24.469Z
+  domains:
+    - wowroguelike-core
+    - wowroguelike-game
+    - wowroguelike-harness
+  confidence: 0.9
+context: |-
+  # Auto-detected by openlore
+  Tech stack: F#, .NET
+  Architecture: Monolithic
+  Domains: context, wowroguelike-core, wowroguelike-game, wowroguelike-harness

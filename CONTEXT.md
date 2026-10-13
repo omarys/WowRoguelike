@@ -18,6 +18,20 @@ _Avoid_: roguelite, traditional roguelike
 The authored environment a Run takes place in, consisting of rooms connected by corridors, with a boss at the end.
 _Avoid_: map, level, instance
 
+### Characters
+
+**Class**:
+One of the five archetypes a Party member is built from — Warrior, Rogue, Mage, Priest, Druid. Which class fills which Role is content.
+_Avoid_: spec, build
+
+**Stats**:
+The five attributes — Strength, Agility, Stamina, Intellect, Spirit — each feeding one derived combat value. Party Buffs multiply them.
+_Avoid_: attributes, primary stats
+
+**Buff**:
+A party-wide passive granted by a Class's mere presence, applied once at Run creation.
+_Avoid_: aura, boon, blessing
+
 ### Dungeon vocabulary
 
 **Mob**:

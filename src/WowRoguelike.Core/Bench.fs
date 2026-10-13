@@ -88,8 +88,8 @@ module Bench =
           |> List.tryHead
 
         match wounded with
-        | Some target when SimState.canReach 8 h target w && canUse h "Lesser Heal" ->
-          cmd h (UseAbility(h.Id, "Lesser Heal", target.Id))
+        | Some target when SimState.canReach 8 h target w && canUse h "Heal" ->
+          cmd h (UseAbility(h.Id, "Heal", target.Id))
         | Some target when SimState.canReach 8 h target w -> []
         | Some target -> cmd h (MoveTo(h.Id, target.Pos))
         | None -> []
@@ -191,6 +191,7 @@ module Bench =
       Entities = party @ mobs
       Pending = []
       Rng = Rng.streamsOf seed
+      PartyBuffs = []
       Log = [] }
 
   // =========================================================================

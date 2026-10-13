@@ -119,67 +119,125 @@ type EntityId = EntityId of int
 
 /// A timed state on an Entity.
 type Aura =
-  /// Druid's Slumber. Any hostile action wakes the target, so *damage* is what
-  /// removes this, not merely the timer running out.
+  /// Druid's Slumber. Any hostile action wakes the target.
   | Sleeping of remaining: int<tick>
   /// Serpent Form: extra physical damage, and no casting while shifted.
   | SerpentForm of remaining: int<tick> * bonusDamage: int
+  /// Gouge / Cheap Shot. Cannot act, but unlike Sleep it is not broken by damage.
+  | Stunned of remaining: int<tick>
+  /// Entangling Roots. Cannot move, but can still act and cast.
+  | Rooted of remaining: int<tick>
+  /// Polymorph. Cannot act, breaks on any damage, and heals while transformed.
+  | Polymorphed of remaining: int<tick>
+  /// A heal-over-time. heals `healPerTick` every Tick.
+  | Rejuvenation of remaining: int<tick> * healPerTick: int
+  /// Sunder Armour. Takes extra physical damage, in basis points. Refreshed by
+  /// another application rather than stacking multiplicatively.
+  | Weakened of remaining: int<tick> * physicalDamageTakenBp: int
 
 /// Every case of `Aura` is matched in exactly one place — here. Everywhere else
 /// asks this module a question, so adding an aura breaks compilation in this
-/// module and nowhere else, rather than silently defaulting at six call sites.
+/// module and nowhere else.
 module Aura =
 
   /// One Tick of ageing. None when the aura has run out.
   let advance =
     function
-    | Sleeping remaining ->
-      if remaining > ticks 1 then Some(Sleeping(remaining - ticks 1)) else None
-    | SerpentForm(remaining, bonus) ->
-      if remaining > ticks 1 then
-        Some(SerpentForm(remaining - ticks 1, bonus))
-      else
-        None
+    | Sleeping r when r > ticks 1 -> Some(Sleeping(r - ticks 1))
+    | SerpentForm(r, b) when r > ticks 1 -> Some(SerpentForm(r - ticks 1, b))
+    | Stunned r when r > ticks 1 -> Some(Stunned(r - ticks 1))
+    | Rooted r when r > ticks 1 -> Some(Rooted(r - ticks 1))
+    | Polymorphed r when r > ticks 1 -> Some(Polymorphed(r - ticks 1))
+    | Rejuvenation(r, n) when r > ticks 1 -> Some(Rejuvenation(r - ticks 1, n))
+    | Weakened(r, bp) when r > ticks 1 -> Some(Weakened(r - ticks 1, bp))
+    | _ -> None
 
   let describe =
     function
-    | Sleeping remaining -> sprintf "sleep(%d)" remaining
-    | SerpentForm(remaining, bonus) -> sprintf "serpent(%d,+%d)" remaining bonus
+    | Sleeping r -> sprintf "sleep(%d)" r
+    | SerpentForm(r, b) -> sprintf "serpent(%d,+%d)" r b
+    | Stunned r -> sprintf "stun(%d)" r
+    | Rooted r -> sprintf "root(%d)" r
+    | Polymorphed r -> sprintf "poly(%d)" r
+    | Rejuvenation(r, n) -> sprintf "rejuv(%d,+%d)" r n
+    | Weakened(r, bp) -> sprintf "weaken(%d,%d)" r bp
 
   let isSleeping =
     function
     | Sleeping _ -> true
-    | SerpentForm _ -> false
+    | _ -> false
 
   let isSerpentForm =
     function
-    | Sleeping _ -> false
     | SerpentForm _ -> true
+    | _ -> false
 
   /// True when this aura stops its holder acting at all.
   let preventsActing =
     function
-    | Sleeping _ -> true
-    | SerpentForm _ -> false
+    | Sleeping _ | Stunned _ | Polymorphed _ -> true
+    | _ -> false
 
   /// True when this aura stops its holder casting.
   let preventsCasting =
     function
-    | Sleeping _ -> true
-    | SerpentForm _ -> true
+    | Sleeping _ | SerpentForm _ | Stunned _ | Polymorphed _ -> true
+    | _ -> false
+
+  /// True when this aura stops its holder moving.
+  let preventsMoving =
+    function
+    | Sleeping _ | Stunned _ | Polymorphed _ | Rooted _ -> true
+    | _ -> false
 
   /// Extra physical damage added to each swing.
   let bonusDamage =
     function
-    | Sleeping _ -> 0
     | SerpentForm(_, bonus) -> bonus
+    | _ -> 0
 
   /// True when a hostile action against the holder ends this aura. Druid's
   /// Slumber is woken by any hostile action, not only by damage.
   let endsOnHostileAction =
     function
-    | Sleeping _ -> true
-    | SerpentForm _ -> false
+    | Sleeping _ | Polymorphed _ -> true
+    | _ -> false
+
+  /// A flat amount healed each Tick (heal-over-time).
+  let flatHealPerTick =
+    function
+    | Rejuvenation(_, n) -> n
+    | _ -> 0
+
+  /// A fraction of max health healed each Tick, in basis points (Polymorph).
+  let maxHealthHealBpPerTick =
+    function
+    | Polymorphed _ -> 125
+    | _ -> 0
+
+  /// A key grouping auras of the same kind, so re-applying refreshes instead of
+  /// stacking. Exhaustive, like everything here.
+  let kind =
+    function
+    | Sleeping _ -> 0
+    | SerpentForm _ -> 1
+    | Stunned _ -> 2
+    | Rooted _ -> 3
+    | Polymorphed _ -> 4
+    | Rejuvenation _ -> 5
+    | Weakened _ -> 6
+
+  /// Prepend `a`, dropping any existing aura of the same kind, so a re-application
+  /// refreshes rather than stacks.
+  let refresh (a: Aura) (auras: Aura list) =
+    a :: (auras |> List.filter (fun x -> kind x <> kind a))
+
+  /// Extra physical damage taken, in basis points (Sunder Armour). Summed over
+  /// auras, so stacked Sunder adds up rather than replacing.
+  let physicalVulnerabilityBp =
+    function
+    | Weakened(_, bp) -> bp
+    | _ -> 0
 
 /// The closed vocabulary of mechanics an Ability can have (Q28b). Adding a new
 /// *mechanic* means adding a case here; adding a new *ability* means writing a
@@ -191,6 +249,16 @@ type Effect =
   | Sleep of duration: int<tick>
   | Shapeshift of form: Form * duration: int<tick> * bonusDamage: int
   | Taunt
+  /// Damage every hostile within `radius` tiles of the caster. No friendly fire.
+  | AreaDamage of radius: int * min: int * max: int
+  | Stun of duration: int<tick>
+  | Root of duration: int<tick>
+  | Polymorph of duration: int<tick>
+  | HealOverTime of duration: int<tick> * healPerTick: int
+  /// Sunder Armour: extra physical damage taken, in basis points.
+  | Weaken of duration: int<tick> * physicalDamageTakenBp: int
+  /// Flat threat on the target, for abilities that taunt without forcing.
+  | Threat of amount: int
 
 type TargetKind =
   | Foe
@@ -222,6 +290,29 @@ type Cast =
   { Ability: Ability
     Target: EntityId
     Remaining: int<tick> }
+
+/// The five Vanilla stats. Each feeds one derived value at construction: Stamina
+/// -> health, Intellect -> resource pool, Spirit -> regen, Strength -> melee
+/// damage, Agility -> crit chance. Hostiles carry Stats.zero.
+[<Struct>]
+type Stats =
+  { Strength: int
+    Agility: int
+    Stamina: int
+    Intellect: int
+    Spirit: int }
+
+module Stats =
+
+  let zero = { Strength = 0; Agility = 0; Stamina = 0; Intellect = 0; Spirit = 0 }
+
+  /// Scale each stat by a basis-point multiplier, flooring. Used for party buffs.
+  let scaleBp (bp: int) (s: Stats) =
+    { Strength = s.Strength * bp / 10000
+      Agility = s.Agility * bp / 10000
+      Stamina = s.Stamina * bp / 10000
+      Intellect = s.Intellect * bp / 10000
+      Spirit = s.Spirit * bp / 10000 }
 
 type Entity =
   { Id: EntityId
@@ -275,6 +366,12 @@ type Entity =
     /// Threat generated is scaled by this, in basis points. A Tank stance is
     /// 5.0x in WoW, and that multiplier is what lets a Tank hold a pull at all.
     ThreatMultiplierBp: int
+    /// The five Vanilla stats; Hostiles carry Stats.zero.
+    Stats: Stats
+    /// Chance to critically hit, in basis points. Derived from Agility.
+    CritChanceBp: int
+    /// Flat bonus to melee damage. Derived from Strength.
+    MeleeDamageBonus: int
     /// False until something engages it; the threat table starts at zero on
     /// entering combat.
     Engaged: bool
@@ -319,6 +416,15 @@ type Outcome =
   | PartyWiped
   | EncounterCleared
 
+/// A passive the party has because some class is present (Q2a).
+type PartyBuffKind =
+  /// Mage: +10% Intellect.
+  | ArcaneIntellect
+  /// Priest: +10% Spirit.
+  | DivineSpirit
+  /// Druid: +5% to all five stats.
+  | MarkOfTheWild
+
 type World =
   { Tick: int<tick>
     Grid: Grid
@@ -326,6 +432,9 @@ type World =
     /// Issued but not yet applied, in issue order.
     Pending: Command list
     Rng: RngStreams
+    /// The party-wide passives, one per class present, computed once at Run
+    /// creation. Held here for display and replay; applied to stats at build time.
+    PartyBuffs: PartyBuffKind list
     /// Newest first. Excluded from fingerprints because it is derivable from
     /// the state; included in dumps because it is what a human reads.
     Log: string list }

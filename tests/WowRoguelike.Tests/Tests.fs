@@ -33,6 +33,7 @@ let private arena (tankThreat: int) (dpsThreat: int) (dpsPos: Pos) : World =
     Entities = [ tank; dps; mob ]
     Pending = []
     Rng = Rng.streamsOf 1UL
+    PartyBuffs = []
     Log = [] }
 
 let private mobOf (w: World) =
@@ -180,6 +181,7 @@ let private casterWorld (ability: Ability) : World =
     Entities = [ rogue; mob ]
     Pending = []
     Rng = Rng.streamsOf 1UL
+    PartyBuffs = []
     Log = [] }
 
 let private lockoutOf (mob: Entity) =
@@ -377,6 +379,7 @@ let ``a party member ordered across the cup room walks around the wall`` () =
             Bench.concaveStart ]
       Pending = []
       Rng = Rng.streamsOf 1UL
+      PartyBuffs = []
       Log = [] }
 
   let w =
@@ -783,6 +786,7 @@ let ``a move order onto a wall never leaves the entity inside it`` () =
             { X = 1; Y = 1 } ]
       Pending = []
       Rng = Rng.streamsOf 1UL
+      PartyBuffs = []
       Log = [] }
 
   // (1,2) is a wall.
@@ -799,3 +803,86 @@ let ``a move order onto a wall never leaves the entity inside it`` () =
     Grid.isFloor w.Grid solo.Pos,
     sprintf "ended on a wall at %d,%d" solo.Pos.X solo.Pos.Y
   )
+
+// ===========================================================================
+// Classes, stats, and the new mechanics (the five-class model)
+// ===========================================================================
+
+/// Sunder Armour is a vulnerability stack, not a real armour value, and it makes
+/// the target take more damage (Q4b).
+[<Fact>]
+let ``sunder armor makes a target take more damage`` () =
+  let w = arena 0 0 { X = 7; Y = 5 }
+  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.sunderArmor w
+  let before = (mobOf w).Health
+  let w = SimState.dealDamage (EntityId 100) 100 w
+  // 100 * (10000 + 1000) / 10000 = 110
+  Assert.Equal(before - 110, (mobOf w).Health)
+
+[<Fact>]
+let ``stun prevents action and is not broken by damage`` () =
+  let w = arena 0 0 { X = 7; Y = 5 }
+  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.gouge w
+  Assert.False(SimState.canAct (mobOf w))
+  let w = SimState.dealDamage (EntityId 100) 10 w
+  Assert.False(SimState.canAct (mobOf w))
+
+[<Fact>]
+let ``root prevents movement but not action`` () =
+  let w = arena 0 0 { X = 7; Y = 5 }
+  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.entanglingRoots w
+  let mob = mobOf w
+  Assert.False(SimState.canMove mob)
+  Assert.True(SimState.canAct mob)
+
+[<Fact>]
+let ``polymorph breaks on damage`` () =
+  let w = arena 0 0 { X = 7; Y = 5 }
+  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.polymorph w
+  Assert.False(SimState.canAct (mobOf w))
+  let w = SimState.dealDamage (EntityId 100) 10 w
+  Assert.True(SimState.canAct (mobOf w))
+
+/// Rejuvenation heals a flat amount every Tick.
+[<Fact>]
+let ``a heal over time heals each tick`` () =
+  let w = arena 0 0 { X = 7; Y = 5 }
+  let w = SimState.mapEntity (EntityId 1) (fun e -> { e with Health = 100 }) w
+  let w = SimState.resolveAbility (EntityId 2) (EntityId 1) Content.rejuvenation w
+  let w = SimTick.run 5 w
+  let tank = w.Entities |> List.find (fun e -> e.Id = EntityId 1)
+  // Rejuvenation heals 14 per tick, 5 ticks = 70.
+  Assert.Equal(170, tank.Health)
+
+/// Arcane Explosion hits every hostile in radius and no ally (Q5a).
+[<Fact>]
+let ``area damage hits hostiles but not allies`` () =
+  let w = arena 0 0 { X = 7; Y = 5 }
+  let before = (mobOf w).Health
+  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.arcaneExplosion w
+  Assert.True((mobOf w).Health < before)
+  let dps = w.Entities |> List.find (fun e -> e.Id = EntityId 2)
+  Assert.Equal(1000, dps.Health)
+
+/// A 100% crit chance forces every hit to 150% damage.
+[<Fact>]
+let ``a guaranteed crit deals 150 percent`` () =
+  let w =
+    arena 0 0 { X = 7; Y = 5 }
+    |> SimState.mapEntity (EntityId 1) (fun e -> { e with CritChanceBp = 10000 })
+
+  let before = (mobOf w).Health
+  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.heroicStrike w
+  let dealt = before - (mobOf w).Health
+  // Heroic Strike rolls 22..30; a crit takes it to 33..45.
+  Assert.True(dealt >= 33 && dealt <= 45, sprintf "dealt %d" dealt)
+
+/// The Mage's Arcane Intellect (+10% Intellect) plus Mark of the Wild (+5% all)
+/// both land on the resource pool (Q1a/Q2a).
+[<Fact>]
+let ``party buffs raise the mage's resource pool`` () =
+  let mage = (Content.dungeon 1UL).Entities |> List.find (fun e -> e.Name = "Mage")
+  // Intellect 240 -> x1.10 -> x1.05 = 277 -> MaxResource 1385.
+  Assert.Equal(1385, mage.MaxResource)
+  // Stamina 60 -> x1.05 = 63 -> MaxHealth 630.
+  Assert.Equal(630, mage.MaxHealth)

@@ -17,6 +17,23 @@ module SimTick =
   let advanceAuras (w: World) =
     mapAll (fun e -> { e with Auras = e.Auras |> List.choose Aura.advance }) w
 
+  /// Heal-over-time and Polymorph's regen tick down each Tick.
+  let advanceAuraHealing (w: World) =
+    mapAll
+      (fun e ->
+        if not (alive e) then
+          e
+        else
+          let flat = e.Auras |> List.sumBy Aura.flatHealPerTick
+          let pctBp = e.Auras |> List.sumBy Aura.maxHealthHealBpPerTick
+          let heal = flat + (e.MaxHealth * pctBp / 10000)
+
+          if heal <= 0 then
+            e
+          else
+            { e with Health = min e.MaxHealth (e.Health + heal) })
+      w
+
   let advanceCooldowns (w: World) =
     mapAll
       (fun e ->
@@ -47,13 +64,18 @@ module SimTick =
       (fun e ->
         if not (alive e) then
           e
-        elif isSleeping e then
-          { e with
-              Goal = None
-              Path = []
-              StallTicks = ticks 0
-              Destination = None
-              MoveTicksLeft = ticks 0 }
+        elif not (canMove e) then
+          if e.Auras |> List.exists Aura.preventsActing then
+            // Incapacitated: drop everything, it will not resume.
+            { e with
+                Goal = None
+                Path = []
+                StallTicks = ticks 0
+                Destination = None
+                MoveTicksLeft = ticks 0 }
+          else
+            // Rooted: hold position and resume when the root ends.
+            e
         else
           match e.Destination with
           | None -> e
@@ -126,7 +148,7 @@ module SimTick =
     w.Entities
     |> List.fold
       (fun (acc: World) e ->
-        if not (canAct e) then
+        if not (canMove e) then
           acc
         else
           match e.Goal with
@@ -195,7 +217,8 @@ module SimTick =
         | None -> w
         | Some t ->
           let amount, w = rollRange attack.Min attack.Max w
-          let total = amount + bonus
+          let amount, w = rollCrit e amount w
+          let total = amount + bonus + e.MeleeDamageBonus
 
           w
           |> dealDamage t.Id total
@@ -400,6 +423,7 @@ module SimTick =
     |> advanceCooldowns
     |> advanceResource
     |> advanceAuras
+    |> advanceAuraHealing
     |> advanceMovement
     |> advanceCasts
     |> advanceSwings

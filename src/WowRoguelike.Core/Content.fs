@@ -26,8 +26,11 @@ namespace WowRoguelike.Core
 ///     every cast time and cooldown in this file
 ///     every health pool, auto-attack range and swing timer
 ///
-///   Our own invention, deliberately: the Party. Five heroes, their classes,
-///   health and damage are chosen for encounter pacing, not copied.
+///   Our own invention, deliberately: the five Party classes (Warrior, Rogue,
+///   Mage, Priest, Druid), their stat spreads, and every ability in this file.
+///   The stat-to-combat mapping (Stamina -> health, Intellect -> resource,
+///   Spirit -> regen, Agility -> crit, Strength -> melee) is faithful in shape
+///   but not in scale: it is pacing, not copied.
 module Content =
 
   // =========================================================================
@@ -132,6 +135,28 @@ module Content =
       TargetKind = Ally
       Effects = [ Heal(110, 150) ] }
 
+  /// Priest: a strong direct heal.
+  let heal =
+    { Name = "Heal"
+      CastTicks = secTicks 2.5
+      CooldownTicks = ticks 0
+      ResourceCost = 160
+      Interruptible = true
+      Range = 8
+      TargetKind = Ally
+      Effects = [ Heal(220, 300) ] }
+
+  /// Priest: a weak heal-over-time.
+  let renew =
+    { Name = "Renew"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 5.0
+      ResourceCost = 80
+      Interruptible = false
+      Range = 8
+      TargetKind = Ally
+      Effects = [ HealOverTime(secTicks 15.0, 10) ] }
+
   /// The Party's only interrupt, and it is melee range — so using it is a
   /// positioning decision, not a cooldown to press.
   let kick =
@@ -163,6 +188,146 @@ module Content =
       Range = 8
       TargetKind = Foe
       Effects = [ Damage(26, 34) ] }
+
+  // -- Warrior --------------------------------------------------------------
+
+  /// Sunder Armour: a vulnerability stack, and flat threat to hold aggro.
+  let sunderArmor =
+    { Name = "Sunder Armor"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 6.0
+      ResourceCost = 60
+      Interruptible = false
+      Range = 1
+      TargetKind = Foe
+      Effects = [ Weaken(secTicks 20.0, 1000); Threat(200) ] }
+
+  let shieldBash =
+    { Name = "Shield Bash"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 12.0
+      ResourceCost = 80
+      Interruptible = false
+      Range = 1
+      TargetKind = Foe
+      Effects = [ Damage(10, 16); Interrupt ] }
+
+  // -- Rogue ----------------------------------------------------------------
+
+  let backstab =
+    { Name = "Backstab"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 6.0
+      ResourceCost = 70
+      Interruptible = false
+      Range = 1
+      TargetKind = Foe
+      Effects = [ Damage(30, 46) ] }
+
+  let gouge =
+    { Name = "Gouge"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 15.0
+      ResourceCost = 60
+      Interruptible = false
+      Range = 1
+      TargetKind = Foe
+      Effects = [ Stun(secTicks 4.0) ] }
+
+  let cheapShot =
+    { Name = "Cheap Shot"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 20.0
+      ResourceCost = 80
+      Interruptible = false
+      Range = 1
+      TargetKind = Foe
+      Effects = [ Stun(secTicks 2.0) ] }
+
+  // -- Mage ----------------------------------------------------------------
+
+  let frostbolt =
+    { Name = "Frostbolt"
+      CastTicks = secTicks 2.5
+      CooldownTicks = ticks 0
+      ResourceCost = 100
+      Interruptible = true
+      Range = 8
+      TargetKind = Foe
+      Effects = [ Damage(38, 52) ] }
+
+  let magicMissile =
+    { Name = "Magic Missile"
+      CastTicks = secTicks 1.5
+      CooldownTicks = ticks 0
+      ResourceCost = 80
+      Interruptible = true
+      Range = 8
+      TargetKind = Foe
+      Effects = [ Damage(24, 34) ] }
+
+  let arcaneExplosion =
+    { Name = "Arcane Explosion"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 10.0
+      ResourceCost = 120
+      Interruptible = false
+      Range = 0
+      TargetKind = Self
+      Effects = [ AreaDamage(3, 24, 36) ] }
+
+  /// Blizzard is the same area effect with a larger radius (Q5a).
+  let blizzard =
+    { Name = "Blizzard"
+      CastTicks = secTicks 2.0
+      CooldownTicks = secTicks 15.0
+      ResourceCost = 150
+      Interruptible = true
+      Range = 0
+      TargetKind = Self
+      Effects = [ AreaDamage(5, 30, 44) ] }
+
+  let polymorph =
+    { Name = "Polymorph"
+      CastTicks = secTicks 1.5
+      CooldownTicks = secTicks 30.0
+      ResourceCost = 100
+      Interruptible = true
+      Range = 8
+      TargetKind = Foe
+      Effects = [ Polymorph(secTicks 30.0) ] }
+
+  // -- Druid ----------------------------------------------------------------
+
+  let rejuvenation =
+    { Name = "Rejuvenation"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 3.0
+      ResourceCost = 90
+      Interruptible = false
+      Range = 8
+      TargetKind = Ally
+      Effects = [ HealOverTime(secTicks 15.0, 14) ] }
+
+  let regrowth =
+    { Name = "Regrowth"
+      CastTicks = secTicks 2.0
+      CooldownTicks = ticks 0
+      ResourceCost = 140
+      Interruptible = true
+      Range = 8
+      TargetKind = Ally
+      Effects = [ Heal(150, 210) ] }
+
+  let entanglingRoots =
+    { Name = "Entangling Roots"
+      CastTicks = secTicks 1.5
+      CooldownTicks = secTicks 20.0
+      ResourceCost = 90
+      Interruptible = true
+      Range = 8
+      TargetKind = Foe
+      Effects = [ Root(secTicks 10.0) ] }
 
   // =========================================================================
   // Builders
@@ -218,6 +383,9 @@ module Content =
       Target = None
       ForcedTarget = None
       ThreatMultiplierBp = threatBp
+      Stats = Stats.zero
+      CritChanceBp = 0
+      MeleeDamageBonus = 0
       Engaged = true
       CallForHelpBelowHealthPct = None
       HasCalledForHelp = false }
@@ -259,8 +427,80 @@ module Content =
       Target = None
       ForcedTarget = None
       ThreatMultiplierBp = mobThreatBp
+      Stats = Stats.zero
+      CritChanceBp = 0
+      MeleeDamageBonus = 0
       Engaged = false
       CallForHelpBelowHealthPct = callForHelpBelowPct
+      HasCalledForHelp = false }
+
+  /// Derive combat values from the five stats (Q1a). Faithful in shape, not in
+  /// scale — these are pacing placeholders.
+  let private derive (s: Stats) =
+    {| MaxHealth = s.Stamina * 10
+       MaxResource = s.Intellect * 5
+       RegenPerTick = s.Spirit / 10
+       CritChanceBp = s.Agility * 5
+       MeleeBonus = s.Strength / 5 |}
+
+  /// The party-wide passives, one per class present (Q2a).
+  let partyBuffs: PartyBuffKind list = [ ArcaneIntellect; DivineSpirit; MarkOfTheWild ]
+
+  /// Apply the party passives to a class's base stats.
+  let private buffed (stats: Stats) =
+    (stats, partyBuffs)
+    ||> List.fold (fun acc b ->
+      match b with
+      | ArcaneIntellect -> { acc with Intellect = acc.Intellect * 110 / 100 }
+      | DivineSpirit -> { acc with Spirit = acc.Spirit * 110 / 100 }
+      | MarkOfTheWild -> Stats.scaleBp 10500 acc)
+
+  /// A Party member specified by the five stats rather than raw values. The
+  /// passives are applied to the stats before the derived values are computed.
+  let heroStats
+    (id: int)
+    (name: string)
+    (role: Role)
+    (stats: Stats)
+    (attack: AutoAttack)
+    (threatBp: int)
+    (abilities: Ability list)
+    (pos: Pos)
+    : Entity =
+    let d = derive (buffed stats)
+
+    { Id = EntityId id
+      Name = name
+      Faction = Party
+      Role = Some role
+      MaxHealth = d.MaxHealth
+      Health = d.MaxHealth
+      Pos = pos
+      Destination = None
+      MoveTicksLeft = ticks 0
+      MoveTicksTotal = ticks 0
+      MoveTicksPerTile = secTicks 0.4
+      Goal = None
+      Path = []
+      StallTicks = ticks 0
+      Auras = []
+      Casting = None
+      Cooldowns = Map.empty
+      Resource = d.MaxResource
+      MaxResource = d.MaxResource
+      ResourceRegenPerTick = d.RegenPerTick
+      Abilities = abilities
+      AutoAttack = Some attack
+      SwingTicksLeft = attack.Ticks
+      Threat = Map.empty
+      Target = None
+      ForcedTarget = None
+      ThreatMultiplierBp = threatBp
+      Stats = stats
+      CritChanceBp = d.CritChanceBp
+      MeleeDamageBonus = d.MeleeBonus
+      Engaged = true
+      CallForHelpBelowHealthPct = None
       HasCalledForHelp = false }
 
   // =========================================================================
@@ -268,19 +508,19 @@ module Content =
   // =========================================================================
 
   let private warrior =
-    hero 1 "Warrior" Tank 900 300 { Min = 18; Max = 26; Ticks = secTicks 2.0; Range = 1 } tankStanceBp [ taunt; heroicStrike ] { X = 1; Y = 5 }
+    heroStats 1 "Warrior" Tank { Strength = 100; Agility = 50; Stamina = 90; Intellect = 60; Spirit = 20 } { Min = 18; Max = 26; Ticks = secTicks 2.0; Range = 1 } tankStanceBp [ taunt; heroicStrike; sunderArmor; shieldBash ] { X = 1; Y = 5 }
 
   let private priest =
-    hero 2 "Priest" Healer 640 900 { Min = 6; Max = 10; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ lesserHeal ] { X = 1; Y = 6 }
+    heroStats 2 "Priest" Healer { Strength = 20; Agility = 30; Stamina = 64; Intellect = 180; Spirit = 200 } { Min = 6; Max = 10; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ heal; renew ] { X = 1; Y = 6 }
 
   let private rogue =
-    hero 3 "Rogue" Dps 700 400 { Min = 16; Max = 24; Ticks = secTicks 1.8; Range = 1 } partyThreatBp [ kick ] { X = 1; Y = 7 }
+    heroStats 3 "Rogue" Dps { Strength = 80; Agility = 120; Stamina = 70; Intellect = 80; Spirit = 20 } { Min = 16; Max = 24; Ticks = secTicks 1.8; Range = 1 } partyThreatBp [ backstab; kick; gouge; cheapShot ] { X = 1; Y = 7 }
 
   let private mage =
-    hero 4 "Mage" Dps 600 1200 { Min = 4; Max = 8; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ fireball ] { X = 2; Y = 6 }
+    heroStats 4 "Mage" Dps { Strength = 20; Agility = 40; Stamina = 60; Intellect = 240; Spirit = 40 } { Min = 4; Max = 8; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ fireball; frostbolt; magicMissile; arcaneExplosion; blizzard; polymorph ] { X = 2; Y = 6 }
 
-  let private hunter =
-    hero 5 "Hunter" Dps 680 900 { Min = 14; Max = 20; Ticks = secTicks 2.2; Range = 8 } partyThreatBp [ arcaneShot ] { X = 2; Y = 7 }
+  let private druid =
+    heroStats 5 "Druid" Healer { Strength = 30; Agility = 40; Stamina = 68; Intellect = 200; Spirit = 180 } { Min = 8; Max = 12; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ rejuvenation; regrowth; entanglingRoots ] { X = 2; Y = 7 }
 
   let private druidOfTheFang id pos =
     mob id "Druid of the Fang" 480 400 (Some { Min = 12; Max = 18; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; serpentForm; druidsSlumber ] None pos
@@ -313,7 +553,7 @@ module Content =
     let guardB = Pos.move 2 0 spawn
 
     let entities =
-      [ warrior; priest; rogue; mage; hunter
+      [ warrior; priest; rogue; mage; druid
         druidOfTheFang 6 { X = 7; Y = 6 }
         raptor 7 { X = 9; Y = 3 }
         raptor 9 { X = 9; Y = 9 }
@@ -326,6 +566,7 @@ module Content =
       Entities = entities
       Pending = []
       Rng = rng
+      PartyBuffs = partyBuffs
       Log = [] }
 
   // =========================================================================
@@ -417,7 +658,7 @@ module Content =
     let partyTiles = freeTiles entranceRoom |> List.truncate 5
 
     let party =
-      List.map2 (fun (e: Entity) p -> { e with Pos = p }) [ warrior; priest; rogue; mage; hunter ] partyTiles
+      List.map2 (fun (e: Entity) p -> { e with Pos = p }) [ warrior; priest; rogue; mage; druid ] partyTiles
 
     for p in partyTiles do
       occupied.Add p |> ignore
@@ -465,4 +706,5 @@ module Content =
       Rng =
         { Generation = generation
           Combat = Rng.stream seed Rng.CombatStream }
+      PartyBuffs = partyBuffs
       Log = [] }

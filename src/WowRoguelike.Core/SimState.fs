@@ -98,6 +98,10 @@ module SimState =
 
   let canAct (e: Entity) =
     alive e && not (e.Auras |> List.exists Aura.preventsActing)
+
+  /// Movement is its own gate: a Rooted entity can still act, but not step.
+  let canMove (e: Entity) =
+    alive e && not (e.Auras |> List.exists Aura.preventsMoving)
   let canAfford (e: Entity) (ability: Ability) = e.Resource >= ability.ResourceCost
 
   // -- threat ---------------------------------------------------------------
@@ -199,6 +203,10 @@ module SimState =
     mapEntity
       targetId
       (fun t ->
+        // Sunder Armour makes the target take more damage. Applied to all damage
+        // rather than only physical, because there is no physical/spell split yet.
+        let vulnerable = t.Auras |> List.sumBy Aura.physicalVulnerabilityBp
+        let amount = amount * (10000 + vulnerable) / 10000
         let hp = max 0 (t.Health - amount)
 
         { t with
@@ -224,6 +232,12 @@ module SimState =
     let v, rng = Rng.drawCombat lo hi w.Rng
     v, { w with Rng = rng }
 
+  /// Roll for a critical hit against the attacker's Agility-derived chance. A
+  /// crit deals 150% damage.
+  let rollCrit (attacker: Entity) (amount: int) (w: World) : int * World =
+    let roll, w = rollRange 0 9999 w
+    if roll < attacker.CritChanceBp then amount * 150 / 100, w else amount, w
+
   let internal nameOf (id: EntityId) (w: World) =
     tryEntity id w |> Option.map (fun e -> e.Name) |> Option.defaultValue "?"
 
@@ -246,6 +260,7 @@ module SimState =
         match effect with
         | Damage(lo, hi) ->
           let amount, w = rollRange lo hi w
+          let amount, w = rollCrit actor amount w
           let w = dealDamage targetId amount w
           // Only the Party builds threat on Mobs.
           let w = if actor.Faction = Party then addThreat targetId actor amount w else w
@@ -326,7 +341,91 @@ module SimState =
                   Threat = mob.Threat |> Map.add actorId (max highest (threatOf actorId mob)) })
             |> wake targetId
             |> logLine (sprintf "%s taunts %s" actor.Name m.Name)
-          | _ -> w)
+          | _ -> w
+
+        | AreaDamage(radius, lo, hi) ->
+          // One roll and one crit for the whole area, applied to every hostile
+          // within `radius` of the actor. No friendly fire.
+          let amount, w = rollRange lo hi w
+          let amount, w = rollCrit actor amount w
+
+          w.Entities
+          |> List.filter (fun e ->
+            e.Faction <> actor.Faction
+            && alive e
+            && Pos.chebyshev actor.Pos e.Pos <= radius)
+          |> List.fold (fun w t ->
+            let w = dealDamage t.Id amount w
+            let w = if actor.Faction = Party then addThreat t.Id actor amount w else w
+            w |> logLine (sprintf "%s blasts %s for %d" actor.Name t.Name amount)) w
+
+        | Stun duration ->
+          match tryEntity targetId w with
+          | Some t ->
+            w
+            |> mapEntity targetId (fun e ->
+              { e with
+                  Auras = Aura.refresh (Stunned duration) e.Auras
+                  Casting = None
+                  Goal = None
+                  Path = []
+                  StallTicks = ticks 0
+                  Destination = None })
+            |> logLine (sprintf "%s stuns %s" actor.Name t.Name)
+          | None -> w
+
+        | Root duration ->
+          match tryEntity targetId w with
+          | Some t ->
+            w
+            |> mapEntity targetId (fun e ->
+              { e with
+                  Auras = Aura.refresh (Rooted duration) e.Auras
+                  Goal = None
+                  Path = []
+                  Destination = None })
+            |> logLine (sprintf "%s roots %s" actor.Name t.Name)
+          | None -> w
+
+        | Polymorph duration ->
+          match tryEntity targetId w with
+          | Some t ->
+            w
+            |> mapEntity targetId (fun e ->
+              { e with
+                  Auras = Aura.refresh (Polymorphed duration) e.Auras
+                  Casting = None
+                  Goal = None
+                  Path = []
+                  StallTicks = ticks 0
+                  Destination = None })
+            |> logLine (sprintf "%s polymorphs %s" actor.Name t.Name)
+          | None -> w
+
+        | HealOverTime(duration, perTick) ->
+          match tryEntity targetId w with
+          | Some t ->
+            w
+            |> mapEntity targetId (fun e ->
+              { e with
+                  Auras = Aura.refresh (Rejuvenation(duration, perTick)) e.Auras })
+            |> logLine (sprintf "%s casts a heal-over-time on %s" actor.Name t.Name)
+          | None -> w
+
+        | Weaken(duration, bp) ->
+          match tryEntity targetId w with
+          | Some t ->
+            w
+            |> mapEntity targetId (fun e ->
+              { e with Auras = Aura.refresh (Weakened(duration, bp)) e.Auras })
+            |> logLine (sprintf "%s sunders %s" actor.Name t.Name)
+          | None -> w
+
+        | Threat amount ->
+          let w =
+            if actor.Faction = Party then addThreat targetId actor amount w else w
+
+          w |> logLine (sprintf "%s threatens %s for %d" actor.Name targetName amount))
 
   // =========================================================================
   // Commands

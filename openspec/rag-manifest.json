@@ -1,0 +1,48 @@
+{
+  "generatedAt": "2026-10-13T16:07:24.479Z",
+  "specVersion": "1.0.0",
+  "domains": [
+    {
+      "domain": "wowroguelike-core",
+      "specPath": "openspec/specs/wowroguelike-core/spec.md",
+      "sourceFiles": [
+        "/home/omary/Dev/WowRoguelike/src/WowRoguelike.Core/Domain.fs",
+        "/home/omary/Dev/WowRoguelike/src/WowRoguelike.Core/Heap.fs",
+        "/home/omary/Dev/WowRoguelike/src/WowRoguelike.Core/Path.fs",
+        "/home/omary/Dev/WowRoguelike/src/WowRoguelike.Core/Content.fs",
+        "/home/omary/Dev/WowRoguelike/src/WowRoguelike.Core/Dump.fs",
+        "/home/omary/Dev/WowRoguelike/src/WowRoguelike.Core/Dungeon.fs",
+        "/home/omary/Dev/WowRoguelike/src/WowRoguelike.Core/Rng.fs",
+        "/home/omary/Dev/WowRoguelike/src/WowRoguelike.Core/SimState.fs",
+        "/home/omary/Dev/WowRoguelike/src/WowRoguelike.Core/SimTick.fs",
+        "/home/omary/Dev/WowRoguelike/src/WowRoguelike.Core/Bench.fs",
+        "/home/omary/Dev/WowRoguelike/src/WowRoguelike.Core/WowRoguelike.Core.fsproj"
+      ],
+      "requirementCount": 80,
+      "dependsOn": [],
+      "calledBy": []
+    },
+    {
+      "domain": "wowroguelike-game",
+      "specPath": "openspec/specs/wowroguelike-game/spec.md",
+      "sourceFiles": [
+        "/home/omary/Dev/WowRoguelike/src/WowRoguelike.Game/Program.fs",
+        "/home/omary/Dev/WowRoguelike/src/WowRoguelike.Game/WowRoguelike.Game.fsproj"
+      ],
+      "requirementCount": 6,
+      "dependsOn": [],
+      "calledBy": []
+    },
+    {
+      "domain": "wowroguelike-harness",
+      "specPath": "openspec/specs/wowroguelike-harness/spec.md",
+      "sourceFiles": [
+        "/home/omary/Dev/WowRoguelike/src/WowRoguelike.Harness/Program.fs",
+        "/home/omary/Dev/WowRoguelike/src/WowRoguelike.Harness/WowRoguelike.Harness.fsproj"
+      ],
+      "requirementCount": 8,
+      "dependsOn": [],
+      "calledBy": []
+    }
+  ]
+}
