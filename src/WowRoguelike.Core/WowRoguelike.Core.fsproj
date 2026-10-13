@@ -9,6 +9,8 @@
     Compile order IS the dependency graph (Q14a).
     Domain.fs holds types and zero logic; nothing may depend on a file above it.
     Heap and Path sit below Sim because the search knows nothing about Entities.
+    SimState is the World's queries and rebuild helpers; SimCombat is the dice,
+    mitigation and command handlers layered above it; SimTick is the per-Tick pipeline.
   -->
   <ItemGroup>
     <Compile Include="Domain.fs" />
@@ -18,6 +20,7 @@
     <Compile Include="Heap.fs" />
     <Compile Include="Path.fs" />
     <Compile Include="SimState.fs" />
+    <Compile Include="SimCombat.fs" />
     <Compile Include="SimTick.fs" />
     <Compile Include="Dump.fs" />
     <Compile Include="Bench.fs" />

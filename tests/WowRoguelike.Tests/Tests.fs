@@ -194,7 +194,7 @@ let ``an interrupt cancels an interruptible cast and locks it out`` () =
   let w = casterWorld Content.lightningBolt
 
   let w =
-    SimState.applyCommand
+    SimCombat.applyCommand
       { ApplyAt = ticks 1
         Kind = UseAbility(EntityId 3, "Kick", EntityId 100) }
       w
@@ -208,7 +208,7 @@ let ``an interrupt cannot cancel a cast that is not interruptible`` () =
   let w = casterWorld Content.serpentForm
 
   let w =
-    SimState.applyCommand
+    SimCombat.applyCommand
       { ApplyAt = ticks 1
         Kind = UseAbility(EntityId 3, "Kick", EntityId 100) }
       w
@@ -220,7 +220,7 @@ let ``damage wakes a sleeper`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
   let w = SimState.mapEntity (EntityId 2) (fun e -> { e with Auras = [ Sleeping(secTicks 15.0) ] }) w
   Assert.True(SimState.isSleeping (w.Entities |> List.find (fun e -> e.Id = EntityId 2)))
-  let w = SimState.dealDamage (EntityId 2) 1 w
+  let w = SimCombat.dealDamage (EntityId 2) 1 w
   Assert.False(SimState.isSleeping (w.Entities |> List.find (fun e -> e.Id = EntityId 2)))
 
 /// Moves are cancelled while asleep, so sleeping a member actually removes them.
@@ -229,7 +229,7 @@ let ``a sleeping entity does not move`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
 
   let w =
-    SimState.applyCommand
+    SimCombat.applyCommand
       { ApplyAt = ticks 1
         Kind = MoveTo(EntityId 2, { X = 18; Y = 5 }) }
       w
@@ -263,7 +263,7 @@ let ``an interrupt wakes a sleeper`` () =
       { e with Auras = [ Sleeping(secTicks 15.0) ] })
 
   Assert.True(SimState.isSleeping (mobOf w))
-  let w = SimState.resolveAbility (EntityId 3) (EntityId 100) Content.kick w
+  let w = SimCombat.resolveAbility (EntityId 3) (EntityId 100) Content.kick w
   Assert.False(SimState.isSleeping (mobOf w))
 
 [<Fact>]
@@ -274,7 +274,7 @@ let ``a taunt wakes a sleeper`` () =
       { e with Auras = [ Sleeping(secTicks 15.0) ] })
 
   Assert.True(SimState.isSleeping (mobOf w))
-  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.taunt w
+  let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.taunt w
   Assert.False(SimState.isSleeping (mobOf w))
 
 // ===========================================================================
@@ -383,7 +383,7 @@ let ``a party member ordered across the cup room walks around the wall`` () =
       Log = [] }
 
   let w =
-    SimState.applyCommand
+    SimCombat.applyCommand
       { ApplyAt = ticks 1
         Kind = MoveTo(EntityId 1, Bench.concaveGoal) }
       w
@@ -413,7 +413,7 @@ let ``the tick counter advances by exactly one per step`` (n: int) =
 let ``resolving an ability spends its resource`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
   let before = (w.Entities |> List.find (fun e -> e.Id = EntityId 1)).Resource
-  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.heroicStrike w
+  let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.heroicStrike w
   let after = (w.Entities |> List.find (fun e -> e.Id = EntityId 1)).Resource
   Assert.Equal<int>(before - Content.heroicStrike.ResourceCost, after)
 
@@ -425,7 +425,7 @@ let ``an interrupted cast spends no resource`` () =
   let before = (mobOf w).Resource
 
   let w =
-    SimState.applyCommand
+    SimCombat.applyCommand
       { ApplyAt = ticks 1
         Kind = UseAbility(EntityId 3, "Kick", EntityId 100) }
       w
@@ -440,7 +440,7 @@ let ``an ability that cannot be afforded is refused`` () =
     |> SimState.mapEntity (EntityId 1) (fun e -> { e with Resource = 0 })
 
   let w =
-    SimState.applyCommand
+    SimCombat.applyCommand
       { ApplyAt = ticks 1
         Kind = UseAbility(EntityId 1, "Heroic Strike", EntityId 100) }
       w
@@ -791,7 +791,7 @@ let ``a move order onto a wall never leaves the entity inside it`` () =
 
   // (1,2) is a wall.
   let w =
-    SimState.applyCommand
+    SimCombat.applyCommand
       { ApplyAt = ticks 1
         Kind = MoveTo(EntityId 1, { X = 1; Y = 2 }) }
       w
@@ -817,12 +817,12 @@ let ``sunder armor reduces physical mitigation`` () =
     |> SimState.mapEntity (EntityId 100) (fun e -> { e with Armor = 500 })
 
   // 500 armour -> 50% mitigation: 100 becomes 50.
-  let before, _ = SimState.mitigatePhysical (EntityId 100) 100 w
+  let before, _ = SimCombat.mitigatePhysical (EntityId 100) 100 w
   Assert.Equal(50, before)
 
-  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.sunderArmor w
+  let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.sunderArmor w
   // 500 - 100 = 400 armour -> 40% mitigation: 100 becomes 60.
-  let after, _ = SimState.mitigatePhysical (EntityId 100) 100 w
+  let after, _ = SimCombat.mitigatePhysical (EntityId 100) 100 w
   Assert.Equal(60, after)
 
 /// Armour mitigates physical damage and leaves spells alone (Q2a).
@@ -832,11 +832,11 @@ let ``armor mitigates physical but not spell damage`` () =
     arena 0 0 { X = 7; Y = 5 }
     |> SimState.mapEntity (EntityId 100) (fun e -> { e with Armor = 500 })
 
-  let physical, _ = SimState.mitigatePhysical (EntityId 100) 100 w
+  let physical, _ = SimCombat.mitigatePhysical (EntityId 100) 100 w
   Assert.Equal(50, physical)
 
   let before = (mobOf w).Health
-  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.fireball w
+  let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.fireball w
   let dealt = before - (mobOf w).Health
   // Fireball is a spell: full 48..66, not halved to 24..33.
   Assert.True(dealt >= 48, sprintf "dealt %d" dealt)
@@ -848,7 +848,7 @@ let ``dodge avoids a physical hit entirely`` () =
     arena 0 0 { X = 7; Y = 5 }
     |> SimState.mapEntity (EntityId 100) (fun e -> { e with DodgeChanceBp = 10000 })
 
-  let amount, _ = SimState.mitigatePhysical (EntityId 100) 100 w
+  let amount, _ = SimCombat.mitigatePhysical (EntityId 100) 100 w
   Assert.Equal(0, amount)
 
 /// Block subtracts a flat value (Q4a).
@@ -861,7 +861,7 @@ let ``block reduces a hit by the block value`` () =
           BlockChanceBp = 10000
           BlockValue = 25 })
 
-  let amount, _ = SimState.mitigatePhysical (EntityId 100) 100 w
+  let amount, _ = SimCombat.mitigatePhysical (EntityId 100) 100 w
   Assert.Equal(75, amount)
 
 /// Casters resist being interrupted by damage (Q5a): full resistance means the
@@ -872,7 +872,7 @@ let ``pushback resistance stops damage interrupting a cast`` () =
     casterWorld Content.lightningBolt
     |> SimState.mapEntity (EntityId 100) (fun e -> { e with PushbackResistanceBp = 10000 })
 
-  let w = SimState.dealDamage (EntityId 100) 50 w
+  let w = SimCombat.dealDamage (EntityId 100) 50 w
   Assert.True((mobOf w).Casting.IsSome)
 
 /// The Rogue's trait gives Backstab 60% extra crit (Q1 of the trait model).
@@ -896,15 +896,15 @@ let ``armor classes only provide armor`` () =
 [<Fact>]
 let ``stun prevents action and is not broken by damage`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
-  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.gouge w
+  let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.gouge w
   Assert.False(SimState.canAct (mobOf w))
-  let w = SimState.dealDamage (EntityId 100) 10 w
+  let w = SimCombat.dealDamage (EntityId 100) 10 w
   Assert.False(SimState.canAct (mobOf w))
 
 [<Fact>]
 let ``root prevents movement but not action`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
-  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.entanglingRoots w
+  let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.entanglingRoots w
   let mob = mobOf w
   Assert.False(SimState.canMove mob)
   Assert.True(SimState.canAct mob)
@@ -912,9 +912,9 @@ let ``root prevents movement but not action`` () =
 [<Fact>]
 let ``polymorph breaks on damage`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
-  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.polymorph w
+  let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.polymorph w
   Assert.False(SimState.canAct (mobOf w))
-  let w = SimState.dealDamage (EntityId 100) 10 w
+  let w = SimCombat.dealDamage (EntityId 100) 10 w
   Assert.True(SimState.canAct (mobOf w))
 
 /// Rejuvenation heals a flat amount every Tick.
@@ -922,7 +922,7 @@ let ``polymorph breaks on damage`` () =
 let ``a heal over time heals each tick`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
   let w = SimState.mapEntity (EntityId 1) (fun e -> { e with Health = 100 }) w
-  let w = SimState.resolveAbility (EntityId 2) (EntityId 1) Content.rejuvenation w
+  let w = SimCombat.resolveAbility (EntityId 2) (EntityId 1) Content.rejuvenation w
   let w = SimTick.run 5 w
   let tank = w.Entities |> List.find (fun e -> e.Id = EntityId 1)
   // Rejuvenation heals 14 per tick, 5 ticks = 70.
@@ -933,7 +933,7 @@ let ``a heal over time heals each tick`` () =
 let ``area damage hits hostiles but not allies`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
   let before = (mobOf w).Health
-  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.arcaneExplosion w
+  let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.arcaneExplosion w
   Assert.True((mobOf w).Health < before)
   let dps = w.Entities |> List.find (fun e -> e.Id = EntityId 2)
   Assert.Equal(1000, dps.Health)
@@ -946,7 +946,7 @@ let ``a guaranteed crit deals 150 percent`` () =
     |> SimState.mapEntity (EntityId 1) (fun e -> { e with CritChanceBp = 10000 })
 
   let before = (mobOf w).Health
-  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.heroicStrike w
+  let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.heroicStrike w
   let dealt = before - (mobOf w).Health
   // Heroic Strike rolls 22..30; a crit takes it to 33..45.
   Assert.True(dealt >= 33 && dealt <= 45, sprintf "dealt %d" dealt)

@@ -1,6 +1,7 @@
 namespace WowRoguelike.Core
 
 open WowRoguelike.Core.SimState
+open WowRoguelike.Core.SimCombat
 
 /// The per-Tick pipeline, and movement. Phase order is the contract: player
 /// intent lands before the world reacts to it, and everything acting in a Tick
