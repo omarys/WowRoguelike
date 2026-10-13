@@ -104,3 +104,19 @@ _Avoid_: cancellable, breakable
 **Resource**:
 The pool an ability is paid for from when it resolves. Running out is what ends a fight; a caster with an empty pool can only melee.
 _Avoid_: mana, energy, rage, power
+
+**Armor**:
+The physical-damage mitigation stat, given by the four Armor classes — Plate, Chainmail, Leather, Cloth — which provide armor and nothing else. Spells ignore it.
+_Avoid_: defence, damage reduction
+
+**Dodge**:
+Full avoidance of a physical hit, derived from Agility.
+_Avoid_: evade, parry
+
+**Block**:
+A flat amount subtracted from a physical hit when a block roll succeeds.
+_Avoid_: shield, absorb
+
+**Pushback**:
+The chance that damage interrupts a Cast in progress. Casters resist it.
+_Avoid_: knockback, interrupt

@@ -217,8 +217,9 @@ module SimTick =
         | None -> w
         | Some t ->
           let amount, w = rollRange attack.Min attack.Max w
-          let amount, w = rollCrit e amount w
+          let amount, w = rollCrit e.CritChanceBp amount w
           let total = amount + bonus + e.MeleeDamageBonus
+          let total, w = mitigatePhysical t.Id total w
 
           w
           |> dealDamage t.Id total

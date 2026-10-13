@@ -197,29 +197,82 @@ module SimState =
       let share = effective * 5000 / 10000 / List.length observers
       observers |> List.fold (fun acc m -> addThreat m.Id healer share acc) w
 
+  /// Damage maths: the RNG and mitigation helpers, placed here because
+  /// dealDamage uses them (F# is order-sensitive).
+  let rollRange (lo: int) (hi: int) (w: World) =
+    let v, rng = Rng.drawCombat lo hi w.Rng
+    v, { w with Rng = rng }
+
+  /// Roll for a critical hit against `critChanceBp`. A crit deals 150% damage.
+  let rollCrit (critChanceBp: int) (amount: int) (w: World) : int * World =
+    let roll, w = rollRange 0 9999 w
+    if roll < critChanceBp then amount * 150 / 100, w else amount, w
+
+  /// Base chance (basis points) that damage interrupts a cast in progress (Q5a).
+  let pushbackBaseBp = 1000
+
+  /// Armour: each point is 10 basis points of physical reduction, capped at 75%
+  /// (Q1a).
+  let private armorMitigationBp (armor: int) = min 7500 (armor * 10)
+
+  /// Dodge (full avoid), block (flat value), then armour (linear, capped). This
+  /// is the physical-only pipeline (Q2a/Q4a); spells skip it entirely.
+  let mitigatePhysical (targetId: EntityId) (amount: int) (w: World) : int * World =
+    match tryEntity targetId w with
+    | None -> amount, w
+    | Some t ->
+      if not (alive t) || amount <= 0 then
+        amount, w
+      else
+        let dodgeRoll, w = rollRange 0 9999 w
+
+        if dodgeRoll < t.DodgeChanceBp then
+          (0, w |> logLine (sprintf "%s dodges" t.Name))
+        else
+          let blockRoll, w = rollRange 0 9999 w
+          let blocked = if blockRoll < t.BlockChanceBp then t.BlockValue else 0
+          let effectiveArmor = max 0 (t.Armor - (t.Auras |> List.sumBy Aura.armorReduction))
+          let afterBlock = max 0 (amount - blocked)
+          afterBlock * (10000 - armorMitigationBp effectiveArmor) / 10000, w
+
   /// Damage wakes a sleeper, as does any other hostile action — see `wake`. A
   /// corpse stops moving and stops casting, so it interpolates nowhere.
   let dealDamage (targetId: EntityId) (amount: int) (w: World) =
-    mapEntity
-      targetId
-      (fun t ->
-        // Sunder Armour makes the target take more damage. Applied to all damage
-        // rather than only physical, because there is no physical/spell split yet.
-        let vulnerable = t.Auras |> List.sumBy Aura.physicalVulnerabilityBp
-        let amount = amount * (10000 + vulnerable) / 10000
-        let hp = max 0 (t.Health - amount)
+    let w =
+      mapEntity
+        targetId
+        (fun t ->
+          let hp = max 0 (t.Health - amount)
 
-        { t with
-            Health = hp
-            Auras = t.Auras |> List.filter (fun a -> not (Aura.endsOnHostileAction a))
-            Casting = if hp = 0 then None else t.Casting
-            Goal = if hp = 0 then None else t.Goal
-            Path = if hp = 0 then [] else t.Path
-            StallTicks = if hp = 0 then ticks 0 else t.StallTicks
-            Destination = if hp = 0 then None else t.Destination
-            MoveTicksLeft = if hp = 0 then ticks 0 else t.MoveTicksLeft
-            MoveTicksTotal = if hp = 0 then ticks 0 else t.MoveTicksTotal })
+          { t with
+              Health = hp
+              Auras = t.Auras |> List.filter (fun a -> not (Aura.endsOnHostileAction a))
+              Casting = if hp = 0 then None else t.Casting
+              Goal = if hp = 0 then None else t.Goal
+              Path = if hp = 0 then [] else t.Path
+              StallTicks = if hp = 0 then ticks 0 else t.StallTicks
+              Destination = if hp = 0 then None else t.Destination
+              MoveTicksLeft = if hp = 0 then ticks 0 else t.MoveTicksLeft
+              MoveTicksTotal = if hp = 0 then ticks 0 else t.MoveTicksTotal })
+        w
+
+    // Pushback: damage can interrupt an interruptible cast in progress, reduced
+    // by the target's resistance (Q5a).
+    if amount <= 0 then
       w
+    else
+      match tryEntity targetId w with
+      | Some t when alive t && (t.Casting |> Option.exists (fun c -> c.Ability.Interruptible)) ->
+        let roll, w = rollRange 0 9999 w
+        let chance = pushbackBaseBp * (10000 - t.PushbackResistanceBp) / 10000
+
+        if roll < chance then
+          w
+          |> mapEntity targetId (fun e -> { e with Casting = None })
+          |> logLine (sprintf "%s's cast is interrupted by damage" t.Name)
+        else
+          w
+      | _ -> w
 
   let healEntity (targetId: EntityId) (amount: int) (w: World) =
     mapEntity targetId (fun t -> { t with Health = min t.MaxHealth (t.Health + amount) }) w
@@ -227,16 +280,6 @@ module SimState =
   // =========================================================================
   // Effects
   // =========================================================================
-
-  let rollRange (lo: int) (hi: int) (w: World) =
-    let v, rng = Rng.drawCombat lo hi w.Rng
-    v, { w with Rng = rng }
-
-  /// Roll for a critical hit against the attacker's Agility-derived chance. A
-  /// crit deals 150% damage.
-  let rollCrit (attacker: Entity) (amount: int) (w: World) : int * World =
-    let roll, w = rollRange 0 9999 w
-    if roll < attacker.CritChanceBp then amount * 150 / 100, w else amount, w
 
   let internal nameOf (id: EntityId) (w: World) =
     tryEntity id w |> Option.map (fun e -> e.Name) |> Option.defaultValue "?"
@@ -260,9 +303,18 @@ module SimState =
         match effect with
         | Damage(lo, hi) ->
           let amount, w = rollRange lo hi w
-          let amount, w = rollCrit actor amount w
+          let critBonus = if ability.Name = "Backstab" then actor.BackstabCritBonusBp else 0
+          let amount, w = rollCrit (actor.CritChanceBp + critBonus) amount w
+          let amount, w = mitigatePhysical targetId amount w
           let w = dealDamage targetId amount w
           // Only the Party builds threat on Mobs.
+          let w = if actor.Faction = Party then addThreat targetId actor amount w else w
+          w |> logLine (sprintf "%s hits %s for %d" actor.Name targetName amount)
+
+        | SpellDamage(lo, hi) ->
+          let amount, w = rollRange lo hi w
+          let amount, w = rollCrit actor.CritChanceBp amount w
+          let w = dealDamage targetId amount w
           let w = if actor.Faction = Party then addThreat targetId actor amount w else w
           w |> logLine (sprintf "%s hits %s for %d" actor.Name targetName amount)
 
@@ -345,9 +397,10 @@ module SimState =
 
         | AreaDamage(radius, lo, hi) ->
           // One roll and one crit for the whole area, applied to every hostile
-          // within `radius` of the actor. No friendly fire.
+          // within `radius` of the actor. No friendly fire, and not mitigated by
+          // armour (spell).
           let amount, w = rollRange lo hi w
-          let amount, w = rollCrit actor amount w
+          let amount, w = rollCrit actor.CritChanceBp amount w
 
           w.Entities
           |> List.filter (fun e ->
@@ -412,12 +465,12 @@ module SimState =
             |> logLine (sprintf "%s casts a heal-over-time on %s" actor.Name t.Name)
           | None -> w
 
-        | Weaken(duration, bp) ->
+        | Sunder(duration, reduction) ->
           match tryEntity targetId w with
           | Some t ->
             w
             |> mapEntity targetId (fun e ->
-              { e with Auras = Aura.refresh (Weakened(duration, bp)) e.Auras })
+              { e with Auras = Aura.refresh (Sundered(duration, reduction)) e.Auras })
             |> logLine (sprintf "%s sunders %s" actor.Name t.Name)
           | None -> w
 

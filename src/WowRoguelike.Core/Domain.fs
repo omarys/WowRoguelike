@@ -131,9 +131,9 @@ type Aura =
   | Polymorphed of remaining: int<tick>
   /// A heal-over-time. heals `healPerTick` every Tick.
   | Rejuvenation of remaining: int<tick> * healPerTick: int
-  /// Sunder Armour. Takes extra physical damage, in basis points. Refreshed by
-  /// another application rather than stacking multiplicatively.
-  | Weakened of remaining: int<tick> * physicalDamageTakenBp: int
+  /// Sunder Armour. Reduces the target's armour by a flat amount. Refreshed by
+  /// another application rather than stacking.
+  | Sundered of remaining: int<tick> * armorReduction: int
 
 /// Every case of `Aura` is matched in exactly one place — here. Everywhere else
 /// asks this module a question, so adding an aura breaks compilation in this
@@ -149,7 +149,7 @@ module Aura =
     | Rooted r when r > ticks 1 -> Some(Rooted(r - ticks 1))
     | Polymorphed r when r > ticks 1 -> Some(Polymorphed(r - ticks 1))
     | Rejuvenation(r, n) when r > ticks 1 -> Some(Rejuvenation(r - ticks 1, n))
-    | Weakened(r, bp) when r > ticks 1 -> Some(Weakened(r - ticks 1, bp))
+    | Sundered(r, reduction) when r > ticks 1 -> Some(Sundered(r - ticks 1, reduction))
     | _ -> None
 
   let describe =
@@ -160,7 +160,7 @@ module Aura =
     | Rooted r -> sprintf "root(%d)" r
     | Polymorphed r -> sprintf "poly(%d)" r
     | Rejuvenation(r, n) -> sprintf "rejuv(%d,+%d)" r n
-    | Weakened(r, bp) -> sprintf "weaken(%d,%d)" r bp
+    | Sundered(r, reduction) -> sprintf "sunder(%d,-%d)" r reduction
 
   let isSleeping =
     function
@@ -225,38 +225,41 @@ module Aura =
     | Rooted _ -> 3
     | Polymorphed _ -> 4
     | Rejuvenation _ -> 5
-    | Weakened _ -> 6
+    | Sundered _ -> 6
 
   /// Prepend `a`, dropping any existing aura of the same kind, so a re-application
   /// refreshes rather than stacks.
   let refresh (a: Aura) (auras: Aura list) =
     a :: (auras |> List.filter (fun x -> kind x <> kind a))
 
-  /// Extra physical damage taken, in basis points (Sunder Armour). Summed over
-  /// auras, so stacked Sunder adds up rather than replacing.
-  let physicalVulnerabilityBp =
+  /// Flat armour reduction from Sunder Armour, summed over auras.
+  let armorReduction =
     function
-    | Weakened(_, bp) -> bp
+    | Sundered(_, reduction) -> reduction
     | _ -> 0
 
 /// The closed vocabulary of mechanics an Ability can have (Q28b). Adding a new
 /// *mechanic* means adding a case here; adding a new *ability* means writing a
 /// record in Content.fs and no code at all.
 type Effect =
+  /// Physical damage, mitigated by armour, dodge and block.
   | Damage of min: int * max: int
+  /// Spell damage, mitigated by nothing (Q2a).
+  | SpellDamage of min: int * max: int
   | Heal of min: int * max: int
   | Interrupt
   | Sleep of duration: int<tick>
   | Shapeshift of form: Form * duration: int<tick> * bonusDamage: int
   | Taunt
-  /// Damage every hostile within `radius` tiles of the caster. No friendly fire.
+  /// Spell damage to every hostile within `radius` tiles of the caster. No
+  /// friendly fire, and not mitigated by armour.
   | AreaDamage of radius: int * min: int * max: int
   | Stun of duration: int<tick>
   | Root of duration: int<tick>
   | Polymorph of duration: int<tick>
   | HealOverTime of duration: int<tick> * healPerTick: int
-  /// Sunder Armour: extra physical damage taken, in basis points.
-  | Weaken of duration: int<tick> * physicalDamageTakenBp: int
+  /// Sunder Armour: reduce the target's armour by a flat amount.
+  | Sunder of duration: int<tick> * armorReduction: int
   /// Flat threat on the target, for abilities that taunt without forcing.
   | Threat of amount: int
 
@@ -313,6 +316,45 @@ module Stats =
       Stamina = s.Stamina * bp / 10000
       Intellect = s.Intellect * bp / 10000
       Spirit = s.Spirit * bp / 10000 }
+
+/// The four armour classes. Provide armour only, no stats.
+type ArmorClass =
+  | Plate
+  | Chainmail
+  | Leather
+  | Cloth
+
+module ArmorClass =
+
+  /// Base armour per class. Agility adds a little on top, traits add the rest.
+  let baseArmor =
+    function
+    | Plate -> 500
+    | Chainmail -> 350
+    | Leather -> 250
+    | Cloth -> 80
+
+/// Skill-tree bonuses that are neither stats nor party Buffs. Mostly zero; a
+/// class's trait record fills in its specialisations.
+type Traits =
+  { CritBonusBp: int
+    DodgeBonusBp: int
+    ArmorBonus: int
+    BlockChanceBp: int
+    BlockValue: int
+    PushbackResistanceBp: int
+    BackstabCritBonusBp: int }
+
+module Traits =
+
+  let none =
+    { CritBonusBp = 0
+      DodgeBonusBp = 0
+      ArmorBonus = 0
+      BlockChanceBp = 0
+      BlockValue = 0
+      PushbackResistanceBp = 0
+      BackstabCritBonusBp = 0 }
 
 type Entity =
   { Id: EntityId
@@ -372,6 +414,19 @@ type Entity =
     CritChanceBp: int
     /// Flat bonus to melee damage. Derived from Strength.
     MeleeDamageBonus: int
+    /// Current armour, reduced by Sunder, raised by traits and agility. Mitigates
+    /// physical damage only (Q2a), linear and capped at 75% (Q1a).
+    Armor: int
+    ArmorClass: ArmorClass
+    /// Full avoidance of a physical hit, agility-derived (Q4a).
+    DodgeChanceBp: int
+    /// A flat amount subtracted from a blocked hit (Q4a).
+    BlockChanceBp: int
+    BlockValue: int
+    /// Reduces the chance damage interrupts a cast in progress (Q5a).
+    PushbackResistanceBp: int
+    /// Extra crit chance on Backstab (Rogue trait).
+    BackstabCritBonusBp: int
     /// False until something engages it; the threat table starts at zero on
     /// entering combat.
     Engaged: bool

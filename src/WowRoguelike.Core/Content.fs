@@ -71,7 +71,7 @@ module Content =
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ Damage(28, 42) ] }
+      Effects = [ SpellDamage(28, 42) ] }
 
   let healingTouch =
     { Name = "Healing Touch"
@@ -177,7 +177,7 @@ module Content =
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ Damage(48, 66) ] }
+      Effects = [ SpellDamage(48, 66) ] }
 
   let arcaneShot =
     { Name = "Arcane Shot"
@@ -200,7 +200,7 @@ module Content =
       Interruptible = false
       Range = 1
       TargetKind = Foe
-      Effects = [ Weaken(secTicks 20.0, 1000); Threat(200) ] }
+      Effects = [ Sunder(secTicks 20.0, 100); Threat(200) ] }
 
   let shieldBash =
     { Name = "Shield Bash"
@@ -254,7 +254,7 @@ module Content =
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ Damage(38, 52) ] }
+      Effects = [ SpellDamage(38, 52) ] }
 
   let magicMissile =
     { Name = "Magic Missile"
@@ -264,7 +264,7 @@ module Content =
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ Damage(24, 34) ] }
+      Effects = [ SpellDamage(24, 34) ] }
 
   let arcaneExplosion =
     { Name = "Arcane Explosion"
@@ -386,6 +386,13 @@ module Content =
       Stats = Stats.zero
       CritChanceBp = 0
       MeleeDamageBonus = 0
+      Armor = 0
+      ArmorClass = Cloth
+      DodgeChanceBp = 0
+      BlockChanceBp = 0
+      BlockValue = 0
+      PushbackResistanceBp = 0
+      BackstabCritBonusBp = 0
       Engaged = true
       CallForHelpBelowHealthPct = None
       HasCalledForHelp = false }
@@ -430,17 +437,28 @@ module Content =
       Stats = Stats.zero
       CritChanceBp = 0
       MeleeDamageBonus = 0
+      Armor = 0
+      ArmorClass = Cloth
+      DodgeChanceBp = 0
+      BlockChanceBp = 0
+      BlockValue = 0
+      PushbackResistanceBp = 0
+      BackstabCritBonusBp = 0
       Engaged = false
       CallForHelpBelowHealthPct = callForHelpBelowPct
       HasCalledForHelp = false }
 
   /// Derive combat values from the five stats (Q1a). Faithful in shape, not in
   /// scale — these are pacing placeholders.
-  let private derive (s: Stats) =
+  let private derive (armorClass: ArmorClass) (traits: Traits) (s: Stats) =
     {| MaxHealth = s.Stamina * 10
        MaxResource = s.Intellect * 5
        RegenPerTick = s.Spirit / 10
-       CritChanceBp = s.Agility * 5
+       CritChanceBp = s.Agility * 5 + traits.CritBonusBp
+       DodgeChanceBp = s.Agility * 3 + traits.DodgeBonusBp
+       Armor = ArmorClass.baseArmor armorClass + s.Agility / 4 + traits.ArmorBonus
+       BlockChanceBp = traits.BlockChanceBp
+       BlockValue = traits.BlockValue
        MeleeBonus = s.Strength / 5 |}
 
   /// The party-wide passives, one per class present (Q2a).
@@ -461,13 +479,15 @@ module Content =
     (id: int)
     (name: string)
     (role: Role)
+    (armorClass: ArmorClass)
+    (traits: Traits)
     (stats: Stats)
     (attack: AutoAttack)
     (threatBp: int)
     (abilities: Ability list)
     (pos: Pos)
     : Entity =
-    let d = derive (buffed stats)
+    let d = derive armorClass traits (buffed stats)
 
     { Id = EntityId id
       Name = name
@@ -499,6 +519,13 @@ module Content =
       Stats = stats
       CritChanceBp = d.CritChanceBp
       MeleeDamageBonus = d.MeleeBonus
+      Armor = d.Armor
+      ArmorClass = armorClass
+      DodgeChanceBp = d.DodgeChanceBp
+      BlockChanceBp = d.BlockChanceBp
+      BlockValue = d.BlockValue
+      PushbackResistanceBp = traits.PushbackResistanceBp
+      BackstabCritBonusBp = traits.BackstabCritBonusBp
       Engaged = true
       CallForHelpBelowHealthPct = None
       HasCalledForHelp = false }
@@ -507,38 +534,53 @@ module Content =
   // The encounter
   // =========================================================================
 
+  // Skill-tree traits, distinct from the party Buffs: the "assumed" per-class
+  // bonuses. Warrior's threat is covered by the Tank stance, not here.
+  let private warriorTraits =
+    { Traits.none with
+        ArmorBonus = 150
+        BlockChanceBp = 800
+        BlockValue = 30 }
+
+  let private rogueTraits = { Traits.none with BackstabCritBonusBp = 6000 }
+  let private casterTraits = { Traits.none with PushbackResistanceBp = 8000 }
+
   let private warrior =
-    heroStats 1 "Warrior" Tank { Strength = 100; Agility = 50; Stamina = 90; Intellect = 60; Spirit = 20 } { Min = 18; Max = 26; Ticks = secTicks 2.0; Range = 1 } tankStanceBp [ taunt; heroicStrike; sunderArmor; shieldBash ] { X = 1; Y = 5 }
+    heroStats 1 "Warrior" Tank Plate warriorTraits { Strength = 100; Agility = 50; Stamina = 90; Intellect = 60; Spirit = 20 } { Min = 18; Max = 26; Ticks = secTicks 2.0; Range = 1 } tankStanceBp [ taunt; heroicStrike; sunderArmor; shieldBash ] { X = 1; Y = 5 }
 
   let private priest =
-    heroStats 2 "Priest" Healer { Strength = 20; Agility = 30; Stamina = 64; Intellect = 180; Spirit = 200 } { Min = 6; Max = 10; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ heal; renew ] { X = 1; Y = 6 }
+    heroStats 2 "Priest" Healer Cloth casterTraits { Strength = 20; Agility = 30; Stamina = 64; Intellect = 180; Spirit = 200 } { Min = 6; Max = 10; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ heal; renew ] { X = 1; Y = 6 }
 
   let private rogue =
-    heroStats 3 "Rogue" Dps { Strength = 80; Agility = 120; Stamina = 70; Intellect = 80; Spirit = 20 } { Min = 16; Max = 24; Ticks = secTicks 1.8; Range = 1 } partyThreatBp [ backstab; kick; gouge; cheapShot ] { X = 1; Y = 7 }
+    heroStats 3 "Rogue" Dps Leather rogueTraits { Strength = 80; Agility = 120; Stamina = 70; Intellect = 80; Spirit = 20 } { Min = 16; Max = 24; Ticks = secTicks 1.8; Range = 1 } partyThreatBp [ backstab; kick; gouge; cheapShot ] { X = 1; Y = 7 }
 
   let private mage =
-    heroStats 4 "Mage" Dps { Strength = 20; Agility = 40; Stamina = 60; Intellect = 240; Spirit = 40 } { Min = 4; Max = 8; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ fireball; frostbolt; magicMissile; arcaneExplosion; blizzard; polymorph ] { X = 2; Y = 6 }
+    heroStats 4 "Mage" Dps Cloth casterTraits { Strength = 20; Agility = 40; Stamina = 60; Intellect = 240; Spirit = 40 } { Min = 4; Max = 8; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ fireball; frostbolt; magicMissile; arcaneExplosion; blizzard; polymorph ] { X = 2; Y = 6 }
 
   let private druid =
-    heroStats 5 "Druid" Healer { Strength = 30; Agility = 40; Stamina = 68; Intellect = 200; Spirit = 180 } { Min = 8; Max = 12; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ rejuvenation; regrowth; entanglingRoots ] { X = 2; Y = 7 }
+    heroStats 5 "Druid" Healer Leather casterTraits { Strength = 30; Agility = 40; Stamina = 68; Intellect = 200; Spirit = 180 } { Min = 8; Max = 12; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ rejuvenation; regrowth; entanglingRoots ] { X = 2; Y = 7 }
 
   let private druidOfTheFang id pos =
-    mob id "Druid of the Fang" 480 400 (Some { Min = 12; Max = 18; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; serpentForm; druidsSlumber ] None pos
+    { mob id "Druid of the Fang" 480 400 (Some { Min = 12; Max = 18; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; serpentForm; druidsSlumber ] None pos with
+        Armor = 100 }
 
   /// Raptors close faster than the casting mobs.
   let private raptor id pos =
     { mob id "Raptor" 380 0 (Some { Min = 20; Max = 28; Ticks = secTicks 1.8; Range = 1 }) [] (Some 20) pos with
-        MoveTicksPerTile = secTicks 0.3 }
+        MoveTicksPerTile = secTicks 0.3
+        Armor = 200 }
 
   let private ladyAnacondra id pos =
-    mob id "Lady Anacondra" 900 600 (Some { Min = 14; Max = 20; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos
+    { mob id "Lady Anacondra" 900 600 (Some { Min = 14; Max = 20; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos with
+        Armor = 120 }
 
   /// Lord Serpentis, last of the four Fanglords, reusing the Druid of the Fang
   /// kit rather than inventing one. Mutanus the Devourer is the real final boss of
   /// Wailing Caverns, but his fight is a summoning event with no sourced numbers,
   /// so he is deliberately not stood in for here.
   let private lordSerpentis id pos =
-    mob id "Lord Serpentis" 1200 600 (Some { Min = 16; Max = 24; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos
+    { mob id "Lord Serpentis" 1200 600 (Some { Min = 16; Max = 24; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos with
+        Armor = 150 }
 
   /// Build the Screaming Gully encounter. The only randomness at generation is
   /// which of Anacondra's four positions she takes, drawn from the Generation

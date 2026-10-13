@@ -808,16 +808,90 @@ let ``a move order onto a wall never leaves the entity inside it`` () =
 // Classes, stats, and the new mechanics (the five-class model)
 // ===========================================================================
 
-/// Sunder Armour is a vulnerability stack, not a real armour value, and it makes
-/// the target take more damage (Q4b).
+/// Sunder Armour reduces the target's armour, which lowers its physical
+/// mitigation (Q3a/Q4b).
 [<Fact>]
-let ``sunder armor makes a target take more damage`` () =
-  let w = arena 0 0 { X = 7; Y = 5 }
+let ``sunder armor reduces physical mitigation`` () =
+  let w =
+    arena 0 0 { X = 7; Y = 5 }
+    |> SimState.mapEntity (EntityId 100) (fun e -> { e with Armor = 500 })
+
+  // 500 armour -> 50% mitigation: 100 becomes 50.
+  let before, _ = SimState.mitigatePhysical (EntityId 100) 100 w
+  Assert.Equal(50, before)
+
   let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.sunderArmor w
+  // 500 - 100 = 400 armour -> 40% mitigation: 100 becomes 60.
+  let after, _ = SimState.mitigatePhysical (EntityId 100) 100 w
+  Assert.Equal(60, after)
+
+/// Armour mitigates physical damage and leaves spells alone (Q2a).
+[<Fact>]
+let ``armor mitigates physical but not spell damage`` () =
+  let w =
+    arena 0 0 { X = 7; Y = 5 }
+    |> SimState.mapEntity (EntityId 100) (fun e -> { e with Armor = 500 })
+
+  let physical, _ = SimState.mitigatePhysical (EntityId 100) 100 w
+  Assert.Equal(50, physical)
+
   let before = (mobOf w).Health
-  let w = SimState.dealDamage (EntityId 100) 100 w
-  // 100 * (10000 + 1000) / 10000 = 110
-  Assert.Equal(before - 110, (mobOf w).Health)
+  let w = SimState.resolveAbility (EntityId 1) (EntityId 100) Content.fireball w
+  let dealt = before - (mobOf w).Health
+  // Fireball is a spell: full 48..66, not halved to 24..33.
+  Assert.True(dealt >= 48, sprintf "dealt %d" dealt)
+
+/// Dodge is full avoidance (Q4a).
+[<Fact>]
+let ``dodge avoids a physical hit entirely`` () =
+  let w =
+    arena 0 0 { X = 7; Y = 5 }
+    |> SimState.mapEntity (EntityId 100) (fun e -> { e with DodgeChanceBp = 10000 })
+
+  let amount, _ = SimState.mitigatePhysical (EntityId 100) 100 w
+  Assert.Equal(0, amount)
+
+/// Block subtracts a flat value (Q4a).
+[<Fact>]
+let ``block reduces a hit by the block value`` () =
+  let w =
+    arena 0 0 { X = 7; Y = 5 }
+    |> SimState.mapEntity (EntityId 100) (fun e ->
+      { e with
+          BlockChanceBp = 10000
+          BlockValue = 25 })
+
+  let amount, _ = SimState.mitigatePhysical (EntityId 100) 100 w
+  Assert.Equal(75, amount)
+
+/// Casters resist being interrupted by damage (Q5a): full resistance means the
+/// pushback chance is zero.
+[<Fact>]
+let ``pushback resistance stops damage interrupting a cast`` () =
+  let w =
+    casterWorld Content.lightningBolt
+    |> SimState.mapEntity (EntityId 100) (fun e -> { e with PushbackResistanceBp = 10000 })
+
+  let w = SimState.dealDamage (EntityId 100) 50 w
+  Assert.True((mobOf w).Casting.IsSome)
+
+/// The Rogue's trait gives Backstab 60% extra crit (Q1 of the trait model).
+[<Fact>]
+let ``the rogue's backstab has extra crit chance`` () =
+  let rogue = (Content.gully 1UL).Entities |> List.find (fun e -> e.Name = "Rogue")
+  Assert.Equal(6000, rogue.BackstabCritBonusBp)
+  // Agility 120 through Mark of the Wild becomes 126 -> 630bp crit, +60% backstab.
+  Assert.Equal(6630, rogue.CritChanceBp + rogue.BackstabCritBonusBp)
+
+/// Armour classes give armour and nothing else, as asked.
+[<Fact>]
+let ``armor classes only provide armor`` () =
+  let w = Content.gully 1UL
+  let armorOf name = (w.Entities |> List.find (fun e -> e.Name = name)).Armor
+
+  // Warrior (plate + trait) > Rogue (leather) > Mage (cloth).
+  Assert.True(armorOf "Warrior" > armorOf "Rogue")
+  Assert.True(armorOf "Rogue" > armorOf "Mage")
 
 [<Fact>]
 let ``stun prevents action and is not broken by damage`` () =
