@@ -43,6 +43,10 @@ run = "dotnet run --project src/WowRoguelike.Harness -c Release -- story"
 description = "Generate a floorplan and render it as ASCII; pass a seed to vary it"
 run = "dotnet run --project src/WowRoguelike.Harness -c Release -- dungeon"
 
+[tasks.maps]
+description = "Render the five Wailing Caverns section maps extracted from images/"
+run = "dotnet run --project src/WowRoguelike.Harness -c Release -- maps"
+
 [tasks.bench]
 description = "Tick cost, search cost, and the hand-rolled heap against the BCL's"
 run = "dotnet run --project src/WowRoguelike.Harness -c Release -- bench"

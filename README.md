@@ -63,6 +63,7 @@ mise run run            # play it
 | `mise run test` | The test suite |
 | `mise run runs` | Outcome distribution over 120 seeds — the behavioural regression signal |
 | `mise run story` | Play the Wailing Caverns story (ink); add `-i` to pick choices interactively |
+| `mise run maps` | Render the five Wailing Caverns section maps (extracted from `images/`) |
 | `mise run dungeon` | Generate a floorplan and render it as ASCII |
 | `mise run sim -- <args>` | Any other harness subcommand (`demo`, `fingerprint`, `profile`) |
 | `mise run bench` | Tick cost, search cost, and the hand-rolled heap against the BCL's |
@@ -98,6 +99,7 @@ src/WowRoguelike.Core/      the simulation. MUST NOT reference MonoGame.
   Domain.fs                 types, and the one module that matches every Aura case
   Rng.fs                    splitmix64, split into independent streams
   Dungeon.fs                rooms-and-corridors generation, BFS flood fill
+  Maps.fs                   the five Wailing Caverns section maps, as Grid fixtures
   Content.fs                abilities, the party, encounter templates, World builders
   Heap.fs                   hand-rolled binary min-heap
   Path.fs                   A*, Dijkstra, greedy baseline, line of sight
