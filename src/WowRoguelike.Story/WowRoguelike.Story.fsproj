@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <!--
+    Narrative content, kept out of the deterministic Core: the ink interpreter
+    is a mutable state machine, so it lives here beside the sim rather than in it.
+  -->
+  <ItemGroup>
+    <Compile Include="StoryRunner.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Qyl27.Ink.Engine" Version="1.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Scripts\wailing_caverns.ink.json" />
+    <None Include="Scripts\wailing_caverns.ink" />
+  </ItemGroup>
+
+</Project>

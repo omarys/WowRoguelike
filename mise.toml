@@ -35,6 +35,10 @@ run = "dotnet run --project src/WowRoguelike.Harness -c Release --"
 description = "Outcome distribution over 120 seeds — the behavioural regression signal"
 run = "dotnet run --project src/WowRoguelike.Harness -c Release -- runs 120 4000"
 
+[tasks.story]
+description = "Play the Wailing Caverns story (ink); pass -i for interactive choices"
+run = "dotnet run --project src/WowRoguelike.Harness -c Release -- story"
+
 [tasks.dungeon]
 description = "Generate a floorplan and render it as ASCII; pass a seed to vary it"
 run = "dotnet run --project src/WowRoguelike.Harness -c Release -- dungeon"

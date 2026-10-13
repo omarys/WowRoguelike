@@ -1,6 +1,7 @@
 module WowRoguelike.Harness.Program
 
 open WowRoguelike.Core
+open WowRoguelike.Story
 
 let private usage () =
   printfn "sim demo [seed] [maxTicks]  play the encounter with the scripted party, show the log"
@@ -10,6 +11,7 @@ let private usage () =
   printfn "sim diagnose                bucket SimTick.step cost across a fight and dump the worst tick"
   printfn "sim dungeon [seed]          generate a floorplan and render it as ASCII"
   printfn "sim runs [n] [maxTicks]     run n seeds and summarise outcomes"
+  printfn "sim story [-i]             play the Wailing Caverns story (auto-picks choices)"
 
 let private nth (args: string list) (i: int) = args |> List.tryItem i
 
@@ -89,6 +91,38 @@ let private bench () =
   for n in [ 10000; 100000 ] do
     printfn "%s" (Bench.compareHeaps n)
 
+let private playStory (interactive: bool) =
+  let runner = StoryRunner(StoryRunner.LoadJson "wailing_caverns.ink.json")
+  let mutable running = true
+  let mutable steps = 0
+
+  while running && steps < 1000 do
+    steps <- steps + 1
+
+    for ev in runner.Continue() do
+      match ev with
+      | StoryEvent.Text t -> printfn "%s" t
+      | StoryEvent.Encounter id -> printfn "\n  >>> ENCOUNTER: %s <<<\n" id
+      | StoryEvent.QuestComplete id -> printfn "\n  >>> QUEST COMPLETE: %s <<<\n" id
+      | StoryEvent.Choice opts ->
+        let index, label =
+          if interactive then
+            printfn ""
+            opts |> List.iteri (fun i (_, l) -> printfn "  [%d] %s" i l)
+            printf "choose> "
+
+            match System.Int32.TryParse(System.Console.ReadLine()) with
+            | true, i when i >= 0 && i < List.length opts -> i, snd (List.item i opts)
+            | _ -> 0, snd (List.head opts)
+          else
+            0, snd (List.head opts)
+
+        printfn "\n  > %s\n" label
+        runner.Choose index
+      | StoryEvent.End ->
+        printfn "\n--- the story ends ---"
+        running <- false
+
 [<EntryPoint>]
 let main argv =
   match argv |> Array.toList with
@@ -154,6 +188,9 @@ let main argv =
     0
   | "runs" :: rest ->
     runs (intOf rest 0 20) (intOf rest 1 2000)
+    0
+  | "story" :: rest ->
+    playStory (List.contains "-i" rest || List.contains "--interactive" rest)
     0
   | _ ->
     usage ()

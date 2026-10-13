@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../WowRoguelike.Core/WowRoguelike.Core.fsproj" />
+    <ProjectReference Include="../WowRoguelike.Story/WowRoguelike.Story.fsproj" />
   </ItemGroup>
 
 </Project>

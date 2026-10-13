@@ -3,6 +3,7 @@ module WowRoguelike.Tests
 open Xunit
 open FsCheck.Xunit
 open WowRoguelike.Core
+open WowRoguelike.Story
 
 // ===========================================================================
 // Fixtures
@@ -960,3 +961,32 @@ let ``party buffs raise the mage's resource pool`` () =
   Assert.Equal(1385, mage.MaxResource)
   // Stamina 60 -> x1.05 = 63 -> MaxHealth 630.
   Assert.Equal(630, mage.MaxHealth)
+
+[<Fact>]
+let ``the wailing caverns story plays through all five encounters`` () =
+  let runner = StoryRunner(StoryRunner.LoadJson "wailing_caverns.ink.json")
+  let lines = ResizeArray<string>()
+  let encounters = ResizeArray<string>()
+  let mutable ended = false
+  let mutable steps = 0
+
+  while not ended && steps < 1000 do
+    steps <- steps + 1
+
+    for ev in runner.Continue() do
+      match ev with
+      | StoryEvent.Text t -> lines.Add t
+      | StoryEvent.Encounter id -> encounters.Add id
+      | StoryEvent.Choice _ -> runner.Choose 0
+      | StoryEvent.QuestComplete _ -> ()
+      | StoryEvent.End -> ended <- true
+
+  Assert.True(ended, "the story should terminate")
+
+  Assert.Equal(
+    "lady_anacondra|lord_cobrahn|lord_pythas|lord_serpentis|mutanus",
+    String.concat "|" encounters)
+
+  let all = lines |> String.concat "\n"
+  Assert.Contains("Naralex", all)
+  Assert.Contains("Mutanus", all)

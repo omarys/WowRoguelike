@@ -51,7 +51,7 @@ Requires [mise](https://mise.jdx.dev/) (it installs the right .NET and
 mise install            # .NET 10 + pre-commit, per mise.toml
 mise run hooks          # install the git hooks — do this once
 mise run build          # solution, Release
-mise run test           # 60 tests, ~12s
+mise run test           # 75 tests, ~8s
 mise run run            # play it
 ```
 
@@ -62,6 +62,7 @@ mise run run            # play it
 | `mise run run` | Play the game. MonoGame window shows the arena; **you type commands on stdin** — `party` to list entities, then e.g. `3 8 kick` |
 | `mise run test` | The test suite |
 | `mise run runs` | Outcome distribution over 120 seeds — the behavioural regression signal |
+| `mise run story` | Play the Wailing Caverns story (ink); add `-i` to pick choices interactively |
 | `mise run dungeon` | Generate a floorplan and render it as ASCII |
 | `mise run sim -- <args>` | Any other harness subcommand (`demo`, `fingerprint`, `profile`) |
 | `mise run bench` | Tick cost, search cost, and the hand-rolled heap against the BCL's |
@@ -100,12 +101,14 @@ src/WowRoguelike.Core/      the simulation. MUST NOT reference MonoGame.
   Content.fs                abilities, the party, encounter templates, World builders
   Heap.fs                   hand-rolled binary min-heap
   Path.fs                   A*, Dijkstra, greedy baseline, line of sight
-  SimState.fs               queries, rebuilds, ability and command resolution
+  SimState.fs               queries and rebuild helpers; no dice rolls
+  SimCombat.fs              dice, mitigation, ability and command resolution
   SimTick.fs                movement, and the per-Tick pipeline
   Dump.fs                   World -> canonical text, for golden-replay comparison
   Bench.fs                  timing harness, scripted player, diagnostics
 src/WowRoguelike.Game/      MonoGame shell — window, input, drawing, interpolation
 src/WowRoguelike.Harness/   headless `sim`; references no MonoGame
+src/WowRoguelike.Story/     ink story content + a thin runner over the ink engine
 tests/WowRoguelike.Tests/   xUnit + FsCheck
 ```
 
