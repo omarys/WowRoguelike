@@ -10,7 +10,7 @@ let private usage () =
   printfn "sim profile                 split the tick cost into search frequency and search internals"
   printfn "sim diagnose                bucket SimTick.step cost across a fight and dump the worst tick"
   printfn "sim dungeon [seed]          generate a floorplan and render it as ASCII"
-  printfn "sim maps                   render the five Wailing Caverns section maps"
+  printfn "sim maps                   render the Wailing Caverns rooms extracted from images/"
   printfn "sim runs [n] [maxTicks]     run n seeds and summarise outcomes"
   printfn "sim story [-i]             play the Wailing Caverns story (auto-picks choices)"
 
@@ -131,11 +131,7 @@ let private maps () =
         |> System.String.Concat ]
     |> String.concat "\n"
 
-  [ "screaming-gully", Maps.screamingGully
-    "dreamers-rock", Maps.dreamersRock
-    "pit-of-fangs", Maps.pitOfFangs
-    "crag-of-the-everliving", Maps.cragOfTheEverliving
-    "winding-chasm", Maps.windingChasm ]
+  Maps.rooms
   |> List.iter (fun (name, g) ->
     let entrance = Grid.tiles g |> Seq.filter (Grid.isFloor g) |> Seq.head
     printfn "%s (%dx%d) connected=%b" name g.Width g.Height (Dungeon.isConnected g entrance)

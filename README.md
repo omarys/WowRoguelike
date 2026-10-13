@@ -63,7 +63,7 @@ mise run run            # play it
 | `mise run test` | The test suite |
 | `mise run runs` | Outcome distribution over 120 seeds — the behavioural regression signal |
 | `mise run story` | Play the Wailing Caverns story (ink); add `-i` to pick choices interactively |
-| `mise run maps` | Render the five Wailing Caverns section maps (extracted from `images/`) |
+| `mise run maps` | Render the Wailing Caverns rooms (extracted from `images/`) |
 | `mise run dungeon` | Generate a floorplan and render it as ASCII |
 | `mise run sim -- <args>` | Any other harness subcommand (`demo`, `fingerprint`, `profile`) |
 | `mise run bench` | Tick cost, search cost, and the hand-rolled heap against the BCL's |

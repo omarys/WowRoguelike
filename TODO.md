@@ -5,10 +5,11 @@ Remaining work, newest first. Numbers `#12/#20/#22/#24` are carried over from
 
 ## Story (ink) — just landed, not yet wired to the sim
 
-- [ ] **Wire the five section maps into encounters.** `Maps.fs` holds the five
-      extracted Grids (`screamingGully`, `dreamersRock`, `pitOfFangs`,
-      `cragOfTheEverliving`, `windingChasm`), but no World builder consumes them
-      yet — they are fixtures, not fights.
+- [ ] **Wire the rooms into encounters.** `Maps.rooms` holds seven extracted
+      Wailing Caverns rooms (`the-screaming-gully`, `dreamers-rock` +
+      `-east`, `the-pit-of-fangs`, `crag-of-the-everliving` + `-south`,
+      `the-winding-chasm`), but no World builder consumes them yet — they are
+      fixtures, not fights.
 
 - [ ] **Wire story encounters to the sim.** `start_encounter(boss_id)` only logs
       the id; it does not launch the deterministic fight. Each boss id must map to

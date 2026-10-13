@@ -992,15 +992,10 @@ let ``the wailing caverns story plays through all five encounters`` () =
   Assert.Contains("Mutanus", all)
 
 [<Fact>]
-let ``all five Wailing Caverns section maps are connected`` () =
-  let maps =
-    [ "screaming-gully", Maps.screamingGully
-      "dreamers-rock", Maps.dreamersRock
-      "pit-of-fangs", Maps.pitOfFangs
-      "crag-of-the-everliving", Maps.cragOfTheEverliving
-      "winding-chasm", Maps.windingChasm ]
+let ``every Wailing Caverns room is connected`` () =
+  Assert.Equal(7, Maps.rooms.Length)
 
-  for name, g in maps do
+  for name, g in Maps.rooms do
     let floor = Grid.tiles g |> Seq.filter (Grid.isFloor g) |> Seq.toList
     Assert.False(List.isEmpty floor, sprintf "%s has no walkable floor" name)
     Assert.True(Dungeon.isConnected g (List.head floor), sprintf "%s is not connected" name)

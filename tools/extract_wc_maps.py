@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Color-aware extraction of Wailing Caverns section maps -> ASCII grids.
+"""Extract every Wailing Caverns section map room into a separate Grid fixture.
 
-Classifies each pixel as floor (tan/gold), wall (black/olive rock), or
-green (foliage/water, non-walkable), then optionally cleans speckles/holes
-and reports the connected floor components.
+Each significant connected floor component becomes its own cropped grid (bounding
+box + one-cell wall margin), named <section> for the largest room and
+<section>-<direction> for the rest. Emits Maps.fs.
 """
-import subprocess, sys, collections
+import subprocess, sys
 
 IMAGES = [
     "the-screaming-gully",
@@ -14,32 +14,25 @@ IMAGES = [
     "crag-of-the-everliving",
     "the-winding-chasm",
 ]
+THRESHOLD = 25          # drop components smaller than this (art noise)
 
 def load(path, w, h):
     data = subprocess.run(
         ["magick", path, "-resize", f"{w}x{h}!", "-depth", "8", "rgb:-"],
         capture_output=True, check=True).stdout
-    assert len(data) == w * h * 3, (len(data), w * h * 3)
+    assert len(data) == w * h * 3
     return data
 
 def classify(r, g, b):
     mx = max(r, g, b)
     mn = min(r, g, b)
     if mx < 40:
-        return '#'          # black void
+        return '#'
     if (mx - mn) < 30 and mx < 90:
-        return '#'          # dark olive rock
-    return '.'              # floor: tan, gold, green grass
-
-def neighbors8(grid, x, y):
-    for dy in (-1, 0, 1):
-        for dx in (-1, 0, 1):
-            if dx == 0 and dy == 0:
-                continue
-            yield x + dx, y + dy
+        return '#'
+    return '.'
 
 def cleanup(grid):
-    """Remove 1-pixel floor speckles and fill 1-pixel wall holes, 8-conn."""
     w, h = len(grid[0]), len(grid)
     g = [list(r) for r in grid]
     for _ in range(2):
@@ -47,9 +40,13 @@ def cleanup(grid):
         for y in range(h):
             for x in range(w):
                 floors = 0
-                for nx, ny in neighbors8(g, x, y):
-                    if 0 <= nx < w and 0 <= ny < h and g[ny][nx] == '.':
-                        floors += 1
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        if dx == 0 and dy == 0:
+                            continue
+                        nx, ny = x + dx, y + dy
+                        if 0 <= nx < w and 0 <= ny < h and g[ny][nx] == '.':
+                            floors += 1
                 if g[y][x] == '.' and floors == 0:
                     ng[y][x] = '#'
                 elif g[y][x] != '.' and floors >= 7:
@@ -58,32 +55,9 @@ def cleanup(grid):
     return [''.join(r) for r in g]
 
 def components(grid):
-    """4-connected floor components -> list of sizes."""
     w, h = len(grid[0]), len(grid)
     seen = [[False] * w for _ in range(h)]
-    sizes = []
-    for sy in range(h):
-        for sx in range(w):
-            if grid[sy][sx] != '.' or seen[sy][sx]:
-                continue
-            q = [(sx, sy)]
-            seen[sy][sx] = True
-            n = 0
-            while q:
-                x, y = q.pop()
-                n += 1
-                for nx, ny in ((x+1, y), (x-1, y), (x, y+1), (x, y-1)):
-                    if 0 <= nx < w and 0 <= ny < h and grid[ny][nx] == '.' and not seen[ny][nx]:
-                        seen[ny][nx] = True
-                        q.append((nx, ny))
-            sizes.append(n)
-    return sizes
-
-def keep_largest(grid):
-    """Zero out every floor component except the largest (4-conn)."""
-    w, h = len(grid[0]), len(grid)
-    seen = [[False] * w for _ in range(h)]
-    best = []
+    out = []
     for sy in range(h):
         for sx in range(w):
             if grid[sy][sx] != '.' or seen[sy][sx]:
@@ -98,16 +72,33 @@ def keep_largest(grid):
                     if 0 <= nx < w and 0 <= ny < h and grid[ny][nx] == '.' and not seen[ny][nx]:
                         seen[ny][nx] = True
                         q.append((nx, ny))
-            if len(comp) > len(best):
-                best = comp
-    out = [list('#' * w) for _ in range(h)]
-    for x, y in best:
-        out[y][x] = '.'
-    return [''.join(r) for r in out]
+            out.append(comp)
+    return out
+
+def crop(grid, comp):
+    w, h = len(grid[0]), len(grid)
+    xs = [x for x, _ in comp]
+    ys = [y for _, y in comp]
+    x0, x1 = max(0, min(xs) - 1), min(w - 1, max(xs) + 1)
+    y0, y1 = max(0, min(ys) - 1), min(h - 1, max(ys) + 1)
+    rows = []
+    for y in range(y0, y1 + 1):
+        rows.append(''.join('.' if (x, y) in comp else '#' for x in range(x0, x1 + 1)))
+    return rows
+
+def direction(a, b):
+    ax = sum(x for x, _ in a) / len(a)
+    ay = sum(y for _, y in a) / len(a)
+    bx = sum(x for x, _ in b) / len(b)
+    by = sum(y for _, y in b) / len(b)
+    dx, dy = bx - ax, by - ay
+    if abs(dx) > abs(dy):
+        return 'east' if dx > 0 else 'west'
+    return 'south' if dy > 0 else 'north'
 
 def main():
-    mode = sys.argv[1] if len(sys.argv) > 1 else "diag"
-    w = int(sys.argv[2]) if len(sys.argv) > 2 else 56
+    w = int(sys.argv[1]) if len(sys.argv) > 1 else 56
+    entries = []
     for name in IMAGES:
         path = f"images/{name}.webp"
         info = subprocess.run(
@@ -117,68 +108,46 @@ def main():
         h = round(ih * w / iw)
         data = load(path, w, h)
         rows = []
-        counts = collections.Counter()
         for y in range(h):
             row = []
             for x in range(w):
                 i = (y * w + x) * 3
-                c = classify(data[i], data[i+1], data[i+2])
-                counts[c] += 1
-                row.append(c)
+                row.append(classify(data[i], data[i+1], data[i+2]))
             rows.append(''.join(row))
 
-        final = cleanup(rows)
-        comps = sorted(components(final), reverse=True)
-        if mode == 'largest':
-            final = keep_largest(final)
-            comps = sorted(components(final), reverse=True)
-        print(f"════ {name} ({w}x{h}) floor={counts['.']} wall={counts['#']} components={comps[:8]} ════")
-        for r in final:
-            print(r)
-        print()
+        grid = cleanup(rows)
+        comps = [c for c in components(grid) if len(c) >= THRESHOLD]
+        comps.sort(key=len, reverse=True)
+        for i, comp in enumerate(comps):
+            room = crop(grid, comp)
+            rname = name if i == 0 else f"{name}-{direction(comps[0], comp)}"
+            entries.append((rname, room, len(comp)))
+            print(f"{rname}: {len(comp)} cells, {len(room[0])}x{len(room)}")
 
-    if mode == 'largest':
-        # Emit an F# module with one Grid per section.
-        idents = {
-            "the-screaming-gully": "screamingGully",
-            "dreamers-rock": "dreamersRock",
-            "the-pit-of-fangs": "pitOfFangs",
-            "crag-of-the-everliving": "cragOfTheEverliving",
-            "the-winding-chasm": "windingChasm",
-        }
-        blocks = []
-        for name in IMAGES:
-            path = f"images/{name}.webp"
-            info = subprocess.run(
-                ["magick", "identify", "-format", "%w %h", path],
-                capture_output=True, text=True).stdout.split()
-            iw, ih = int(info[0]), int(info[1])
-            h = round(ih * w / iw)
-            data = load(path, w, h)
-            rows = []
-            for y in range(h):
-                row = []
-                for x in range(w):
-                    i = (y * w + x) * 3
-                    row.append(classify(data[i], data[i+1], data[i+2]))
-                rows.append(''.join(row))
-            final = keep_largest(cleanup(rows))
-            ident = idents[name]
-            rows = '\n        '.join(f'"{r}"' for r in final)
-            blocks.append(f"  /// {name}\n  let {ident} =\n    Grid.ofRows\n      [ {rows} ]")
-        out = f"""namespace WowRoguelike.Core
+    # Emit F#.
+    blocks = []
+    for rname, room, _ in entries:
+        rows = '\n            '.join(f'"{r}"' for r in room)
+        blocks.append(f'      "{rname}",\n        Grid.ofRows\n          [ {rows} ]')
+    body = '\n'.join(blocks)
+    out = f"""namespace WowRoguelike.Core
 
-/// The five Wailing Caverns section maps, extracted from the section art in
-/// images/ (color-aware: near-black and dark-olive are walls; tan, gold and
-/// green are walkable floor) by tools/extract_wc_maps.py, then kept to the
-/// largest connected floor region. These are separate areas, not one dungeon.
+/// Every Wailing Caverns room, extracted from the section art in images/ by
+/// tools/extract_wc_maps.py: near-black and dark-olive are walls; tan, gold and
+/// green are walkable floor. Each connected floor region of at least 25 cells
+/// becomes its own room, cropped to its bounding box with a one-cell wall
+/// margin. Within a section the largest room keeps the section name and the
+/// rest take a compass suffix.
 module Maps =
 
-{chr(10).join(blocks)}
+  /// All extracted rooms, largest-per-section first, each a connected Grid.
+  let rooms : (string * Grid) list =
+    [
+{body}
+    ]
 """
-        with open("/tmp/Maps.fs", "w") as f:
-            f.write(out)
-        print("wrote /tmp/Maps.fs")
-
+    with open("/tmp/Maps.fs", "w") as f:
+        f.write(out)
+    print("wrote /tmp/Maps.fs")
 
 main()
