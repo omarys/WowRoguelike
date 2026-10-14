@@ -1012,3 +1012,7 @@ let ``the stitched Wailing Caverns is connected and every entity stands on floor
   let names = w.Entities |> List.map (fun e -> e.Name)
   Assert.Contains("Lady Anacondra", names)
   Assert.Contains("Lord Serpentis", names)
+  Assert.Contains("Lord Cobrahn", names)
+  Assert.Contains("Lord Pythas", names)
+  Assert.Contains("Naralex", names)
+  Assert.Contains("Mutanus the Devourer", names)

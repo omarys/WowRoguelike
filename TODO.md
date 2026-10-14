@@ -5,18 +5,18 @@ Remaining work, newest first. Numbers `#12/#20/#22/#24` are carried over from
 
 ## Story (ink) — just landed, not yet wired to the sim
 
-- [ ] **Wire the rooms into encounters.** `Maps.stitch` joins the seven rooms
-      into one connected grid and `Content.wailingCaverns` places the party and
-      the existing mobs (Anacondra first, Serpentis in the Pit of Fangs, trash
-      elsewhere). Still missing: Lord Cobrahn, Lord Pythas, Naralex and Mutanus
-      the Devourer are not modelled yet — their rooms get guards as placeholders.
+- [x] **Wire the rooms into encounters.** `Maps.stitch` joins the seven rooms
+      into one connected grid, and `Content.wailingCaverns` places the party and
+      every boss — Anacondra (first cave), Serpentis (Pit of Fangs), Cobrahn and
+      Pythas (Crag), Naralex (Dreamer's Rock), Mutanus (deepest chamber).
+
+- [ ] **Model Naralex and Mutanus properly.** They reuse the Druid of the Fang
+      kit with pacing-only stat blocks. Naralex's Nightmare and Mutanus's
+      summoning event need sourced numbers before real mechanics.
 
 - [ ] **Wire story encounters to the sim.** `start_encounter(boss_id)` only logs
-      the id; it does not launch the deterministic fight. Each boss id must map to
-      a real `Content` encounter. Three bosses have no mob yet — `lord_cobrahn`,
-      `lord_pythas`, `mutanus` — while `lady_anacondra` and `lord_serpentis` exist
-      in `Content.fs`. Add the missing mobs (Mutanus is the real final boss, a
-      summoning event with no sourced numbers).
+      the id; it does not launch the deterministic fight. Map each boss id to a
+      real `Content` encounter and run it when the story reaches it.
 - [ ] **Play the story in the Game shell.** Only the headless harness renders it;
       the MonoGame window has no dialogue or choice UI.
 - [ ] **Source-check the ink dialogue.** Boss/quest names and the Naralex/Nightmare

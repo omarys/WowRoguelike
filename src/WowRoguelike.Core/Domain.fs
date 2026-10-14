@@ -542,7 +542,11 @@ type EncounterMember =
   | DruidOfTheFang
   | Raptor
   | LadyAnacondra
+  | LordCobrahn
+  | LordPythas
   | LordSerpentis
+  | Naralex
+  | Mutanus
 
 /// A fight as data: what to put in a room, and how much room it needs. The
 /// floorplan is generated; the fights are authored (Q21b).

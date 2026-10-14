@@ -18,13 +18,16 @@ namespace WowRoguelike.Core
 ///     Anacondra's spawn      "always appears in the first cave of the Caverns,
 ///                            but spawns in one of four locations around the
 ///                            room"  [Warcraft Wiki, Lady Anacondra]
-///     Lord Serpentis         one of the four Fanglords; his kit here is the
-///                            Druid of the Fang kit, not a separate sourced one
+///     Fanglords              Lady Anacondra, Lord Cobrahn, Lord Pythas and
+///                            Lord Serpentis; each uses the Druid of the Fang
+///                            kit, not a separate sourced one
 ///
 ///   NOT sourced — placeholders, first knobs to turn against real data:
 ///     Lightning Bolt damage range (spells 9532 / 20295)
 ///     every cast time and cooldown in this file
 ///     every health pool, auto-attack range and swing timer
+///     Naralex and Mutanus the Devourer: pacing-only stat blocks. Mutanus's
+///     real fight is a summoning event with no sourced numbers.
 ///
 ///   Our own invention, deliberately: the five Party classes (Warrior, Rogue,
 ///   Mage, Priest, Druid), their stat spreads, and every ability in this file.
@@ -574,13 +577,32 @@ module Content =
     { mob id "Lady Anacondra" 900 600 (Some { Min = 14; Max = 20; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos with
         Armor = 120 }
 
-  /// Lord Serpentis, last of the four Fanglords, reusing the Druid of the Fang
-  /// kit rather than inventing one. Mutanus the Devourer is the real final boss of
-  /// Wailing Caverns, but his fight is a summoning event with no sourced numbers,
-  /// so he is deliberately not stood in for here.
+  /// The four Fanglords share the Druid of the Fang kit — their differences are
+  /// pacing-only health and armour until sourced numbers exist.
   let private lordSerpentis id pos =
     { mob id "Lord Serpentis" 1200 600 (Some { Min = 16; Max = 24; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos with
         Armor = 150 }
+
+  let private lordCobrahn id pos =
+    { mob id "Lord Cobrahn" 1100 600 (Some { Min = 15; Max = 23; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos with
+        Armor = 140 }
+
+  let private lordPythas id pos =
+    { mob id "Lord Pythas" 1000 600 (Some { Min = 14; Max = 22; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos with
+        Armor = 130 }
+
+  /// Naralex, the sleeping dreamer at the heart of the Caverns. His nightmare
+  /// fights back with the Fang kit until a Nightmare mechanic is modelled.
+  let private naralex id pos =
+    { mob id "Naralex" 1500 800 (Some { Min = 12; Max = 18; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos with
+        Armor = 100 }
+
+  /// Mutanus the Devourer, the final boss: a heavy melee aberration with no
+  /// cast. The real fight is a summoning event with no sourced numbers, so this
+  /// is a pacing placeholder.
+  let private mutanus id pos =
+    { mob id "Mutanus the Devourer" 2200 0 (Some { Min = 24; Max = 34; Ticks = secTicks 1.8; Range = 1 }) [] None pos with
+        Armor = 250 }
 
   /// Build the Screaming Gully encounter. The only randomness at generation is
   /// which of Anacondra's four positions she takes, drawn from the Generation
@@ -664,7 +686,11 @@ module Content =
     | DruidOfTheFang -> druidOfTheFang id pos
     | Raptor -> raptor id pos
     | LadyAnacondra -> ladyAnacondra id pos
+    | LordCobrahn -> lordCobrahn id pos
+    | LordPythas -> lordPythas id pos
     | LordSerpentis -> lordSerpentis id pos
+    | Naralex -> naralex id pos
+    | Mutanus -> mutanus id pos
 
   /// Build a Run's World: a generated floorplan with authored fights placed into
   /// it. Generation happens once, at Run creation, and draws only from the
@@ -800,11 +826,16 @@ module Content =
         yield! place "the-pit-of-fangs" lordSerpentis |> Option.toList
         yield! place "the-pit-of-fangs" druidOfTheFang |> Option.toList
         yield! place "the-pit-of-fangs" druidOfTheFang |> Option.toList
-        // Crag of the Everliving — trash; its Fang lord is not yet modelled.
+        // Crag of the Everliving — Lord Cobrahn and Lord Pythas, the other Fanglords.
+        yield! place "crag-of-the-everliving" lordCobrahn |> Option.toList
         yield! place "crag-of-the-everliving" druidOfTheFang |> Option.toList
-        yield! place "crag-of-the-everliving-south" raptor |> Option.toList
-        // Dreamer's Rock — Naralex's grove; guarded until he is modelled.
-        yield! place "dreamers-rock" druidOfTheFang |> Option.toList ]
+        yield! place "crag-of-the-everliving-south" lordPythas |> Option.toList
+        yield! place "crag-of-the-everliving-south" druidOfTheFang |> Option.toList
+        // Dreamer's Rock — Naralex, the dreamer, at the heart.
+        yield! place "dreamers-rock" naralex |> Option.toList
+        yield! place "dreamers-rock" druidOfTheFang |> Option.toList
+        // The deepest chamber — Mutanus the Devourer.
+        yield! place "dreamers-rock-east" mutanus |> Option.toList ]
 
     { Tick = ticks 0
       Grid = grid
