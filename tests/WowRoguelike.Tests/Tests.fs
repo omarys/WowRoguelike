@@ -999,3 +999,16 @@ let ``every Wailing Caverns room is connected`` () =
     let floor = Grid.tiles g |> Seq.filter (Grid.isFloor g) |> Seq.toList
     Assert.False(List.isEmpty floor, sprintf "%s has no walkable floor" name)
     Assert.True(Dungeon.isConnected g (List.head floor), sprintf "%s is not connected" name)
+
+[<Fact>]
+let ``the stitched Wailing Caverns is connected and every entity stands on floor`` () =
+  let w = Content.wailingCaverns 1UL
+  let partyPos = (w.Entities |> List.find (fun e -> e.Faction = Party)).Pos
+  Assert.True(Dungeon.isConnected w.Grid partyPos, "stitched dungeon should be connected")
+
+  for e in w.Entities do
+    Assert.True(Grid.isFloor w.Grid e.Pos, sprintf "%s stands on a wall" e.Name)
+
+  let names = w.Entities |> List.map (fun e -> e.Name)
+  Assert.Contains("Lady Anacondra", names)
+  Assert.Contains("Lord Serpentis", names)

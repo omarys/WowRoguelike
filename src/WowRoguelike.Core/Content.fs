@@ -750,3 +750,66 @@ module Content =
           Combat = Rng.stream seed Rng.CombatStream }
       PartyBuffs = partyBuffs
       Log = [] }
+
+  /// The stitched Wailing Caverns: the seven extracted rooms joined into one
+  /// continuous dungeon and populated from the lore table. Placement is by the
+  /// room each fight belongs to, not by template-fitting a generated floorplan.
+  ///
+  /// Missing bosses (Lord Cobrahn, Lord Pythas, Naralex, Mutanus) are TODO;
+  /// their rooms get guards until they are modelled.
+  let wailingCaverns (seed: uint64) : World =
+    let grid, _, roomFloors = Maps.stitch ()
+    let occupied = System.Collections.Generic.HashSet<Pos>()
+    let mutable nextId = 6
+
+    let takeId () =
+      let id = nextId
+      nextId <- nextId + 1
+      id
+
+    let freeTiles room =
+      roomFloors.[room] |> List.filter (fun p -> not (occupied.Contains p))
+
+    let place room (mk: int -> Pos -> Entity) =
+      match freeTiles room with
+      | p :: _ ->
+        occupied.Add p |> ignore
+        Some(mk (takeId ()) p)
+      | [] -> None
+
+    let partyTiles = freeTiles "the-screaming-gully" |> List.truncate 5
+
+    let party =
+      List.map2
+        (fun (e: Entity) p -> { e with Pos = p })
+        [ warrior; priest; rogue; mage; druid ]
+        partyTiles
+
+    for p in partyTiles do
+      occupied.Add p |> ignore
+
+    let mobs =
+      [ // Screaming Gully — the first cave: Lady Anacondra and her guards.
+        yield! place "the-screaming-gully" ladyAnacondra |> Option.toList
+        yield! place "the-screaming-gully" druidOfTheFang |> Option.toList
+        yield! place "the-screaming-gully" druidOfTheFang |> Option.toList
+        // Winding Chasm — a connecting passage of deviate wildlife.
+        yield! place "the-winding-chasm" raptor |> Option.toList
+        yield! place "the-winding-chasm" druidOfTheFang |> Option.toList
+        // Pit of Fangs — Lord Serpentis and his cult.
+        yield! place "the-pit-of-fangs" lordSerpentis |> Option.toList
+        yield! place "the-pit-of-fangs" druidOfTheFang |> Option.toList
+        yield! place "the-pit-of-fangs" druidOfTheFang |> Option.toList
+        // Crag of the Everliving — trash; its Fang lord is not yet modelled.
+        yield! place "crag-of-the-everliving" druidOfTheFang |> Option.toList
+        yield! place "crag-of-the-everliving-south" raptor |> Option.toList
+        // Dreamer's Rock — Naralex's grove; guarded until he is modelled.
+        yield! place "dreamers-rock" druidOfTheFang |> Option.toList ]
+
+    { Tick = ticks 0
+      Grid = grid
+      Entities = party @ mobs
+      Pending = []
+      Rng = Rng.streamsOf seed
+      PartyBuffs = partyBuffs
+      Log = [] }

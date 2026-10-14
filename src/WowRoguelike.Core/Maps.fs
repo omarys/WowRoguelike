@@ -296,3 +296,107 @@ module Maps =
             "#####......###########################################"
             "######################################################" ]
     ]
+
+  // =========================================================================
+  // Stitching — one continuous dungeon from the separate rooms
+  // =========================================================================
+
+  /// Route order, entrance (first) to deepest (last). Each secondary chamber
+  /// (-south, -east) sits directly after its parent, so joining consecutive
+  /// rooms yields a single path rather than a tree.
+  let private route =
+    [ "the-screaming-gully"
+      "the-winding-chasm"
+      "the-pit-of-fangs"
+      "crag-of-the-everliving"
+      "crag-of-the-everliving-south"
+      "dreamers-rock"
+      "dreamers-rock-east" ]
+
+  let private gridOf name = rooms |> List.find (fun (n, _) -> n = name) |> snd
+
+  let private floorTiles (g: Grid) : Pos list =
+    Grid.tiles g |> Seq.filter (Grid.isFloor g) |> Seq.toList
+
+  let private leftmost (g: Grid) = floorTiles g |> List.minBy (fun p -> p.X)
+  let private rightmost (g: Grid) = floorTiles g |> List.maxBy (fun p -> p.X)
+
+  /// Carve a 2-wide horizontal-then-vertical corridor, the same shape as
+  /// Dungeon's, mutating `g` (the one place Q8 sanctions mutation).
+  let private carve (g: Grid) (from: Pos) (target: Pos) =
+    let setFloor (p: Pos) =
+      for dy in 0 .. 1 do
+        for dx in 0 .. 1 do
+          let q = { X = p.X + dx; Y = p.Y + dy }
+
+          if Grid.inBounds g q then
+            g.Walls.[q.Y * g.Width + q.X] <- false
+
+    let stepX = sign (target.X - from.X)
+    let stepY = sign (target.Y - from.Y)
+    let mutable p = from
+
+    while p.X <> target.X do
+      setFloor p
+      p <- { p with X = p.X + stepX }
+
+    while p.Y <> target.Y do
+      setFloor p
+      p <- { p with Y = p.Y + stepY }
+
+    setFloor p
+
+  /// Stitch the rooms left-to-right in route order, joined by 2-wide
+  /// corridors. Deterministic. Returns the grid, the entrance tile (the first
+  /// room's leftmost floor), and each room's floor tiles in canvas coordinates.
+  let stitch () : Grid * Pos * Map<string, Pos list> =
+    let margin = 1
+    let ordered = route |> List.map (fun n -> n, gridOf n)
+
+    let width =
+      (ordered |> List.sumBy (fun (_, g) -> g.Width)) + margin * (List.length ordered + 1)
+
+    let height =
+      margin * 2 + (ordered |> List.map (fun (_, g) -> g.Height) |> List.max)
+
+    let canvas = Grid.createSolid width height
+    let offsets = ResizeArray<Pos>()
+    let mutable x = margin
+
+    for _, g in ordered do
+      for y in 0 .. g.Height - 1 do
+        for cx in 0 .. g.Width - 1 do
+          let src = { X = cx; Y = y }
+
+          if Grid.isFloor g src then
+            let dst = { X = x + cx; Y = margin + y }
+            canvas.Walls.[dst.Y * width + dst.X] <- false
+
+      offsets.Add { X = x; Y = margin }
+      x <- x + g.Width + margin
+
+    for i in 0 .. List.length ordered - 2 do
+      let _, gA = ordered.[i]
+      let _, gB = ordered.[i + 1]
+      let oA = offsets.[i]
+      let oB = offsets.[i + 1]
+
+      carve
+        canvas
+        { X = oA.X + (rightmost gA).X; Y = oA.Y + (rightmost gA).Y }
+        { X = oB.X + (leftmost gB).X; Y = oB.Y + (leftmost gB).Y }
+
+    let entrance =
+      let _, g0 = ordered.[0]
+      let o0 = offsets.[0]
+      let l = leftmost g0
+      { X = o0.X + l.X; Y = o0.Y + l.Y }
+
+    let roomFloors =
+      ordered
+      |> List.mapi (fun i (name, g) ->
+        let o = offsets.[i]
+        name, floorTiles g |> List.map (fun p -> { X = o.X + p.X; Y = o.Y + p.Y }))
+      |> Map.ofList
+
+    canvas, entrance, roomFloors

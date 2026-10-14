@@ -11,6 +11,7 @@ let private usage () =
   printfn "sim diagnose                bucket SimTick.step cost across a fight and dump the worst tick"
   printfn "sim dungeon [seed]          generate a floorplan and render it as ASCII"
   printfn "sim maps                   render the Wailing Caverns rooms extracted from images/"
+  printfn "sim wc                     render the stitched Wailing Caverns dungeon"
   printfn "sim runs [n] [maxTicks]     run n seeds and summarise outcomes"
   printfn "sim story [-i]             play the Wailing Caverns story (auto-picks choices)"
 
@@ -124,18 +125,25 @@ let private playStory (interactive: bool) =
         printfn "\n--- the story ends ---"
         running <- false
 
-let private maps () =
-  let render (g: Grid) =
-    [ for y in 0 .. g.Height - 1 ->
-        [ for x in 0 .. g.Width - 1 -> if Grid.isWall g { X = x; Y = y } then '#' else '.' ]
-        |> System.String.Concat ]
-    |> String.concat "\n"
+let private renderGrid (g: Grid) =
+  [ for y in 0 .. g.Height - 1 ->
+      [ for x in 0 .. g.Width - 1 -> if Grid.isWall g { X = x; Y = y } then '#' else '.' ]
+      |> System.String.Concat ]
+  |> String.concat "\n"
 
+let private maps () =
   Maps.rooms
   |> List.iter (fun (name, g) ->
     let entrance = Grid.tiles g |> Seq.filter (Grid.isFloor g) |> Seq.head
     printfn "%s (%dx%d) connected=%b" name g.Width g.Height (Dungeon.isConnected g entrance)
-    printfn "%s\n" (render g))
+    printfn "%s\n" (renderGrid g))
+
+let private wc () =
+  let w = Content.wailingCaverns 1UL
+  let party = w.Entities |> List.filter (fun e -> e.Faction = Party) |> List.length
+  let hostiles = w.Entities |> List.filter (fun e -> e.Faction = Hostile) |> List.length
+  printfn "stitched %dx%d  party=%d hostiles=%d" w.Grid.Width w.Grid.Height party hostiles
+  printfn "%s" (renderGrid w.Grid)
 
 [<EntryPoint>]
 let main argv =
@@ -163,6 +171,9 @@ let main argv =
     0
   | [ "maps" ] ->
     maps ()
+    0
+  | [ "wc" ] ->
+    wc ()
     0
   | [ "diagnose" ] ->
     printfn "%s" (Bench.searchFailureCost 200)
