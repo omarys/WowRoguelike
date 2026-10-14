@@ -150,6 +150,29 @@ module SimState =
     | Some p -> Some p
     | None -> m.Target |> Option.bind (aliveMember w)
 
+  /// The entities an ability can be cast at right now: alive, the faction its
+  /// TargetKind expects, and within range and line of sight. This is the whole
+  /// targeting rule — heals see every party member in reach, damaging abilities
+  /// see every enemy in view.
+  let validTargets (actorId: EntityId) (abilityName: string) (w: World) : Entity list =
+    match tryEntity actorId w with
+    | None -> []
+    | Some actor ->
+      match actor.Abilities |> List.tryFind (fun a -> a.Name = abilityName) with
+      | None -> []
+      | Some ability ->
+        let factionOk (t: Entity) =
+          match ability.TargetKind with
+          | Self -> t.Id = actor.Id
+          | Foe -> t.Faction <> actor.Faction
+          | Ally -> t.Faction = actor.Faction
+
+        w.Entities
+        |> List.filter (fun t ->
+          alive t
+          && factionOk t
+          && (ability.TargetKind = Self || canReach ability.Range actor t w))
+
   // =========================================================================
   // Record rebuilds (the naive path)
   // =========================================================================

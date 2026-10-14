@@ -17,6 +17,7 @@ type private ShellRequest =
   | TickOnce
   | ShowParty
   | ShowState
+  | ShowTargets of EntityId * string
   | Issue of CommandKind
 
 module private Parse =
@@ -61,6 +62,10 @@ module private Parse =
       match idOf actor, Int32.TryParse x, Int32.TryParse y with
       | Some id, (true, px), (true, py) -> Some(Issue(MoveTo(id, { X = px; Y = py })))
       | _ -> None
+    | [| "targets"; actor; abilityKey |] ->
+      match idOf actor with
+      | Some id -> abilityName id abilityKey |> Option.map (fun name -> ShowTargets(id, name))
+      | None -> None
     | [| actor; target; abilityKey |] ->
       match idOf actor, idOf target with
       | Some a, Some tg ->
@@ -274,6 +279,16 @@ type RoguelikeGame() as this =
       | Some ShowState ->
         Console.WriteLine()
         Console.WriteLine(Dump.world world)
+      | Some(ShowTargets(actorId, abilityName)) ->
+        Console.WriteLine()
+        Console.WriteLine(sprintf "valid targets for %s:" abilityName)
+
+        SimState.validTargets actorId abilityName world
+        |> List.iter (fun t ->
+          Console.WriteLine(
+            sprintf "  %-3d %-18s hp %4d/%-4d" (let (EntityId i) = t.Id in i) t.Name t.Health t.MaxHealth))
+
+        Console.WriteLine()
       | Some(Issue kind) -> pending.Add kind
       | None -> Console.WriteLine(sprintf "? %s" line)
 
@@ -355,6 +370,7 @@ module Program =
     Console.WriteLine "  pause | resume | step         speed control, 0 to 20Hz (space, period)"
     Console.WriteLine "  speed <n>                     set ticks per second, 0..20"
     Console.WriteLine "  party | state                list entities | dump canonical state"
+    Console.WriteLine "  targets <actor> <abilitykey>  list what that ability can hit"
 
     game.Run()
     0

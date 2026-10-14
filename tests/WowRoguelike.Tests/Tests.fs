@@ -1016,3 +1016,36 @@ let ``the stitched Wailing Caverns is connected and every entity stands on floor
   Assert.Contains("Lord Pythas", names)
   Assert.Contains("Naralex", names)
   Assert.Contains("Mutanus the Devourer", names)
+
+[<Fact>]
+let ``heal abilities target every party member`` () =
+  let targets = SimState.validTargets (EntityId 2) "Heal" (Content.gully 1UL)
+  Assert.Equal(5, targets.Length)
+
+  for t in targets do
+    Assert.Equal(Party, t.Faction)
+
+[<Fact>]
+let ``damaging abilities target enemies within view`` () =
+  let targets = SimState.validTargets (EntityId 4) "Fireball" (Content.gully 1UL)
+  Assert.True(targets.Length > 0, "the mage should see at least one enemy")
+
+  for t in targets do
+    Assert.Equal(Hostile, t.Faction)
+
+[<Fact>]
+let ``an enemy behind a wall is not a valid damage target`` () =
+  let slow = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
+  let mage = Content.hero 1 "Mage" Dps 1000 1000 slow 10000 [ Content.fireball ] { X = 1; Y = 2 }
+  let mob = Content.mob 100 "Mob" 1000 0 (Some slow) [] None { X = 3; Y = 2 }
+
+  let w =
+    { Tick = ticks 0
+      Grid = Grid.ofRows [ "#####"; "#...#"; "#.#.#"; "#...#"; "#####" ]
+      Entities = [ mage; mob ]
+      Pending = []
+      Rng = Rng.streamsOf 1UL
+      PartyBuffs = []
+      Log = [] }
+
+  Assert.Empty(SimState.validTargets (EntityId 1) "Fireball" w)
