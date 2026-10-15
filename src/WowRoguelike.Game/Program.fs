@@ -162,9 +162,13 @@ type RoguelikeGame() as this =
   let uiTop = rows * tile + 8
   let uiHeight = 140
 
-  /// The side panel to the right of the grid that lists queued orders.
-  let queueX = columns * tile + 8
-  let queueW = 248
+  /// The side panel to the right of the grid: the party roster on top, the
+  /// queue below.
+  let panelX = columns * tile + 8
+  let panelW = 320
+  let rosterTop = 24
+  let rosterRowH = 42
+  let queueTop = 242
 
   /// Ceiling on ticks per rendered frame. Without it a slow frame becomes a
   /// longer frame, which is the classic spiral. Falling behind in real time is
@@ -341,14 +345,13 @@ type RoguelikeGame() as this =
   /// `pending`, so a click cancels the right one.
   let queueRows () =
     let rowH = 34
-    let top = 34
-    let visible = max 1 ((uiTop - top) / rowH)
+    let visible = max 1 ((uiTop - queueTop) / rowH)
 
     pending
     |> Seq.indexed
     |> Seq.filter (fun (_, kind) -> selected = None || Some(actorOf kind) = selected)
     |> Seq.truncate visible
-    |> Seq.mapi (fun row (i, _) -> Rectangle(queueX + 8, top + row * rowH, queueW - 16, rowH - 4), i)
+    |> Seq.mapi (fun row (i, _) -> Rectangle(panelX + 8, queueTop + row * rowH, panelW - 16, rowH - 4), i)
     |> Seq.toList
 
   /// What the selected member does with no order queued: swing at an engaged
@@ -466,7 +469,7 @@ type RoguelikeGame() as this =
     world <- SimTick.step commands world
 
   do
-    graphics.PreferredBackBufferWidth <- queueX + queueW
+    graphics.PreferredBackBufferWidth <- panelX + panelW
     graphics.PreferredBackBufferHeight <- uiTop + uiHeight
     this.Content.RootDirectory <- "Content"
     this.IsMouseVisible <- true
@@ -666,18 +669,30 @@ type RoguelikeGame() as this =
       else
         spriteBatch.Draw(pixel, Rectangle(cx - 6, cy - 6, 12, 12), colour)
 
-    // The queued orders: the selected member's, or everyone's. Click a row to
-    // cancel it; with nothing queued, show the member's default action.
-    spriteBatch.Draw(pixel, Rectangle(queueX, 0, queueW, uiTop), Color(18, 20, 28))
+    // The side panel: the party's health and mana, then the queue.
+    spriteBatch.Draw(pixel, Rectangle(panelX, 0, panelW, uiTop), Color(18, 20, 28))
     let m = Mouse.GetState()
-    let rowChars = max 1 ((queueW - 24) / cellW)
+    let rowChars = max 1 ((panelW - 24) / cellW)
+
+    drawText "PARTY" (panelX + 6) 8 (Color(180, 180, 200))
+    let party = world.Entities |> List.filter (fun e -> e.Faction = Party)
+
+    for i, e in party |> List.indexed do
+      let y = rosterTop + i * rosterRowH
+      drawText (shorten rowChars e.Name) (panelX + 6) (y + 1) (Color(224, 224, 232))
+      let hpPct = if e.MaxHealth > 0 then e.Health * 100 / e.MaxHealth else 0
+      bar (panelX + 6) (y + 15) 104 8 (float e.Health / float (max 1 e.MaxHealth)) (Color(90, 220, 110))
+      drawText (sprintf "%d/%d %d%%" e.Health e.MaxHealth hpPct) (panelX + 116) (y + 13) (Color(210, 240, 210))
+      let mpPct = if e.MaxResource > 0 then e.Resource * 100 / e.MaxResource else 0
+      bar (panelX + 6) (y + 27) 104 8 (float e.Resource / float (max 1 e.MaxResource)) (Color(90, 150, 230))
+      drawText (sprintf "%d/%d %d%%" e.Resource e.MaxResource mpPct) (panelX + 116) (y + 25) (Color(210, 220, 245))
 
     let title =
       match selected with
       | Some aid -> sprintf "queue %s" (nameOf aid)
       | None -> "queue all"
 
-    drawText (shorten rowChars title) (queueX + 8) 10 (Color(180, 180, 200))
+    drawText (shorten rowChars title) (panelX + 6) (queueTop - 16) (Color(180, 180, 200))
     let rows = queueRows ()
 
     for (rect, i) in rows do
@@ -695,7 +710,7 @@ type RoguelikeGame() as this =
         | Some aid -> defaultAction aid
         | None -> "nothing queued"
 
-      drawTextWrapped text (queueX + 12) 40 (queueW - 24) (Color(120, 120, 138))
+      drawTextWrapped text (panelX + 12) (queueTop + 2) (panelW - 24) (Color(120, 120, 138))
 
     // The clickable strip.
     let panelW = this.GraphicsDevice.Viewport.Width
