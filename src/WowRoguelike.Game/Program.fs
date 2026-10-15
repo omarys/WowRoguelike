@@ -323,6 +323,12 @@ type RoguelikeGame() as this =
     if text.Length <= maxChars then text
     else text.Substring(0, max 0 (maxChars - 2)) + ".."
 
+  let actorOf (kind: CommandKind) : EntityId =
+    match kind with
+    | UseAbility(actor, _, _) -> actor
+    | MoveTo(actor, _) -> actor
+    | Stop actor -> actor
+
   /// A queued order as (what it is, who it is on).
   let describeQueued (kind: CommandKind) : string * string =
     match kind with
@@ -330,8 +336,9 @@ type RoguelikeGame() as this =
     | MoveTo(actor, dest) -> (sprintf "%s move" (nameOf actor), sprintf "to %d,%d" dest.X dest.Y)
     | Stop actor -> (sprintf "%s stop" (nameOf actor), "")
 
-  /// One clickable row per queued order: its rectangle and its index in
-  /// `pending`. Only the rows that fit the panel are shown.
+  /// The rows shown: the selected member's queued orders only, or everyone's
+  /// when nothing is selected. Each entry is its rectangle and its index in
+  /// `pending`, so a click cancels the right one.
   let queueRows () =
     let rowH = 34
     let top = 34
@@ -339,9 +346,26 @@ type RoguelikeGame() as this =
 
     pending
     |> Seq.indexed
+    |> Seq.filter (fun (_, kind) -> selected = None || Some(actorOf kind) = selected)
     |> Seq.truncate visible
-    |> Seq.map (fun (i, _) -> Rectangle(queueX + 8, top + i * rowH, queueW - 16, rowH - 4), i)
+    |> Seq.mapi (fun row (i, _) -> Rectangle(queueX + 8, top + row * rowH, queueW - 16, rowH - 4), i)
     |> Seq.toList
+
+  /// What the selected member does with no order queued: swing at an engaged
+  /// enemy in reach, which is what "auto-attack when attacked" means.
+  let defaultAction (aid: EntityId) : string =
+    match SimState.tryEntity aid world with
+    | Some e ->
+      match e.AutoAttack with
+      | Some attack ->
+        SimState.aliveHostiles world
+        |> List.filter (fun t -> t.Engaged && SimState.canReach attack.Range e t world)
+        |> List.sortBy (fun t -> Pos.chebyshev e.Pos t.Pos)
+        |> List.tryHead
+        |> Option.map (fun t -> sprintf "auto-attacks %s" t.Name)
+        |> Option.defaultValue "idle, no target in reach"
+      | None -> "no auto-attack"
+    | None -> "no orders"
 
   /// The buttons for this frame: the global controls, plus the selected member's
   /// Move and abilities (or a Cancel while a click is pending). Wraps onto rows.
@@ -642,13 +666,21 @@ type RoguelikeGame() as this =
       else
         spriteBatch.Draw(pixel, Rectangle(cx - 6, cy - 6, 12, 12), colour)
 
-    // The queued orders: click a row to cancel it.
+    // The queued orders: the selected member's, or everyone's. Click a row to
+    // cancel it; with nothing queued, show the member's default action.
     spriteBatch.Draw(pixel, Rectangle(queueX, 0, queueW, uiTop), Color(18, 20, 28))
-    drawText "QUEUE" (queueX + 8) 10 (Color(180, 180, 200))
     let m = Mouse.GetState()
     let rowChars = max 1 ((queueW - 24) / cellW)
 
-    for (rect, i) in queueRows () do
+    let title =
+      match selected with
+      | Some aid -> sprintf "queue %s" (nameOf aid)
+      | None -> "queue all"
+
+    drawText (shorten rowChars title) (queueX + 8) 10 (Color(180, 180, 200))
+    let rows = queueRows ()
+
+    for (rect, i) in rows do
       let hover = rect.Contains(m.X, m.Y)
       spriteBatch.Draw(pixel, rect, if hover then Color(96, 62, 62) else Color(34, 30, 38))
       let line1, line2 = describeQueued pending.[i]
@@ -656,6 +688,14 @@ type RoguelikeGame() as this =
 
       if line2 <> "" then
         drawText (shorten rowChars line2) (rect.X + 4) (rect.Y + 17) (Color(150, 150, 165))
+
+    if List.isEmpty rows then
+      let text =
+        match selected with
+        | Some aid -> defaultAction aid
+        | None -> "nothing queued"
+
+      drawTextWrapped text (queueX + 12) 40 (queueW - 24) (Color(120, 120, 138))
 
     // The clickable strip.
     let panelW = this.GraphicsDevice.Viewport.Width
