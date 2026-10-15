@@ -1087,3 +1087,79 @@ let ``using an ability interrupts a move in progress`` () =
 
   // And the ability itself resolved: the mob took damage.
   Assert.True((w.Entities |> List.find (fun e -> e.Id = EntityId 100)).Health < 1000)
+
+[<Fact>]
+let ``a damage-over-time hurts the target each tick`` () =
+  let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.shadowWordPain (arena 0 0 { X = 7; Y = 5 })
+  Assert.True((mobOf w).Auras |> List.exists (fun a -> Aura.flatDamagePerTick a <> 0))
+  let before = (mobOf w).Health
+  let w = SimTick.step [] w
+  Assert.True((mobOf w).Health < before, "the DoT should keep ticking")
+
+[<Fact>]
+let ``a disarmed enemy does not swing`` () =
+  let slow = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
+  let fast = { Min = 30; Max = 30; Ticks = ticks 1; Range = 1 }
+  let tank = Content.hero 1 "Tank" Tank 1000 1000 slow 50000 [ Content.heroicStrike ] { X = 5; Y = 5 }
+
+  let mob =
+    { Content.mob 100 "Mob" 1000 0 (Some fast) [] None { X = 6; Y = 5 } with
+        Engaged = true
+        Target = Some(EntityId 1) }
+
+  let baseWorld =
+    { Tick = ticks 0
+      Grid = Grid.create 20 10
+      Entities = [ tank; mob ]
+      Pending = []
+      Rng = Rng.streamsOf 1UL
+      PartyBuffs = []
+      Log = [] }
+
+  // Control: the mob swings and the tank is hurt.
+  let control = SimTick.step [] baseWorld
+  Assert.True((control.Entities |> List.find (fun e -> e.Id = EntityId 1)).Health < 1000)
+
+  // Disarmed: the same tick leaves the tank untouched.
+  let disarmed =
+    SimState.mapEntity (EntityId 100) (fun e -> { e with Auras = [ Disarmed(secTicks 5.0) ] }) baseWorld
+
+  let after = SimTick.step [] disarmed
+  Assert.Equal(1000, (after.Entities |> List.find (fun e -> e.Id = EntityId 1)).Health)
+
+[<Fact>]
+let ``Charge moves the warrior beside the target`` () =
+  let slow = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
+  let warrior = Content.hero 1 "Warrior" Tank 1000 1000 slow 50000 [ Content.charge ] { X = 1; Y = 1 }
+  let mob = Content.mob 100 "Mob" 1000 0 (Some slow) [] None { X = 6; Y = 1 }
+
+  let w =
+    { Tick = ticks 0
+      Grid = Grid.create 10 5
+      Entities = [ warrior; mob ]
+      Pending = []
+      Rng = Rng.streamsOf 1UL
+      PartyBuffs = []
+      Log = [] }
+
+  let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.charge w
+  let moved = w.Entities |> List.find (fun e -> e.Id = EntityId 1)
+  Assert.True(Pos.chebyshev moved.Pos { X = 6; Y = 1 } <= 1, "the warrior should land beside the mob")
+
+[<Fact>]
+let ``the mage's auto-attack is a ranged wand`` () =
+  let mage = (Content.gully 1UL).Entities |> List.find (fun e -> e.Name = "Mage")
+  Assert.True(mage.AutoAttack.Value.Range > 1, "the wand reaches beyond melee")
+
+[<Fact>]
+let ``Battle Shout buffs the party`` () =
+  Assert.Contains(BattleShout, Content.partyBuffs)
+  let warrior = (Content.gully 1UL).Entities |> List.find (fun e -> e.Name = "Warrior")
+  // Strength 100 -> Mark of the Wild x1.05 = 105 -> Battle Shout +10% = 115; /5 = 23.
+  Assert.Equal(23, warrior.MeleeDamageBonus)
+
+[<Fact>]
+let ``the warrior starts in front of the party`` () =
+  let party = (Content.gully 1UL).Entities |> List.filter (fun e -> e.Faction = Party)
+  let warriorX = (party |> List.find (fun e -> e.Name = "Warrior")).Pos.X
+  Assert.Equal(party |> List.map (fun e -> e.Pos.X) |> List.max, warriorX)

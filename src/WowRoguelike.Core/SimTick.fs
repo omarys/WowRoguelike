@@ -35,6 +35,16 @@ module SimTick =
             { e with Health = min e.MaxHealth (e.Health + heal) })
       w
 
+  /// Damage-over-time ticks down each Tick, applied unmitigated. It routes
+  /// through dealDamage so the target wakes and, if it dies, drops its orders.
+  let advanceAuraDamage (w: World) =
+    let burning =
+      w.Entities
+      |> List.filter (fun e -> alive e && (e.Auras |> List.sumBy Aura.flatDamagePerTick) > 0)
+
+    (w, burning)
+    ||> List.fold (fun w e -> dealDamage e.Id (e.Auras |> List.sumBy Aura.flatDamagePerTick) w)
+
   let advanceCooldowns (w: World) =
     mapAll
       (fun e ->
@@ -191,7 +201,10 @@ module SimTick =
   /// Everyone with a swing timer swings. Party auto-attack only engages Mobs
   /// that are already in the fight, so nobody pulls by accident.
   let advanceSwings (w: World) =
-    let attackers = w.Entities |> List.filter (fun e -> canAct e && e.AutoAttack.IsSome)
+    let attackers =
+      w.Entities
+      |> List.filter (fun e ->
+        canAct e && e.AutoAttack.IsSome && not (e.Auras |> List.exists Aura.disablesAttack))
 
     (w, attackers)
     ||> List.fold (fun w e ->
@@ -426,6 +439,7 @@ module SimTick =
     |> advanceResource
     |> advanceAuras
     |> advanceAuraHealing
+    |> advanceAuraDamage
     |> advanceMovement
     |> advanceCasts
     |> advanceSwings

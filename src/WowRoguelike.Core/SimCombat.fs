@@ -289,7 +289,49 @@ module SimCombat =
           let w =
             if actor.Faction = Party then addThreat targetId actor amount w else w
 
-          w |> logLine (sprintf "%s threatens %s for %d" actor.Name targetName amount))
+          w |> logLine (sprintf "%s threatens %s for %d" actor.Name targetName amount)
+
+        | DamageOverTime(duration, perTick) ->
+          match tryEntity targetId w with
+          | Some t ->
+            w
+            |> mapEntity targetId (fun e ->
+              { e with Auras = Aura.refresh (Corrupted(duration, perTick)) e.Auras })
+            |> logLine (sprintf "%s afflicts %s" actor.Name t.Name)
+          | None -> w
+
+        | Charge ->
+          match tryEntity actorId w, tryEntity targetId w with
+          | Some a, Some t ->
+            let spot =
+              Path.neighbours
+                (fun p -> Grid.isFloor w.Grid p && not (claimedByOther w actorId p))
+                t.Pos
+              |> List.sortBy (fun p -> Pos.chebyshev a.Pos p)
+              |> List.tryHead
+
+            match spot with
+            | Some p ->
+              w
+              |> mapEntity actorId (fun e ->
+                { e with
+                    Pos = p
+                    Goal = None
+                    Path = []
+                    Destination = None
+                    StallTicks = ticks 0 })
+              |> logLine (sprintf "%s charges %s" a.Name t.Name)
+            | None -> w
+          | _ -> w
+
+        | Disarm duration ->
+          match tryEntity targetId w with
+          | Some t ->
+            w
+            |> mapEntity targetId (fun e ->
+              { e with Auras = Aura.refresh (Disarmed duration) e.Auras })
+            |> logLine (sprintf "%s disarms %s" actor.Name t.Name)
+          | None -> w)
 
 
   // =========================================================================

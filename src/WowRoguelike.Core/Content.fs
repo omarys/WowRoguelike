@@ -28,6 +28,8 @@ namespace WowRoguelike.Core
 ///     every health pool, auto-attack range and swing timer
 ///     Naralex and Mutanus the Devourer: pacing-only stat blocks. Mutanus's
 ///     real fight is a summoning event with no sourced numbers.
+///     Wrath, Moonfire, Smite, Shadow Word: Pain, Charge, Disarm, Execute and
+///     Battle Shout: pacing-only numbers and effects, all placeholders.
 ///
 ///   Our own invention, deliberately: the five Party classes (Warrior, Rogue,
 ///   Mage, Priest, Druid), their stat spreads, and every ability in this file.
@@ -332,6 +334,81 @@ module Content =
       TargetKind = Foe
       Effects = [ Root(secTicks 10.0) ] }
 
+  // -- casters' damage, and the Warrior's cooldowns ---------------------------
+
+  let wrath =
+    { Name = "Wrath"
+      CastTicks = secTicks 2.0
+      CooldownTicks = ticks 0
+      ResourceCost = 60
+      Interruptible = true
+      Range = 8
+      TargetKind = Foe
+      Effects = [ SpellDamage(40, 55) ] }
+
+  let moonfire =
+    { Name = "Moonfire"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 6.0
+      ResourceCost = 80
+      Interruptible = false
+      Range = 8
+      TargetKind = Foe
+      Effects = [ SpellDamage(30, 45); DamageOverTime(secTicks 12.0, 8) ] }
+
+  let smite =
+    { Name = "Smite"
+      CastTicks = secTicks 2.0
+      CooldownTicks = ticks 0
+      ResourceCost = 70
+      Interruptible = true
+      Range = 8
+      TargetKind = Foe
+      Effects = [ SpellDamage(45, 60) ] }
+
+  let shadowWordPain =
+    { Name = "Shadow Word: Pain"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 6.0
+      ResourceCost = 90
+      Interruptible = false
+      Range = 8
+      TargetKind = Foe
+      Effects = [ DamageOverTime(secTicks 18.0, 12) ] }
+
+  /// Charge leaps to the target, so its range is the charge distance.
+  let charge =
+    { Name = "Charge"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 15.0
+      ResourceCost = 0
+      Interruptible = false
+      Range = 8
+      TargetKind = Foe
+      Effects = [ Charge; Threat(300) ] }
+
+  let disarm =
+    { Name = "Disarm"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 20.0
+      ResourceCost = 100
+      Interruptible = false
+      Range = 1
+      TargetKind = Foe
+      Effects = [ Disarm(secTicks 8.0); Threat(200) ] }
+
+  /// Execute is a plain heavy hit here; the real one is gated on the target's
+  /// health, which is a mechanic this sim does not have yet.
+  let execute =
+    { Name = "Execute"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 10.0
+      ResourceCost = 150
+      Interruptible = false
+      Range = 1
+      TargetKind = Foe
+      Effects = [ Damage(90, 120) ] }
+
   // =========================================================================
   // Builders
   // =========================================================================
@@ -465,7 +542,7 @@ module Content =
        MeleeBonus = s.Strength / 5 |}
 
   /// The party-wide passives, one per class present (Q2a).
-  let partyBuffs: PartyBuffKind list = [ ArcaneIntellect; DivineSpirit; MarkOfTheWild ]
+  let partyBuffs: PartyBuffKind list = [ ArcaneIntellect; DivineSpirit; MarkOfTheWild; BattleShout ]
 
   /// Apply the party passives to a class's base stats.
   let private buffed (stats: Stats) =
@@ -474,7 +551,8 @@ module Content =
       match b with
       | ArcaneIntellect -> { acc with Intellect = acc.Intellect * 110 / 100 }
       | DivineSpirit -> { acc with Spirit = acc.Spirit * 110 / 100 }
-      | MarkOfTheWild -> Stats.scaleBp 10500 acc)
+      | MarkOfTheWild -> Stats.scaleBp 10500 acc
+      | BattleShout -> { acc with Strength = acc.Strength * 110 / 100 })
 
   /// A Party member specified by the five stats rather than raw values. The
   /// passives are applied to the stats before the derived values are computed.
@@ -549,19 +627,20 @@ module Content =
   let private casterTraits = { Traits.none with PushbackResistanceBp = 8000 }
 
   let private warrior =
-    heroStats 1 "Warrior" Tank Plate warriorTraits { Strength = 100; Agility = 50; Stamina = 90; Intellect = 60; Spirit = 20 } { Min = 18; Max = 26; Ticks = secTicks 2.0; Range = 1 } tankStanceBp [ taunt; heroicStrike; sunderArmor; shieldBash ] { X = 1; Y = 5 }
+    heroStats 1 "Warrior" Tank Plate warriorTraits { Strength = 100; Agility = 50; Stamina = 90; Intellect = 60; Spirit = 20 } { Min = 18; Max = 26; Ticks = secTicks 2.0; Range = 1 } tankStanceBp [ taunt; heroicStrike; sunderArmor; shieldBash; charge; disarm; execute ] { X = 1; Y = 5 }
 
   let private priest =
-    heroStats 2 "Priest" Healer Cloth casterTraits { Strength = 20; Agility = 30; Stamina = 64; Intellect = 180; Spirit = 200 } { Min = 6; Max = 10; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ heal; renew ] { X = 1; Y = 6 }
+    heroStats 2 "Priest" Healer Cloth casterTraits { Strength = 20; Agility = 30; Stamina = 64; Intellect = 180; Spirit = 200 } { Min = 6; Max = 10; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ heal; renew; smite; shadowWordPain ] { X = 1; Y = 6 }
 
   let private rogue =
     heroStats 3 "Rogue" Dps Leather rogueTraits { Strength = 80; Agility = 120; Stamina = 70; Intellect = 80; Spirit = 20 } { Min = 16; Max = 24; Ticks = secTicks 1.8; Range = 1 } partyThreatBp [ backstab; kick; gouge; cheapShot ] { X = 1; Y = 7 }
 
   let private mage =
-    heroStats 4 "Mage" Dps Cloth casterTraits { Strength = 20; Agility = 40; Stamina = 60; Intellect = 240; Spirit = 40 } { Min = 4; Max = 8; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ fireball; frostbolt; magicMissile; arcaneExplosion; blizzard; polymorph ] { X = 2; Y = 6 }
+    // The mage's auto-attack is a wand: the same swing, at range.
+    heroStats 4 "Mage" Dps Cloth casterTraits { Strength = 20; Agility = 40; Stamina = 60; Intellect = 240; Spirit = 40 } { Min = 4; Max = 8; Ticks = secTicks 3.0; Range = 8 } partyThreatBp [ fireball; frostbolt; magicMissile; arcaneExplosion; blizzard; polymorph ] { X = 2; Y = 6 }
 
   let private druid =
-    heroStats 5 "Druid" Healer Leather casterTraits { Strength = 30; Agility = 40; Stamina = 68; Intellect = 200; Spirit = 180 } { Min = 8; Max = 12; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ rejuvenation; regrowth; entanglingRoots ] { X = 2; Y = 7 }
+    heroStats 5 "Druid" Healer Leather casterTraits { Strength = 30; Agility = 40; Stamina = 68; Intellect = 200; Spirit = 180 } { Min = 8; Max = 12; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ rejuvenation; regrowth; entanglingRoots; wrath; moonfire ] { X = 2; Y = 7 }
 
   let private druidOfTheFang id pos =
     { mob id "Druid of the Fang" 480 400 (Some { Min = 12; Max = 18; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; serpentForm; druidsSlumber ] None pos with
@@ -617,7 +696,12 @@ module Content =
     let guardB = Pos.move 2 0 spawn
 
     let entities =
-      [ warrior; priest; rogue; mage; druid
+      // The warrior leads, in front of the party and facing the Fang.
+      [ { warrior with Pos = { X = 3; Y = 6 } }
+        { rogue with Pos = { X = 2; Y = 6 } }
+        { priest with Pos = { X = 1; Y = 6 } }
+        { mage with Pos = { X = 1; Y = 5 } }
+        { druid with Pos = { X = 1; Y = 7 } }
         druidOfTheFang 6 { X = 7; Y = 6 }
         raptor 7 { X = 9; Y = 3 }
         raptor 9 { X = 9; Y = 9 }

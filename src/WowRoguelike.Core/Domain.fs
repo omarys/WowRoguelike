@@ -134,6 +134,10 @@ type Aura =
   /// Sunder Armour. Reduces the target's armour by a flat amount. Refreshed by
   /// another application rather than stacking.
   | Sundered of remaining: int<tick> * armorReduction: int
+  /// A damage-over-time. Deals `damagePerTick` every Tick, unmitigated.
+  | Corrupted of remaining: int<tick> * damagePerTick: int
+  /// Disarm. The holder cannot swing its auto-attack while this lasts.
+  | Disarmed of remaining: int<tick>
 
 /// Every case of `Aura` is matched in exactly one place — here. Everywhere else
 /// asks this module a question, so adding an aura breaks compilation in this
@@ -150,6 +154,8 @@ module Aura =
     | Polymorphed r when r > ticks 1 -> Some(Polymorphed(r - ticks 1))
     | Rejuvenation(r, n) when r > ticks 1 -> Some(Rejuvenation(r - ticks 1, n))
     | Sundered(r, reduction) when r > ticks 1 -> Some(Sundered(r - ticks 1, reduction))
+    | Corrupted(r, n) when r > ticks 1 -> Some(Corrupted(r - ticks 1, n))
+    | Disarmed r when r > ticks 1 -> Some(Disarmed(r - ticks 1))
     | _ -> None
 
   let describe =
@@ -161,6 +167,8 @@ module Aura =
     | Polymorphed r -> sprintf "poly(%d)" r
     | Rejuvenation(r, n) -> sprintf "rejuv(%d,+%d)" r n
     | Sundered(r, reduction) -> sprintf "sunder(%d,-%d)" r reduction
+    | Corrupted(r, n) -> sprintf "dot(%d,%d)" r n
+    | Disarmed r -> sprintf "disarm(%d)" r
 
   let isSleeping =
     function
@@ -226,6 +234,8 @@ module Aura =
     | Polymorphed _ -> 4
     | Rejuvenation _ -> 5
     | Sundered _ -> 6
+    | Corrupted _ -> 7
+    | Disarmed _ -> 8
 
   /// Prepend `a`, dropping any existing aura of the same kind, so a re-application
   /// refreshes rather than stacks.
@@ -237,6 +247,18 @@ module Aura =
     function
     | Sundered(_, reduction) -> reduction
     | _ -> 0
+
+  /// A flat amount dealt as damage each Tick (damage-over-time).
+  let flatDamagePerTick =
+    function
+    | Corrupted(_, n) -> n
+    | _ -> 0
+
+  /// True when this aura stops its holder swinging its auto-attack.
+  let disablesAttack =
+    function
+    | Disarmed _ -> true
+    | _ -> false
 
 /// The closed vocabulary of mechanics an Ability can have (Q28b). Adding a new
 /// *mechanic* means adding a case here; adding a new *ability* means writing a
@@ -262,6 +284,12 @@ type Effect =
   | Sunder of duration: int<tick> * armorReduction: int
   /// Flat threat on the target, for abilities that taunt without forcing.
   | Threat of amount: int
+  /// Damage-over-time: deal `damagePerTick` every Tick for `duration`, unmitigated.
+  | DamageOverTime of duration: int<tick> * damagePerTick: int
+  /// Charge: leap to a free tile beside the target.
+  | Charge
+  /// Disarm: the target cannot swing its auto-attack for `duration`.
+  | Disarm of duration: int<tick>
 
 type TargetKind =
   | Foe
@@ -479,6 +507,8 @@ type PartyBuffKind =
   | DivineSpirit
   /// Druid: +5% to all five stats.
   | MarkOfTheWild
+  /// Warrior: +10% Strength (Battle Shout).
+  | BattleShout
 
 type World =
   { Tick: int<tick>
