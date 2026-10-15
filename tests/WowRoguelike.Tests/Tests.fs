@@ -1049,3 +1049,41 @@ let ``an enemy behind a wall is not a valid damage target`` () =
       Log = [] }
 
   Assert.Empty(SimState.validTargets (EntityId 1) "Fireball" w)
+
+[<Fact>]
+let ``using an ability interrupts a move in progress`` () =
+  let slow = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
+
+  let warrior =
+    Content.hero 1 "Warrior" Tank 1000 1000 slow 50000 [ Content.heroicStrike ] { X = 1; Y = 1 }
+
+  let mob = Content.mob 100 "Mob" 1000 0 (Some slow) [] None { X = 2; Y = 1 }
+
+  let w =
+    { Tick = ticks 0
+      Grid = Grid.create 10 5
+      Entities = [ warrior; mob ]
+      Pending = []
+      Rng = Rng.streamsOf 1UL
+      PartyBuffs = []
+      Log = [] }
+
+  // Order a move: the warrior is now walking.
+  let w =
+    SimCombat.applyCommand { ApplyAt = ticks 0; Kind = MoveTo(EntityId 1, { X = 5; Y = 3 }) } w
+
+  Assert.True((w.Entities |> List.find (fun e -> e.Id = EntityId 1)).Goal.IsSome, "the move should set a goal")
+
+  // Use a melee ability on the adjacent mob: it should stop the walk.
+  let w =
+    SimCombat.applyCommand
+      { ApplyAt = ticks 0
+        Kind = UseAbility(EntityId 1, "Heroic Strike", EntityId 100) }
+      w
+
+  let struck = w.Entities |> List.find (fun e -> e.Id = EntityId 1)
+  Assert.True(struck.Goal.IsNone, "the ability should clear the move goal")
+  Assert.True(struck.Path.IsEmpty, "the ability should clear the path")
+
+  // And the ability itself resolved: the mob took damage.
+  Assert.True((w.Entities |> List.find (fun e -> e.Id = EntityId 100)).Health < 1000)

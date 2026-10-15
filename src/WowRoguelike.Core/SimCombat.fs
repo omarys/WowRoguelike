@@ -315,10 +315,18 @@ module SimCombat =
     | Ally -> allyInNeed actor ability w
 
   let internal startOrResolve (actor: Entity) (targetId: EntityId) (ability: Ability) (w: World) : World =
+    // Using an ability interrupts a move in progress: the character stops to
+    // strike or cast rather than walking on through the order.
     let w =
       mapEntity
         actor.Id
-        (fun e -> { e with Cooldowns = e.Cooldowns |> Map.add ability.Name ability.CooldownTicks })
+        (fun e ->
+          { e with
+              Cooldowns = e.Cooldowns |> Map.add ability.Name ability.CooldownTicks
+              Goal = None
+              Path = []
+              Destination = None
+              StallTicks = ticks 0 })
         w
 
     if ability.CastTicks <= ticks 0 then
