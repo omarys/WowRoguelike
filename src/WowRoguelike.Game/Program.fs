@@ -26,7 +26,14 @@ type private UiAction =
   | StepOnce
   | Deselect
   | ChooseAbility of EntityId * string
-  | CancelTargeting
+  | ChooseMove of EntityId
+  | CancelPending
+
+/// What a click is waiting on: an ability awaiting a target, or a move awaiting
+/// a destination tile. Both are queued per character, the same way.
+type private PendingAction =
+  | Targeting of EntityId * string
+  | Moving of EntityId
 
 module private Parse =
 
@@ -153,7 +160,7 @@ type RoguelikeGame() as this =
 
   /// The strip below the grid that holds the clickable controls.
   let uiTop = rows * tile + 8
-  let uiHeight = 120
+  let uiHeight = 140
 
   /// Ceiling on ticks per rendered frame. Without it a slow frame becomes a
   /// longer frame, which is the classic spiral. Falling behind in real time is
@@ -177,7 +184,7 @@ type RoguelikeGame() as this =
 
   // Mouse-driven command state.
   let mutable selected: EntityId option = None
-  let mutable targeting: (EntityId * string) option = None
+  let mutable pendingAction: PendingAction option = None
   let mutable prevMouse = Mouse.GetState()
 
   let makeDisc (radius: int) : Texture2D =
@@ -269,6 +276,31 @@ type RoguelikeGame() as this =
           Rectangle(code * cellW, 0, glyphW * fontScale, glyphH * fontScale),
           colour))
 
+  /// Break text into lines of at most `maxChars`, on word boundaries.
+  let wrapWords (maxChars: int) (text: string) : string list =
+    let words = text.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
+    let lines = ResizeArray<string>()
+    let mutable current = ""
+
+    for w in words do
+      let candidate = if current = "" then w else current + " " + w
+
+      if candidate.Length <= maxChars then
+        current <- candidate
+      else
+        if current <> "" then lines.Add current
+        current <- w
+
+    if current <> "" then lines.Add current
+    Seq.toList lines
+
+  /// Draw `text` wrapped at word boundaries to fit `maxWidth` pixels.
+  let drawTextWrapped (text: string) (x: int) (y: int) (maxWidth: int) (colour: Color) =
+    let maxChars = max 1 (maxWidth / cellW)
+
+    wrapWords maxChars text
+    |> List.iteri (fun i line -> drawText line x (y + i * (cellH + 2)) colour)
+
   /// The alive entity under a click, hit-tested against its interpolated centre.
   let entityAt (mx: int) (my: int) =
     world.Entities
@@ -280,10 +312,10 @@ type RoguelikeGame() as this =
           let size = if e.Faction = Party then 22 else 20
           abs (mx - cx) <= size / 2 + 4 && abs (my - cy) <= size / 2 + 4))
 
-  /// The buttons for this frame: the global controls, plus the selected
-  /// member's abilities (or a Cancel while targeting). Wraps onto extra rows.
+  /// The buttons for this frame: the global controls, plus the selected member's
+  /// Move and abilities (or a Cancel while a click is pending). Wraps onto rows.
   let uiButtons () =
-    let panelW = columns * tile + 24
+    let panelW = this.GraphicsDevice.Viewport.Width
     let mutable x = 8
     let mutable row = 0
     let y0 = uiTop + 6
@@ -305,11 +337,14 @@ type RoguelikeGame() as this =
     match selected with
     | None -> globals
     | Some aid ->
-      match targeting with
-      | Some _ -> globals @ [ add "Cancel" CancelTargeting ]
+      match pendingAction with
+      | Some _ -> globals @ [ add "Cancel" CancelPending ]
       | None ->
         match SimState.tryEntity aid world with
-        | Some e -> globals @ (e.Abilities |> List.map (fun a -> add a.Name (ChooseAbility(aid, a.Name))))
+        | Some e ->
+          globals
+          @ (add "Move" (ChooseMove aid)
+             :: (e.Abilities |> List.map (fun a -> add a.Name (ChooseAbility(aid, a.Name)))))
         | None -> globals
 
   let printParty () =
@@ -392,7 +427,10 @@ type RoguelikeGame() as this =
     reader.IsBackground <- true
     reader.Start()
 
-  override _.Initialize() = base.Initialize()
+  override _.Initialize() =
+    // Set here rather than in the constructor: the window exists by now.
+    this.Window.AllowUserResizing <- true
+    base.Initialize()
 
   override _.LoadContent() =
     spriteBatch <- new SpriteBatch(this.GraphicsDevice)
@@ -432,26 +470,30 @@ type RoguelikeGame() as this =
         | StepOnce -> runOnce <- true
         | Deselect ->
           selected <- None
-          targeting <- None
-        | ChooseAbility(aid, ability) -> targeting <- Some(aid, ability)
-        | CancelTargeting -> targeting <- None
+          pendingAction <- None
+        | ChooseAbility(aid, ability) -> pendingAction <- Some(Targeting(aid, ability))
+        | ChooseMove aid -> pendingAction <- Some(Moving aid)
+        | CancelPending -> pendingAction <- None
       | None ->
         match entityAt mx my with
         | Some e ->
-          match targeting with
-          | Some (aid, ability) ->
+          match pendingAction with
+          | Some (Targeting(aid, ability)) ->
             if SimState.validTargets aid ability world |> List.exists (fun t -> t.Id = e.Id) then
               pending.Add(UseAbility(aid, ability, e.Id))
 
-            targeting <- None
-          | None -> if e.Faction = Party then selected <- Some e.Id
+            pendingAction <- None
+          | _ -> if e.Faction = Party then selected <- Some e.Id
         | None ->
           let tx, ty = mx / tile, my / tile
 
           if ty < rows && Grid.isFloor world.Grid { X = tx; Y = ty } then
-            match selected with
-            | Some aid -> pending.Add(MoveTo(aid, { X = tx; Y = ty }))
-            | None -> ()
+            match pendingAction, selected with
+            | Some (Moving aid), _ ->
+              pending.Add(MoveTo(aid, { X = tx; Y = ty }))
+              pendingAction <- None
+            | None, Some aid -> pending.Add(MoveTo(aid, { X = tx; Y = ty }))
+            | _ -> ()
 
     prevMouse <- mouse
 
@@ -512,10 +554,10 @@ type RoguelikeGame() as this =
     this.GraphicsDevice.Clear(Color(12, 12, 18))
 
     let validIds =
-      match targeting with
-      | Some (aid, ability) ->
+      match pendingAction with
+      | Some (Targeting(aid, ability)) ->
         SimState.validTargets aid ability world |> List.map (fun t -> t.Id) |> Set.ofList
-      | None -> Set.empty
+      | _ -> Set.empty
 
     spriteBatch.Begin()
 
@@ -566,7 +608,8 @@ type RoguelikeGame() as this =
         spriteBatch.Draw(pixel, Rectangle(cx - 6, cy - 6, 12, 12), colour)
 
     // The clickable strip.
-    spriteBatch.Draw(pixel, Rectangle(0, uiTop, columns * tile + 24, uiHeight), Color(20, 22, 30))
+    let panelW = this.GraphicsDevice.Viewport.Width
+    spriteBatch.Draw(pixel, Rectangle(0, uiTop, panelW, uiHeight), Color(20, 22, 30))
     let m = Mouse.GetState()
 
     for (rect, label, _) in uiButtons () do
@@ -578,12 +621,13 @@ type RoguelikeGame() as this =
       SimState.tryEntity aid world |> Option.map (fun e -> e.Name) |> Option.defaultValue "?"
 
     let hint =
-      match selected, targeting with
-      | Some _, Some (_, ability) -> sprintf "Choose a target for %s — click a highlighted unit" ability
-      | Some aid, None -> sprintf "%s selected — click a tile to move, or an ability button" (nameOf aid)
+      match selected, pendingAction with
+      | Some _, Some (Targeting(_, ability)) -> sprintf "Choose a target for %s - click a highlighted unit" ability
+      | Some aid, Some (Moving _) -> sprintf "%s - click a destination tile" (nameOf aid)
+      | Some aid, None -> sprintf "%s selected - Move, an ability, or click a tile to walk" (nameOf aid)
       | None, _ -> "Click a party member to command them"
 
-    drawText hint 8 (uiTop + uiHeight - 22) (Color(160, 160, 170))
+    drawTextWrapped hint 8 (uiTop + 100) (panelW - 16) (Color(160, 160, 170))
 
     spriteBatch.End()
     base.Draw(gameTime)
