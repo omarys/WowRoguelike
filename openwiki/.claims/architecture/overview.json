@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:7c79598ba49207dccfbcd68a7a934452f327a075963b1aea9a508677bca932da",
+  "claims": [
+    {
+      "id": "claim_cb8b25ff79614945a8544b2b821d6790",
+      "statement": "The Core simulation in WowRoguelike.Core maintains absolute isolation from MonoGame, operating with integer-only arithmetic, discrete 20Hz ticks, and no real-time clock dependencies.",
+      "evidence": [
+        {
+          "resource": "repo://docs/adr/0001-fixed-tick-deterministic-simulation.md#L1-L10",
+          "version": "repo-lines-v1:sha256:4b3dd76f8051a20f547b91e0c438d974c32c47dc10a9e7fba7a3ffc20e035a4b:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBmNDRjNGI0YzBiN2VjYWVkMTE4MjhiYzUzNGU1NmZhNTg1MjM5MWNjOTM0ZWIyN2ViZjliYmExMGUyYjc5YzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA3YWIwYzEyOGI4ZGQ0OGY4ZTYxOWRjMjQwMzk2ZjIzYjNmMDZhMWJhNGMyODdiZDEyYmY5ZGQ5NzBmNmYwZGIifQ"
+        },
+        {
+          "resource": "repo://src/WowRoguelike.Core/WowRoguelike.Core.fsproj#L1-L30",
+          "version": "repo-lines-v1:sha256:76a063aefbfb370f1fea71393fe2c380dabd2b708edef5260ce1d5be4fb3ca56:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdjYjhkNDAyMWNhZmVhOTFiZDJiODcwNzcwZmI0ODY3MmNjZGU1NzcwOWMwYzFkNDFmYjNmYmQzYWYyNmFlZTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjljYWVkMTZhZDM5ZjAxMDM2YTFmOTUyNjU2YjhiZjJlMjQ3YTIyNjZmNTVjNjhlZjUwMjkwNTk0YmU1NzgxMzkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_5ec0808d014d41bfb76c7e337bf34ebf",
+      "statement": "Compilation order in WowRoguelike.Core.fsproj defines the strict dependency graph, where Domain.fs defines types without logic at the top and SimCombat/SimTick build upon lower-level pathfinding and state query modules.",
+      "evidence": [
+        {
+          "resource": "repo://docs/HANDOFF.md#L39-L59",
+          "version": "repo-lines-v1:sha256:987ea9fdcf4130f4d33642281e3aaa1b4bee1c9b78a3a87af8832187eb154228:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjYjk4YTA4ZWIwNWQ4Zjc1NzdjZDRhNTA1MDQ4MDMwZGZjMmQ3MzI3YWRkNTlhZDE2NjcyODY2M2NiMmJiYTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3NzNmYzk4OTM4NDQyYzRkZWNlNjM3YWU2OWNiN2ExOWJkMmU0OTg3ZWI3MjY2OWZhMjFmMzBhNzI2ODJhZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNmZGI0N2Q4Mzk4MGQ2ZjY3YmExYzExNGQ4YmI3N2E4OWMwYzk4YzEzYzM2NGRmZGY2MzFiNmQxODU3ODk0ZGMifQ"
+        },
+        {
+          "resource": "repo://src/WowRoguelike.Core/WowRoguelike.Core.fsproj#L8-L28",
+          "version": "repo-lines-v1:sha256:129c03d2e21b821d317df00c08427878b2d618f79f0078b84954007e3b77a167:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzOTk4ODJkOWIxNGExNmE0NDBjODI2YWI4MDU0ZWEzYjZmZWU2OTk5ZWQ1MzBkNGI1ZmM5ZTk0MDA4YTRkODgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdkZGMxNTliYjU5NzQ5OGY1MjJlNzkzNWM4MTIxN2JlZTI3OTcyODZlMDNkNmRlYWQ2YWUxZDUyNjI1ZTdlNjMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZiOWE1YWFhNjFkNmI1ZGVhMjQyMjQxMGJlMjIyYjg3MGRkNmNlM2IzN2NjMGYxNDk0NzBhZjc5ZDA2N2FiNzciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoyLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgwYmRjNTk3ZTY5ZDFlNDc4MDQ5ZTgxNWQwNTg2MTZmMjgxNzliMmMxZTk0ZTg5ZmYyZWQzYWYyNzRiOWUwYTMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_70ff5743ae8140cb91bfd2d0dccb8236",
+      "statement": "Random number generation in the simulation core uses a hand-rolled splitmix64 implementation with partitioned independent streams for generation and combat to prevent cross-subsystem roll desynchronization.",
+      "evidence": [
+        {
+          "resource": "repo://docs/adr/0002-hand-rolled-prng-integer-core.md#L1-L18",
+          "version": "repo-lines-v1:sha256:068f2935140d97bbd56bdf63d42744b41346a9cbcdcacdab1e5d40e62d44c4ec:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRmM2UxYTc3MTg1ZmEyNjdlZmU0NTJhZTRmNzZlOWY3MmNiNGQ4MzAyY2ViZjlmNTcxYzcxNzc2N2M2ZTVhOTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlY2JiNzVkZDZkZjdiYjdjNmQ4MDFiMjkyZWY5ZDUwY2EyMDZhYTc5MWVkMmNiN2IxNTI5YmZkZTZjMWNkNDkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://src/WowRoguelike.Core/Rng.fs#L1-L30",
+          "version": "repo-lines-v1:sha256:0ec75ac36564817f1d77000883883afadaf7b28bc05a00f910df004c2a25c882:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ2Y2M3MjU5OGMxMGY0ODFjMGZkMGFjYTcyNDY0MTkyODgzNjI2YzM0ZTE1MGFjNDJhMGRlOGE2MTYzNzgzMjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI2MGUxYjU0YWNmMGEwYjM4ZDU0N2RjYzAxMjMyM2JhZTZiNmYwYzI0ZmU5OWE4ODAxZmQ3MTA2ZDMwMTA0OTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_66f7ae5bcc9c4db6834be42ebd2a9281",
+      "statement": "The MonoGame Shell hosts window management, player input, and variable timestep accumulation, invoking SimTick.step without owning any game rules or altering simulation speed internally.",
+      "evidence": [
+        {
+          "resource": "repo://README.md#L80-L93",
+          "version": "repo-lines-v1:sha256:ce2ad3416619427189d6e02a4e0f56dcbf9f5db381767330b94528d4758e860c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNiNGQ1YTBhMjVmNmU1NWYwZGU2NmZiZDM1NDVmY2M1MmVmYzcxOWY2ZTQxMGZmY2FhZTExM2YyOTFmYjk1NmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUyZmEwYWEyOTA3OTdlYWJiZjk3ODNkMDMwYmVkNTlhODhjMjQyMmUwNjM4ZGMyNTJmNzgxMWRjOGZhYjJlYTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlkMDAzMDZlYmFhYzRhNjg3Y2Y0MmIxMjExN2ZjMGNhNWY4ZTMzNmZmODZkYTAxZDA3NDEzNGUyYmYwYmMwMzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRlYzkwNjg1NjgxYjQxYzI2ZjQ3Yzg1M2RmYzljM2EzMjFhMGI0NDg2MWRmNTE3ZjZkMzQwNDdkZjcyNjVlNTQifQ"
+        },
+        {
+          "resource": "repo://docs/adr/0001-fixed-tick-deterministic-simulation.md#L7-L10",
+          "version": "repo-lines-v1:sha256:39bca75c4935bb64086e477230457e63b106e7570f232f27be5c9e093c96003a:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNTUzNjM1MDdlYjU1MjQ4NjU4OTNhNGFiYTg0ODNkYzlkYjE0MWY5ZGE0NjNhNWJhY2I4NzQzY2QwZGU3ZTgyMiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNjIwZGZkOGMxODVmNzFkMDE4MWJkN2Q4M2U3ODVmNzY5MGY0MjU2MTAyYTAzYjkxODg2ZWQ5NzIwZjk4OTJlNyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMDdhYjBjMTI4YjhkZDQ4ZjhlNjE5ZGMyNDAzOTZmMjNiM2YwNmExYmE0YzI4N2JkMTJiZjlkZDk3MGY2ZjBkYiJ9"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-15T19:24:01.244Z"
+  }
+}

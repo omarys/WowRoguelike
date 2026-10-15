@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:8b58a51e821cf123f2a6be60c48bcde021092e360378b0ad4ff5249a1f576969",
+  "claims": [
+    {
+      "id": "claim_5ccab0fadf5d4b9a82c0c2ab4e298535",
+      "statement": "Procedural dungeon generation uses non-overlapping rectangular rooms and 2-tile wide corridors to avoid party movement deadlocks, selecting the boss room via BFS path length rather than Euclidean distance.",
+      "evidence": [
+        {
+          "resource": "repo://src/WowRoguelike.Core/Dungeon.fs#L1-L39",
+          "version": "repo-lines-v1:sha256:8a9389c05780c71bc5a2bee7de3e7bc20a55ec4d63204f77e05eb9d7ed9d99b5:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ2Y2M3MjU5OGMxMGY0ODFjMGZkMGFjYTcyNDY0MTkyODgzNjI2YzM0ZTE1MGFjNDJhMGRlOGE2MTYzNzgzMjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgzZWE0YWY5MWEyZWJjMTExYzBkYzk4NDc5ODU1ZTI1ZjU4MDEzNmEwZGIwNmFlZGIwMzlhOTY0YWFmM2MwYjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBkNzgzYzU2ZmQyMDlmNGQ5YWQ1OWFhNzZjYWE3NTJkNGJlZGRiYTNjODI4ZGRhZTRhYTZmYTFlOWRiMzE3MzQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7ad5253fbd904af9bc7f090214326eb1",
+      "statement": "Connectivity of generated dungeons is proved by construction and verified by a 4-way BFS flood fill assertion across all floor tiles rather than a regenerative retry loop.",
+      "evidence": [
+        {
+          "resource": "repo://src/WowRoguelike.Core/Dungeon.fs#L33-L70",
+          "version": "repo-lines-v1:sha256:3caff18c85f5958ec38cb4c2e49571d16ea9b3399c2641aa9ee1ad26750f3b45:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI2MTYwODA1NGYxMzhkNDY1MTU0NjI3YTE0NWQ3NGJmOWVmNzZkYzQ0NTUwZjEzMWFhNTQ1OGZiMWZkODdlZWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUyOWQxZjY1Nzg0NDI1MmU4ZDA4YTJmOTVmODY4ZjcxOTRhODJiYzk5ZjMzMDgwNTg0YWRmMTRjYzIyM2QyN2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdkMTAxMzlmNTY1MDU5ZWY3MGQ0Mjk3YTVkOTc0M2ZhNDNlZjc0NmNhMzY4NzhkMzY2ZDExOTMyOTc3M2NiZjQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a4e75addf3b34ecf8bc2e9df1f89782f",
+      "statement": "Grid pathfinding employs integer costs (10 orthogonal, 14 diagonal) with an admissible octile heuristic and prohibits diagonal movement when either orthogonal neighbor is impassable.",
+      "evidence": [
+        {
+          "resource": "repo://src/WowRoguelike.Core/Path.fs#L9-L48",
+          "version": "repo-lines-v1:sha256:11f244cc1920ecfe8df72a62a9eb39407b2695f83ef7574e61fcb8f98bb493ca:eyJzZWxlY3RlZExpbmVDb3VudCI6NDAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJhYzc0YjFjYmM2OWUxZjBiMDUxNDU1NTRjYTkxNGM5ODAxNjJjYjBmYzdiMmQ2Y2E4NzA4YzUxMzVmYjBmYTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU0NzViMjM4OTYxZDZiOGE4MGViYmE2MjM3ZWExNWNjMzNkMDg0ZTA5ODEwZmQ0NzI0ZmI4ODMzYzIyMzA2YzUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ2N2ZkZDFmMjE1NWY5ZTFhMDg4MjgxN2IxMTA3NTg3NzhhZjEyNGJmMjA5OWYxYTY1NmVmYmU0MTc2MjQwNjEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ae9caf2a94ed404f80df10a9d5108de5",
+      "statement": "The hand-rolled MinHeap maintains parallel primitive arrays for priorities and values instead of tuple pairs, eliminating object allocation on push and element copying on swap.",
+      "evidence": [
+        {
+          "resource": "repo://docs/HANDOFF.md#L129-L133",
+          "version": "repo-lines-v1:sha256:c4cb77bff2c2e7a09a84bc6a2f4a88238b2427f86fa71dd12a50949c3e1eea7f:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiODI3OGJlMDkyMTcwMjdlYWE3NTFlMmRlZTVmMWQwMTI1YTA3NWFkNjYzMmIzNTljMTlmNTVkZjU4YWFmMmU4ZCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDY4NmNkYWE3MzAzM2M1NDVlYWNiMjQ4ZjVlMjQwMzZmZDQ0MjQzNjU4MGUyNDQ4YzhlNGM4OTFmYWEyODc1NCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMzBiZDIwYmIyZDdiOWZhNWI1MGExMWM2ZDk1MWExNmEwNzQ2MDI0ZTBiZjBmYjY4OWU3MTE5ZTQ2YjlkODQ1OSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiN2RiNWVhMDU2MGY5ZDY3ZTI4ZjQzZGNkZTgzMjBkNjFhNjhjNGM2YTUyODBhMjhhYTFhZjZkZGYwMDE2MjFkNiJ9"
+        },
+        {
+          "resource": "repo://src/WowRoguelike.Core/Heap.fs#L9-L26",
+          "version": "repo-lines-v1:sha256:0a0d0576884a75dac37096cd70b473f914ac9ee0d3dd0796cca4ab413453e3b2:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI3YzVjMDVhNjE4MjFmMWJiMTlmYzA0ZDI1NzAzMmUzNTZkNjcwNDVhZDkyYjlmYjZjNTNmOWRkOTRhNWQzZDEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUxMWJlYTJlNzg1ZTJiYmM1NDg0OTk0NTI1YjljODRmMjIzYzJmZGJkYjA5YjUwYTM2MmM0NTViMzNiNTA4NjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQyMmNmZWRkMWI2MjUxODc1M2VmMzM5ODhmMmI2OWRhM2U3MGQxODk5ODhkMGQ1ZjdkNWZjZTA0YTc1MzY2YWMifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-15T19:24:01.244Z"
+  }
+}

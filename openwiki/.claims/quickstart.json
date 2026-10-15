@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:cb283ae8f09d2552099fefa65b09099914aa1adf97fe3005a4caf05bbab76607",
+  "claims": [
+    {
+      "id": "claim_67d8a0639744488cbdd8d5f3fdfa023a",
+      "statement": "The repository environment is managed via mise, which pins the .NET 10 SDK and pre-commit hooks while configuring DOTNET_MULTILEVEL_LOOKUP to prevent fallback to system-wide runtimes.",
+      "evidence": [
+        {
+          "resource": "repo://README.md#L45-L56",
+          "version": "repo-lines-v1:sha256:7ceff8b67feec5378425dbb09ce64936e4494ce7c6c4c0946f8f1f4f79e38217:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA1M2ZiMjQ5MTZhYTk5ZDZkNTdiMTI2NzM1ZDVjZDNlNGJkOWVlNmQwNGU3YTFhYzViYTE5MjNhNGQxMTJhMGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ3YzA2YzU2MWQ1YzMyNzM0MzY4NTI2OGE0NmIzMzkxZjM5OThlZWU4OTBkMmJlNTFmMGQyMWNjNGE1M2FlNmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA4MTFlODY3MTM0ZjZjNTIyZGU3OGQ4N2I0ZGJiMDFiYzZjYzc1MzQwNWNhMzQwYzMwNmQ2MTlhODhiZDk0ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdhMjA5MGNlMzUxMjUyMzIwOWQ0ZGJkYWM1NTY3ZGNlNDg4MDY2OWJiZGYzNDQ5MjZhN2FjMWJhOGU2ZDZhN2YifQ"
+        },
+        {
+          "resource": "repo://mise.toml#L1-L15",
+          "version": "repo-lines-v1:sha256:63657c4a616ac6efdf0d32856895a9326a3ea9174077931aea23cf7f978c6385:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlOWU3OTViYmMwYmE0ODJmMjgyNjYzZWY2ZDE0NzcxNTkzN2M5ZGZmNGYwOGM2YTBlNWZhOTFmMWY2YjhkMjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc1YzMzMDZkZWI5YTNhM2M5YWJmNWM4Yzk4OGNjMDlmODZjYjU2NTcxNWI4YmFlOWEwZDkwZjIwM2RmMzdjNWUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b7a57ababc9648f4aa5fee86e0cda3ff",
+      "statement": "Game commands in the interactive MonoGame shell are accepted via standard input, allowing direct player control over individual party members without companion AI.",
+      "evidence": [
+        {
+          "resource": "repo://CONTEXT.md#L78-L85",
+          "version": "repo-lines-v1:sha256:59f7d8edf214a4d4d822a74177348f940ada3f1deff7dec404b59fd633f191ac:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOGRiYzljOTdlZTYwMGE1Y2U2NGE1MzQyYmU2NTIyNTk3YmNjOTc1ZDhiYmU2NTUyZmFjNDBiMTJkM2Q4NTE1MyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjE2YmI3Y2FmZmJiZDI5YzcwMzZhNzczY2JjYmM0MzQ2NzliYzg3ZTVkMTI0MDNjMDA3ZWY2NmU0ZDJhY2EyZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTJjMDAyOTE0ZDIwYjExNjUyZjhiMWFiZWJjMjVhZWM0NTkwNDg0NDAzZjRkZGI5MDBmMDk1NjI0NGRiODgzOCJ9"
+        },
+        {
+          "resource": "repo://README.md#L60-L63",
+          "version": "repo-lines-v1:sha256:d89b9369ba52535c24ff8dc0c3c2935533028ca5ca1fd8fea34da7141de348bc:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNTQyZjk2NDE2YTcxZDhlZjBhY2QxODNhOTAyMDJiZTAwYjJhOTY5YTg2NTI1YmNjYTlmMmM3NmRlYjE3NmM1ZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTJkOTFiNThkOTExZDEyYmFiOWM5MGVjYzU2ODExOTZhNDY3NmVhMGQxZmNmOWZhZGE4NjFhMGJmN2VkMGFlZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiN2EyMDkwY2UzNTEyNTIzMjA5ZDRkYmRhYzU1NjdkY2U0ODgwNjY5YmJkZjM0NDkyNmE3YWMxYmE4ZTZkNmE3ZiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMjg0ZmY4ODMyZTY5ZTFjNzdhOGFmMzYwYWMxYjFiZGEyODllOGZmNmVjNjU0MDVmNGRjMWE5NjBkODIyZjM1MSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_44c39cb5f9f34d97b3122630b544b1ee",
+      "statement": "The ubiquitous language defined in CONTEXT.md mandates canonical terminology for run structure, dungeon entities, and combat simulation, binding code and comments to designated terms.",
+      "evidence": [
+        {
+          "resource": "repo://CONTEXT.md#L5-L122",
+          "version": "repo-lines-v1:sha256:1c556af0d62d406f3a5368daeca7171d41000227c77c251012026def28fb579a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIwZDM4OTViYzA4NjVlOWNjOTYxMDIwYjU3ZmU5ZWU2NjdjYmE0ZjUyYTBlZDIzNmI5ZDA2M2Y1YjIxYjBkNDFlIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0ZTBiNGZmMzhiODUyNjdkNDc1NTRlZGY2ZjQ1OWM2YTc1ZjcxODRmMDVlNTE5YTc4YTcxMDk4YjI5N2UwODg2IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJmMWYxZjI5Y2RhZTI4MjAxYWM0N2FmZDI2MDllYzUyOGU2ZmU3NjI2ZjA3YzgyNTJkNjQyN2ViNzUyOTVjOWQxIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-15T19:24:01.244Z"
+  }
+}

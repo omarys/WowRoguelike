@@ -138,7 +138,10 @@ module private Font5x7 =
         '.', [| 0uy; 96uy; 96uy; 0uy; 0uy |]
         ',', [| 0uy; 112uy; 48uy; 0uy; 0uy |]
         '-', [| 8uy; 8uy; 8uy; 8uy; 8uy |]
-        ':', [| 0uy; 54uy; 54uy; 0uy; 0uy |] ]
+        ':', [| 0uy; 54uy; 54uy; 0uy; 0uy |]
+        '\'', [| 6uy; 0uy; 0uy; 0uy; 0uy |]
+        '(', [| 62uy; 65uy; 0uy; 0uy; 0uy |]
+        ')', [| 0uy; 0uy; 0uy; 65uy; 62uy |] ]
 
   let ofChar (c: char) = glyphs.TryFind c |> Option.defaultValue block
 
@@ -147,7 +150,11 @@ type RoguelikeGame() as this =
 
   let graphics = new GraphicsDeviceManager(this)
 
-  let tile = 28
+  /// Must match TILE and SPRITE in tools/slice_tileset.py: the PNGs are cut to
+  /// the size they are drawn at, so nothing is resampled at runtime. A sprite
+  /// is taller than its tile and stands on it, overhanging the row above.
+  let tile = 40
+  let spriteSize = 48
   let columns = 22
   let rows = 13
 
@@ -161,6 +168,10 @@ type RoguelikeGame() as this =
   /// The strip below the grid that holds the clickable controls.
   let uiTop = rows * tile + 8
   let uiHeight = 140
+
+  /// The combat log box below the control strip. The window is taller than the
+  /// board so the log gets its own room rather than covering it.
+  let logHeight = 188
 
   /// The side panel to the right of the grid: the party roster on top, the
   /// queue below.
@@ -179,6 +190,10 @@ type RoguelikeGame() as this =
   let mutable pixel: Texture2D = null
   let mutable disc: Texture2D = null
   let mutable fontTex: Texture2D = null
+
+  /// Art sliced from the tileset by tools/slice_tileset.py, keyed by file name.
+  /// A missing file is just absent: drawing falls back to the plain shapes.
+  let mutable textures: Map<string, Texture2D> = Map.empty
 
   let mutable world = Content.gully 1UL
   let mutable ticksPerSecond = 20.0
@@ -248,6 +263,106 @@ type RoguelikeGame() as this =
     else
       Color(210, 80, 80)
 
+  /// Every PNG under Assets/, keyed by file name without extension.
+  let loadTextures () : Map<string, Texture2D> =
+    let root = IO.Path.Combine(AppContext.BaseDirectory, "Assets")
+
+    if not (IO.Directory.Exists root) then
+      Map.empty
+    else
+      IO.Directory.GetFiles(root, "*.png", IO.SearchOption.AllDirectories)
+      |> Array.map (fun path ->
+        let tex = Texture2D.FromFile(this.GraphicsDevice, path)
+        // PNGs hold straight alpha; SpriteBatch's default blend expects
+        // premultiplied, or keyed edges draw as bright fringes.
+        let data = Array.zeroCreate<Color> (tex.Width * tex.Height)
+        tex.GetData data
+
+        for i in 0 .. data.Length - 1 do
+          let c = data.[i]
+          let a = int c.A
+          data.[i] <- Color(int c.R * a / 255, int c.G * a / 255, int c.B * a / 255, a)
+
+        tex.SetData data
+        IO.Path.GetFileNameWithoutExtension path, tex)
+      |> Map.ofArray
+
+  /// Which sliced sprite stands for an entity. Serpent Form swaps the caster
+  /// for the snake; names with no art fall back to a disc.
+  let spriteKey (e: Entity) =
+    if SimState.isShifted e then
+      "serpent"
+    else
+      match e.Name with
+      | "Warrior" -> "warrior"
+      | "Priest" -> "priest"
+      | "Rogue" -> "rogue"
+      | "Mage" -> "mage"
+      | "Druid"
+      | "Naralex" -> "druid"
+      | "Raptor" -> (let (EntityId i) = e.Id in if i % 2 = 0 then "raptor0" else "raptor1")
+      | "Druid of the Fang" -> "fang_druid"
+      | "Lady Anacondra" -> "anacondra"
+      | "Lord Cobrahn" -> "cobra_lord"
+      | "Lord Pythas" -> "pythas"
+      | "Lord Serpentis" -> "serpentis"
+      | "Mutanus the Devourer" -> "mutanus"
+      | n when n.Contains "Turtle" -> "deviate_turtle"
+      | _ -> ""
+
+  /// The art faces right; flip it to face the current target, or by default
+  /// the party faces right and the hostiles face left, towards each other.
+  let facesLeft (e: Entity) =
+    match e.Target |> Option.bind (fun t -> SimState.tryEntity t world) with
+    | Some t when t.Pos.X <> e.Pos.X -> t.Pos.X < e.Pos.X
+    | _ -> e.Faction <> Party
+
+  /// The rectangle an entity's art actually covers: a sprite is taller than its
+  /// tile and stands on it, while the disc fallback sits lower. Drawing and
+  /// hit-testing both measure from here, so a click lands on what is on screen.
+  let artRect (e: Entity) =
+    let fx, fy = drawnAt e
+    let cx = int (fx * float tile + float tile / 2.0)
+    let feet = int (fy * float tile) + tile - 3
+
+    match textures.TryFind(spriteKey e) with
+    | Some _ -> Rectangle(cx - spriteSize / 2, feet - spriteSize, spriteSize, spriteSize)
+    | None ->
+      let size = if e.Faction = Party then 22 else 20
+      Rectangle(cx - size / 2, feet - size - 6, size, size)
+
+  /// A stable per-tile number, so floor variety and decorations hold still.
+  let tileHash (x: int) (y: int) = ((x * 73856093) ^^^ (y * 19349663)) &&& 0x7fffffff
+
+  /// Fill `area` with the dark cobble texture, then a mossy two-tone rim.
+  let panel (area: Rectangle) =
+    match textures.TryFind "panel" with
+    | Some t ->
+      let mutable y = area.Y
+
+      while y < area.Bottom do
+        let h = min t.Height (area.Bottom - y)
+        let mutable x = area.X
+
+        while x < area.Right do
+          let w = min t.Width (area.Right - x)
+          spriteBatch.Draw(t, Rectangle(x, y, w, h), Nullable(Rectangle(0, 0, w, h)), Color(92, 92, 100))
+          x <- x + w
+
+        y <- y + h
+    | None -> spriteBatch.Draw(pixel, area, Color(18, 20, 28))
+
+    let edge (colour: Color) (inset: int) =
+      let r = Rectangle(area.X + inset, area.Y + inset, area.Width - 2 * inset, area.Height - 2 * inset)
+      spriteBatch.Draw(pixel, Rectangle(r.X, r.Y, r.Width, 1), colour)
+      spriteBatch.Draw(pixel, Rectangle(r.X, r.Bottom - 1, r.Width, 1), colour)
+      spriteBatch.Draw(pixel, Rectangle(r.X, r.Y, 1, r.Height), colour)
+      spriteBatch.Draw(pixel, Rectangle(r.Right - 1, r.Y, 1, r.Height), colour)
+
+    edge (Color(8, 8, 10)) 0
+    edge (Color(78, 112, 58)) 1
+    edge (Color(30, 40, 28)) 2
+
   let measure (text: string) = text.Length * cellW
 
   let buildFontTexture () =
@@ -284,6 +399,11 @@ type RoguelikeGame() as this =
           Rectangle(code * cellW, 0, glyphW * fontScale, glyphH * fontScale),
           colour))
 
+  /// Text with a 1px drop shadow, for labels over the textured board.
+  let drawTextShadow (text: string) (x: int) (y: int) (colour: Color) =
+    drawText text (x + 1) (y + 1) (Color.Black * 0.85f)
+    drawText text x y colour
+
   /// Break text into lines of at most `maxChars`, on word boundaries.
   let wrapWords (maxChars: int) (text: string) : string list =
     let words = text.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
@@ -309,16 +429,17 @@ type RoguelikeGame() as this =
     wrapWords maxChars text
     |> List.iteri (fun i line -> drawText line x (y + i * (cellH + 2)) colour)
 
-  /// The alive entity under a click, hit-tested against its interpolated centre.
+  /// The alive entity under a click: the union of the tile it stands on and the
+  /// art drawn above it, so the overhanging head is reachable without taking the
+  /// click away from the tile below.
   let entityAt (mx: int) (my: int) =
+    let tileRect (e: Entity) =
+      let fx, fy = drawnAt e
+      Rectangle(int (fx * float tile), int (fy * float tile), tile, tile)
+
     world.Entities
     |> List.tryFind (fun e ->
-      SimState.alive e
-      && (let fx, fy = drawnAt e
-          let cx = int (fx * float tile + float tile / 2.0)
-          let cy = int (fy * float tile + float tile / 2.0)
-          let size = if e.Faction = Party then 22 else 20
-          abs (mx - cx) <= size / 2 + 4 && abs (my - cy) <= size / 2 + 4))
+      SimState.alive e && (Rectangle.Union(tileRect e, artRect e)).Contains(mx, my))
 
   let nameOf (id: EntityId) =
     SimState.tryEntity id world |> Option.map (fun e -> e.Name) |> Option.defaultValue "?"
@@ -470,7 +591,7 @@ type RoguelikeGame() as this =
 
   do
     graphics.PreferredBackBufferWidth <- panelX + panelW
-    graphics.PreferredBackBufferHeight <- uiTop + uiHeight
+    graphics.PreferredBackBufferHeight <- uiTop + uiHeight + logHeight
     this.Content.RootDirectory <- "Content"
     this.IsMouseVisible <- true
 
@@ -496,6 +617,7 @@ type RoguelikeGame() as this =
     pixel.SetData([| Color.White |])
     disc <- makeDisc 32
     fontTex <- buildFontTexture ()
+    textures <- loadTextures ()
 
   override _.Update(gameTime: GameTime) =
     let keyboard = Keyboard.GetState()
@@ -613,7 +735,7 @@ type RoguelikeGame() as this =
     base.Update(gameTime)
 
   override _.Draw(gameTime: GameTime) =
-    this.GraphicsDevice.Clear(Color(12, 12, 18))
+    this.GraphicsDevice.Clear(Color(10, 10, 14))
 
     let validIds =
       match pendingAction with
@@ -623,86 +745,146 @@ type RoguelikeGame() as this =
 
     spriteBatch.Begin()
 
+    let decorations = [| "mushroom_green"; "mushroom_blue"; "mushroom_teal"; "fern" |]
+
     for y in 0 .. rows - 1 do
       for x in 0 .. columns - 1 do
         let p = { X = x; Y = y }
+        let dest = Rectangle(x * tile, y * tile, tile, tile)
+        let h = tileHash x y
 
-        let colour =
-          if Grid.isWall world.Grid p then Color(46, 44, 40) else Color(24, 26, 34)
+        if Grid.isWall world.Grid p then
+          // Rock with no floor beside it is deep inside the wall: shade it so
+          // the cave edge reads.
+          let exposed =
+            [ -1, 0; 1, 0; 0, -1; 0, 1 ]
+            |> List.exists (fun (dx, dy) -> Grid.isFloor world.Grid { X = x + dx; Y = y + dy })
 
-        spriteBatch.Draw(pixel, Rectangle(x * tile, y * tile, tile - 1, tile - 1), colour)
+          match textures.TryFind "wall" with
+          | Some t -> spriteBatch.Draw(t, dest, (if exposed then Color(200, 200, 205) else Color(80, 80, 92)))
+          | None -> spriteBatch.Draw(pixel, Rectangle(dest.X, dest.Y, tile - 1, tile - 1), Color(46, 44, 40))
+        else
+          match textures.TryFind(if h % 3 = 0 then "floor1" else "floor0") with
+          | Some t ->
+            // Mirroring by the tile hash hides the repeat.
+            let flip = if (h >>> 3) % 2 = 0 then SpriteEffects.None else SpriteEffects.FlipHorizontally
+            spriteBatch.Draw(t, dest, Nullable(), Color(190, 190, 190), 0.0f, Vector2.Zero, flip, 0.0f)
+          | None -> spriteBatch.Draw(pixel, Rectangle(dest.X, dest.Y, tile - 1, tile - 1), Color(24, 26, 34))
 
-    for e in world.Entities do
+          if (h >>> 5) % 100 < 7 then
+            match textures.TryFind decorations.[(h >>> 12) % decorations.Length] with
+            | Some d ->
+              let ox = (h >>> 16) % (tile - d.Width + 1)
+              spriteBatch.Draw(d, Rectangle(dest.X + ox, dest.Bottom - d.Height - 2, d.Width, d.Height), Color.White * 0.9f)
+            | None -> ()
+
+    // Back to front: the dead first, then by row, so a lower sprite overlaps
+    // the one standing behind it.
+    let drawOrder =
+      world.Entities |> List.sortBy (fun e -> SimState.alive e, snd (drawnAt e))
+
+    for e in drawOrder do
       let fx, fy = drawnAt e
 
       let cx = int (fx * float tile + float tile / 2.0)
-      let cy = int (fy * float tile + float tile / 2.0)
-      let size = if e.Faction = Party then 22 else 20
-      let colour = entityColour e
+      let feet = int (fy * float tile) + tile - 3
+      let top = feet - spriteSize
+      let art = textures.TryFind(spriteKey e)
+      let flip = if facesLeft e then SpriteEffects.FlipHorizontally else SpriteEffects.None
+      let box = artRect e
+
+      let drawArt (tint: Color) =
+        match art with
+        | Some t -> spriteBatch.Draw(t, box, Nullable(), tint, 0.0f, Vector2.Zero, flip, 0.0f)
+        | None -> spriteBatch.Draw(disc, box, entityColour e)
 
       if SimState.alive e then
-        // Halo for the selected member and for valid targeting candidates.
-        match selected with
-        | Some sid when sid = e.Id -> spriteBatch.Draw(disc, Rectangle(cx - 16, cy - 16, 32, 32), Color(120, 200, 255) * 0.55f)
-        | _ ->
-          if validIds.Contains e.Id then
-            let halo = if e.Faction = Party then Color(110, 240, 150) else Color(240, 110, 110)
-            spriteBatch.Draw(disc, Rectangle(cx - 16, cy - 16, 32, 32), halo * 0.55f)
+        spriteBatch.Draw(disc, Rectangle(cx - 15, feet - 5, 30, 10), Color.Black * 0.5f)
 
-        spriteBatch.Draw(
-          disc,
-          Rectangle(cx - size / 2, cy - size / 2, size, size),
-          colour
-        )
+        // A ring on the ground for the selected member and for valid targets.
+        let ring =
+          match selected with
+          | Some sid when sid = e.Id -> Some(Color(120, 200, 255))
+          | _ when validIds.Contains e.Id -> Some(if e.Faction = Party then Color(110, 240, 150) else Color(240, 110, 110))
+          | _ -> None
 
-        bar (cx - 14) (cy - size / 2 - 7) 28 4 (float e.Health / float e.MaxHealth)
+        ring |> Option.iter (fun c -> spriteBatch.Draw(disc, Rectangle(cx - 19, feet - 8, 38, 16), c * 0.75f))
+
+        let tint =
+          if SimState.isSleeping e then Color(170, 170, 110)
+          else Color.White
+
+        drawArt tint
+
+        bar (cx - 16) (top - 4) 32 4 (float e.Health / float e.MaxHealth)
           (if e.Faction = Party then Color(90, 220, 110) else Color(220, 90, 90))
 
         if e.MaxResource > 0 then
-          bar (cx - 14) (cy - size / 2 - 11) 28 2 (float e.Resource / float e.MaxResource) (Color(90, 150, 230))
+          bar (cx - 16) (top - 7) 32 2 (float e.Resource / float e.MaxResource) (Color(90, 150, 230))
 
         if e.Casting.IsSome then
-          bar (cx - 14) (cy + size / 2 + 2) 28 3 1.0 (Color(240, 200, 90))
+          bar (cx - 16) (top - 11) 32 3 1.0 (Color(240, 200, 90))
 
         if e.Faction = Party then
-          drawText e.Name (cx - measure e.Name / 2) (cy + 16) (Color(220, 220, 230))
+          drawTextShadow e.Name (cx - measure e.Name / 2) (feet + 2) (Color(220, 220, 230))
       else
-        spriteBatch.Draw(pixel, Rectangle(cx - 6, cy - 6, 12, 12), colour)
+        drawArt (Color(70, 70, 70) * 0.55f)
 
     // The side panel: the party's health and mana, then the queue.
-    spriteBatch.Draw(pixel, Rectangle(panelX, 0, panelW, uiTop), Color(18, 20, 28))
+    panel (Rectangle(panelX, 0, panelW, uiTop))
     let m = Mouse.GetState()
     let rowChars = max 1 ((panelW - 24) / cellW)
 
-    drawText "PARTY" (panelX + 6) 8 (Color(180, 180, 200))
+    drawTextShadow "PARTY" (panelX + 8) 8 (Color(190, 214, 160))
     let party = world.Entities |> List.filter (fun e -> e.Faction = Party)
+    let portrait = rosterRowH - 6
+    let barX = panelX + 8 + portrait + 6
+    let barW = 84
+    let textX = barX + barW + 6
+    let nameChars = max 1 ((panelX + panelW - barX - 8) / cellW)
 
     for i, e in party |> List.indexed do
       let y = rosterTop + i * rosterRowH
-      drawText (shorten rowChars e.Name) (panelX + 6) (y + 1) (Color(224, 224, 232))
+
+      if selected = Some e.Id then
+        spriteBatch.Draw(pixel, Rectangle(panelX + 4, y - 2, panelW - 8, rosterRowH - 2), Color(120, 200, 255) * 0.18f)
+
+      let frame = Rectangle(panelX + 8, y, portrait, portrait)
+      spriteBatch.Draw(pixel, frame, Color(78, 112, 58))
+      spriteBatch.Draw(pixel, Rectangle(frame.X + 1, frame.Y + 1, frame.Width - 2, frame.Height - 2), Color(14, 16, 14))
+
+      match textures.TryFind(spriteKey e) with
+      | Some t ->
+        let tint = if SimState.alive e then Color.White else Color(80, 80, 80)
+        // The sprite's upper part is the face; crop to it for a bust portrait.
+        spriteBatch.Draw(t, Rectangle(frame.X + 1, frame.Y + 1, frame.Width - 2, frame.Height - 2), Nullable(Rectangle(8, 0, 32, 32)), tint)
+      | None -> spriteBatch.Draw(disc, Rectangle(frame.X + 6, frame.Y + 6, portrait - 12, portrait - 12), entityColour e)
+
+      drawTextShadow (shorten nameChars e.Name) barX (y + 1) (Color(224, 224, 232))
       let hpPct = if e.MaxHealth > 0 then e.Health * 100 / e.MaxHealth else 0
-      bar (panelX + 6) (y + 15) 104 8 (float e.Health / float (max 1 e.MaxHealth)) (Color(90, 220, 110))
-      drawText (sprintf "%d/%d %d%%" e.Health e.MaxHealth hpPct) (panelX + 116) (y + 13) (Color(210, 240, 210))
+      bar barX (y + 15) barW 8 (float e.Health / float (max 1 e.MaxHealth)) (Color(90, 220, 110))
+      drawText (sprintf "%d/%d %d%%" e.Health e.MaxHealth hpPct) textX (y + 13) (Color(210, 240, 210))
       let mpPct = if e.MaxResource > 0 then e.Resource * 100 / e.MaxResource else 0
-      bar (panelX + 6) (y + 27) 104 8 (float e.Resource / float (max 1 e.MaxResource)) (Color(90, 150, 230))
-      drawText (sprintf "%d/%d %d%%" e.Resource e.MaxResource mpPct) (panelX + 116) (y + 25) (Color(210, 220, 245))
+      bar barX (y + 27) barW 8 (float e.Resource / float (max 1 e.MaxResource)) (Color(90, 150, 230))
+      drawText (sprintf "%d/%d %d%%" e.Resource e.MaxResource mpPct) textX (y + 25) (Color(210, 220, 245))
 
     let title =
       match selected with
       | Some aid -> sprintf "queue %s" (nameOf aid)
       | None -> "queue all"
 
-    drawText (shorten rowChars title) (panelX + 6) (queueTop - 16) (Color(180, 180, 200))
+    drawTextShadow (shorten rowChars title) (panelX + 8) (queueTop - 16) (Color(190, 214, 160))
     let rows = queueRows ()
 
     for (rect, i) in rows do
       let hover = rect.Contains(m.X, m.Y)
-      spriteBatch.Draw(pixel, rect, if hover then Color(96, 62, 62) else Color(34, 30, 38))
+      spriteBatch.Draw(pixel, rect, if hover then Color(110, 52, 48) * 0.9f else Color(12, 14, 12) * 0.75f)
+      spriteBatch.Draw(pixel, Rectangle(rect.X, rect.Y, 2, rect.Height), if hover then Color(220, 110, 90) else Color(78, 112, 58))
       let line1, line2 = describeQueued pending.[i]
-      drawText (shorten rowChars line1) (rect.X + 4) (rect.Y + 3) (Color(224, 224, 232))
+      drawText (shorten rowChars line1) (rect.X + 6) (rect.Y + 3) (Color(224, 224, 232))
 
       if line2 <> "" then
-        drawText (shorten rowChars line2) (rect.X + 4) (rect.Y + 17) (Color(150, 150, 165))
+        drawText (shorten rowChars line2) (rect.X + 6) (rect.Y + 17) (Color(150, 150, 165))
 
     if List.isEmpty rows then
       let text =
@@ -710,16 +892,18 @@ type RoguelikeGame() as this =
         | Some aid -> defaultAction aid
         | None -> "nothing queued"
 
-      drawTextWrapped text (panelX + 12) (queueTop + 2) (panelW - 24) (Color(120, 120, 138))
+      drawTextWrapped text (panelX + 12) (queueTop + 2) (panelW - 24) (Color(130, 136, 128))
 
     // The clickable strip.
     let panelW = this.GraphicsDevice.Viewport.Width
-    spriteBatch.Draw(pixel, Rectangle(0, uiTop, panelW, uiHeight), Color(20, 22, 30))
+    panel (Rectangle(0, uiTop, panelW, uiHeight))
 
     for (rect, label, _) in uiButtons () do
       let hover = rect.Contains(m.X, m.Y)
-      spriteBatch.Draw(pixel, rect, if hover then Color(70, 78, 96) else Color(42, 46, 60))
-      drawText label (rect.X + 6) (rect.Y + 5) (if hover then Color.White else Color(210, 210, 220))
+      spriteBatch.Draw(pixel, rect, if hover then Color(120, 160, 84) else Color(60, 84, 46))
+      spriteBatch.Draw(pixel, Rectangle(rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2), if hover then Color(58, 78, 44) else Color(26, 30, 24))
+      spriteBatch.Draw(pixel, Rectangle(rect.X + 1, rect.Y + 1, rect.Width - 2, 1), Color.White * 0.08f)
+      drawTextShadow label (rect.X + 6) (rect.Y + 6) (if hover then Color.White else Color(214, 220, 200))
 
     let hint =
       match selected, pendingAction with
@@ -729,6 +913,26 @@ type RoguelikeGame() as this =
       | None, _ -> "Click a party member to command them"
 
     drawTextWrapped hint 8 (uiTop + 100) (panelW - 16) (Color(160, 160, 170))
+
+    // The combat log. `world.Log` is newest-first, so reverse it to read the
+    // way a log should: oldest visible line at the top, newest at the bottom.
+    let logTop = uiTop + uiHeight
+    let bodyTop = logTop + 24
+    let lineH = cellH + 2
+    let lines = max 1 ((this.GraphicsDevice.Viewport.Height - bodyTop - 6) / lineH)
+    let logChars = max 1 ((panelW - 16) / cellW)
+
+    panel (Rectangle(0, logTop, panelW, this.GraphicsDevice.Viewport.Height - logTop))
+    drawTextShadow "COMBAT LOG" 8 (logTop + 6) (Color(190, 214, 160))
+
+    world.Log
+    |> List.truncate lines
+    |> List.rev
+    |> List.iteri (fun i line ->
+      drawText (shorten logChars line) 8 (bodyTop + i * lineH) (Color(198, 198, 208)))
+
+    if List.isEmpty world.Log then
+      drawText "nothing has happened yet" 8 bodyTop (Color(120, 120, 138))
 
     spriteBatch.End()
     base.Draw(gameTime)

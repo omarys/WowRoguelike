@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:46e3d39d22c16206f4480128b0d1c8a92835448f0730bc6336c4303c293d211c",
+  "claims": [
+    {
+      "id": "claim_3d58dd47595e46fba502812c2f2e4df8",
+      "statement": "The 20Hz simulation pipeline in SimTick.step strictly orders tick phases such that scheduled player commands execute before cooldowns, resources, auras, movement, combat casts, and AI decisions.",
+      "evidence": [
+        {
+          "resource": "repo://src/WowRoguelike.Core/SimTick.fs#L427-L450",
+          "version": "repo-lines-v1:sha256:2ca687e7221bfd073a03a288a4565c10a78a9be9ab9249ffd184e50d41401542:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUwNzg3MzA4NGQ4MWI2MjE1ZTI4YzZmYWRmZTE5NmMzOWI0NDg2NjZkYzM0OTJkZTVmYjk0MWJhZTdjOGIyZDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVkNzVlMjE5MzlkNmYwNTU5OTk1ZmYyNDQ4YzQ5OWFiNzJlY2QxMTRiMmU2ZDdjNDg4ZjU3ZmFkZGE4NzJjMjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoyLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjczNjg3OTQ4ZTZjNzRmZmU3Y2ZhZTdlNzk5M2YzN2QzOWZiNzdhMzZmZjYzN2M5ZmJhOGQ4ZGUzMTMwY2I2YzYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_10671a40ac0240d6ae9b8bb6d149a499",
+      "statement": "Hostile mob resource regeneration is held at zero in advanceResource, imposing finite mana pools that guarantee casters exhaust their resources after a fixed number of casts.",
+      "evidence": [
+        {
+          "resource": "repo://src/WowRoguelike.Core/SimTick.fs#L58-L65",
+          "version": "repo-lines-v1:sha256:51c7a27ac3acadcf39faa7bbc81717f27cda5fdd7f32785ce4e41b5fdf257135:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWY1OWRlY2EzMmI4YTBiZTkyZDcwOTkzZjIxZWIxOGNjYzYwNDRhZTBkNzUzM2Q3ZjhkMThhNzNkZjI3NGQxMiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZTVhYzIwNjRlOWZhMGI5ZGVkMDBkMTZiNDlmY2JlNWRmNWNlZmM0YTEyMTFhNmQxOGFlNDQyZDg4ZjFhNDczNCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNDU2ZjQ4ZGRlMjk0N2Q0ZDc2YjA4OWM3YWU2MzEyYTQwYmYwNzM4NzczMTVmMTgyMmE2YTkzMmU3ZjllM2IyOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOTRjNjVhYjZmYzRkZGExNjhlZDlhMjY1NGY1ZTRkOWFhNTY3MzJiMjc4NDMxM2U1MWVkYTkwZDhkOTUwOTdkMSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_0439dc034a4f44d8ad10fc7ff7c6c7f2",
+      "statement": "The splitmix64 PRNG implementation splits the initial run seed into partitioned independent streams for dungeon generation and combat to prevent layout changes from perturbing combat rolls.",
+      "evidence": [
+        {
+          "resource": "repo://docs/adr/0002-hand-rolled-prng-integer-core.md#L8-L12",
+          "version": "repo-lines-v1:sha256:2ec9ecb1a6962051c30192521f215575b1ac1f51c27014e6e25a7e0d7e6ef8f4:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzIxNjM4NzhlNzBjYjYyZjVhYzVjYTZiYjQ5Zjk5ZDc4Y2QxYWZmNmU3ZmRjYmVjNWUxMDhlMTczZjMxZTZiOSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTg0ODNmNDc5NWY5ZTI4M2M2OGFjMzE5ZDU5Y2I4MDIyZmI3NTBlZjg3ZDg4MzQ2NWZkNDMzNzBjZjIxZmYyMSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYWYzZDBmNjkxMGFhYjk4NTk1NDNmNzM5ZTBkYTg5OGQ1Njg5Y2FlNTk0ZjU2OWZhMmRkNzkzNTAyMTgxMmNlYSJ9"
+        },
+        {
+          "resource": "repo://src/WowRoguelike.Core/Rng.fs#L28-L39",
+          "version": "repo-lines-v1:sha256:e868c36bc6086aebb48637377ca6eb06d5e6b9c3ba605406b06142cd8610337c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJlMGM3MjNlZWNiZTUyOWMwZWRhNWQ3NzE2Mjc2NDQ0YjQ2Mjk5NDE5MjZmZDQ0MzlkMzVjYmYxMDAzMWI3YzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU3Mzk0Y2MwZWMxMTNmODdhYWQ2ZTUxZmYxMTYxNjliMWM4MmIwNjIzNzAyMmVjMzY3MWFkZTNkZmEwN2RmMmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdmMGM1MGIxMzc4OWExMGNhYzA4OGFlNDU2ZWEzNGI4ZjVkY2FkZDdjZjFkNjgxYTEwZWM5OTQ0MTBkNDI4MDUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d5d872a60cd6413b8756f4a53db6dd16",
+      "statement": "Dump.world serializes canonical entity coordinates, health, cooldowns, and threat into a diffable string for golden replay verification while intentionally excluding log messages to prevent string changes from registering as regressions.",
+      "evidence": [
+        {
+          "resource": "repo://src/WowRoguelike.Core/Dump.fs#L3-L7",
+          "version": "repo-lines-v1:sha256:1842da3a341b4cea1b7e46bc826bfaa9d844da680f78b37213d089c8c8d4fa44:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMjQ5OTQyYzAwOTc5NDk2MjllMDJkNmYzNzJkOTNmN2U5Nzk4M2FhM2I4ODVmZTA2Yjg2YmY2MTNhODk4NmZiOSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMjgwOTBkYzIzYjE2YjFlODcyNDM2YjNiYzU2MWY5YjVmZjQzMDlmZGYzZDljOTkyYWI3NjUwNGRhMmUzOWEwZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjIsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiY2EzYjQyZmQxN2IxNDk5M2VjOGZmMDZhMDAxYTRjMGVlNmU4ZGRkMTExNmZhZWNjMTY4NWE1ZmUzZGQyMDY1OCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMTdjMmUwN2M3YTk0YzM1NTkyZjg2NzUyNjU3ODk0MGNkNzVkMWE3MWQ1ZWY5ZDAwOTUzZjYxNjk5MmVkMDc4MCJ9"
+        },
+        {
+          "resource": "repo://src/WowRoguelike.Core/Dump.fs#L57-L70",
+          "version": "repo-lines-v1:sha256:321df809469679a5766aa8aa6da4cf3fcfc266a9dc645baca1861dd99f0071d1:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ5MmJhYTc5ZGVhNmNiZWY1OWEzYTU2MWEzZWM5N2Y4M2I2OTRlODhjODY4MTY1NWI2MTI4ODRiM2JkZjM3N2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ5NGYzNTQ1Y2QxOGM3YmQ1ZGU0NzVhNDhlMmVhOTlmMzJlMjhiYjAyMzUwMTIzZjJlNDdiODUzYjA3ZDdiYmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRkODc1NGNiZDAxZmZiNjljZWEwNmE0OWRmMDJlZDNlOWRlOTdmZjk2MmJjNmIzNzk1ZDZhY2RmMDViZGU0MTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVkMDQ1NTNlNmE5NWJlOWU5NDVjZjE4YjRkNGMyZDY2YmQ1Y2RiOWViM2NjMDRmYzllYWQyZjA4MTQ2MjE1MGYifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-15T19:24:01.244Z"
+  }
+}

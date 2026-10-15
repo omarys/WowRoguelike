@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:e57aef54ed16743c04cf8122a1a0e186dec12edde580c1d6a0f4f091da1120a2",
+  "claims": [
+    {
+      "id": "claim_4537a11b55074a4682ecddcf2fea69b6",
+      "statement": "The 120-seed headless regression sweep executed by sim runs 120 4000 serves as the primary behavioral fingerprint to prove that refactors and performance optimizations have not altered gameplay outcomes.",
+      "evidence": [
+        {
+          "resource": "repo://README.md#L129-L141",
+          "version": "repo-lines-v1:sha256:62ff7998147749a39cb29a14b1e06f814100fbe66825c8084c90a046e7c4285d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2YmMyODljMGY3OWI5YjU2MWRkZjU3MWJiMmUxYmVmZmFlMWJhNzFlNTFiMjFmMjM1NDc1NGZlMTlmNTkzYjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNjYmJlNDZiMDQzMDRlZTZkODJjMzA1NTY0YWQxM2FkMjFhNzM2ZmNjZWZhY2NjNWJiNDY2M2VjNmUyNjkyN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRhZjFjZDQ4YWUzMzUzYWRhMWNhMzAyZmUyOGQxMTg3MDc3Yjg5ZTE5MDQxZjMwZjBjNWU0OGRkODEwNTdhNTcifQ"
+        },
+        {
+          "resource": "repo://docs/HANDOFF.md#L97-L102",
+          "version": "repo-lines-v1:sha256:6cbbce86840f49af2c32f280b2e3069feabaed45f46b7cae468786243d035341:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDQwOWI1YTcwNWZiMTg2MWIwMDU0OGYzNjVjOWU0YTIwOTU2ODg2ZDliNmIzM2UwOGUwYjYyNmYzMmY1Yjc2YyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZmZiMTNlZWM2ZjE1YWVjYjUzOWViZTE2MGIyYTk0MGU0OWJhODA1ZTI3MzFlN2MwOGQ3MGJkNzY5YzliOWFkYyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTFiYjk0YTE5M2U5YzdmMTBiYmNmYWYwZDU0M2VlZTlmYTZjMmQ0OTQ5NTVhYmRlNjU2Y2IxMDg1N2I3ZDY1MiJ9"
+        },
+        {
+          "resource": "repo://mise.toml#L34-L37",
+          "version": "repo-lines-v1:sha256:37cd0dc8e21250979df49c008470512081b2bfef119e837d15bb64159eda0d05:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjg4OTNlMTk5NTVjOTY3YTM1NDE1M2M2NzNhNDY4NWEyNTE2MDZiYTRhZjJmYjBmMzRhYjYzNDJlMzU5OWMwOSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNDE4NGIxZTRiNTkwYjYzNWI3MzA3YWE0N2I0YWUzZDU2YWZkODJiZGM0OGNmNjcwY2Y3YWIxZmFiMmU3OTI0MCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYzYyMWZjYjE5NzMxMWNmZWFiMjdiNzhiMjQxMjZhNzMxMmVlZGZjYmI5MDcwNTM1NDA3ZTIyMmVhY2RhNGU1YSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_d53662aec91a4154a191aab284e10858",
+      "statement": "Pre-commit hooks are tiered into a fast pre-commit stage running Release builds in ~6s and a thorough pre-push stage running dotnet test and the 120-seed simulation sweep in ~1m.",
+      "evidence": [
+        {
+          "resource": "repo://.pre-commit-config.yaml#L1-L10",
+          "version": "repo-lines-v1:sha256:ea4cdf78def8427126b5a318533793ff7b09549419d957f6880e0289eabaae7a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3ZjQ3Y2M5ZjA5ODQyNzFiNGJkZGViZTM0MmI0MTZmYmJmNWY3MjAyNjRkZDJkMTUxNGRiMDhkMTYwYjUzMjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIxZDIzNWVjNjE0ZGU0ZTRmODM3ZDllZjFmZTg0MjA1N2IwMjIwZWRjZjYzOWI2OTc1YzVjZDIzZmE2YjYyYWQifQ"
+        },
+        {
+          "resource": "repo://.pre-commit-config.yaml#L27-L50",
+          "version": "repo-lines-v1:sha256:20dfb291b40b57b07000057fb74f96ccbafbb98d62e131aa38f6e5e7f66c6e84:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEwNWFjN2E3OGNlODgzZmExOGI3MDdlODJmMzU1ZjRkZDQ0OWNmZWNjNzkyZmVkMWYwZGQyOGFlM2Y2MDk4NTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlOTQwZjY2OWI3MWVlZWVlZjc2NWYyYzEyMmJhNzdmNGU3OGQxMmUwMDNlZmVjODc3NDQzZTgyMTBmNzgxNzkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM0YmJlZDk2YWQwYjVlZDFiN2I1Y2JjZTE2NWIyZTk1N2I0NjdmY2EyYzdjYWE1MzYwNTM3N2I5NTAwNTk4OWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI3Yjg1OTEwY2JiM2RmMjViNzZiN2FhNmU0ODE5MDhjZDk0MmU5N2ZmNjg0ZTY3YmQ5OTExOTI4YTRiNGZhYTcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_34af93b782534718ac8a2e7f816862e1",
+      "statement": "Bench.autoPilot acts as a scripted headless commander within Core to provide realistic player input for benchmarks without referencing MonoGame or functioning as gameplay companion AI.",
+      "evidence": [
+        {
+          "resource": "repo://docs/HANDOFF.md#L247-L250",
+          "version": "repo-lines-v1:sha256:eb80148238af5e34dc137a7d54784ac3d4ef6eaf4f80bb2490102dd6ecd51d02:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWY1MTVkMTBjNGI1ZmIxOTRlNjg4ZWU2ZDg3NGNkYjFiZmEyZTgwYjljMTg5ZjY1MTA5NmY2MGY1ZDAyNDkxZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYmYwMjQ0NDY1YjI4MmE5N2FjMjcxZDlmNDE4ZDE2MTU2NGQ3NTU4MjNjZGM5YjVmYzQwNzE3MjQ4OTNhY2IzNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiY2EzNWIxYjJmOWM3Njc2YTRkYjFmYmE2YzVhMDUxM2E5YWEwY2Y1NzI3NGZiNjFhMTgyMjg4MmY1Njc3NjkzYiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDc0OTg4NThjMWE3YzQ5ZTQxZWJhYmMzNWU3NjIzMmIxMDJiMDNlYWUzYTM4YTNlZTAxYjI5YTc1MTI3YWU5MiJ9"
+        },
+        {
+          "resource": "repo://src/WowRoguelike.Core/Bench.fs#L31-L36",
+          "version": "repo-lines-v1:sha256:bb5db93058dd9a7cc47e6bc90221ad5b889c6de604470bfd05f40f96befe3368:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiN2Y4ZTllMDgwNmNhOGVhYjg3MGU2YWVmNjhhOGU5NjA1NGUwMTA2NTE1NTg4OTlkMmZmYjI0YmY4YTQ4Y2FhYyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOWYxZjFkYmFiNDA0NGFjZTFjOGQ0NzlmNzBiYjU0MmFlNjk3ZTc1ZmQ3YjYyYTExYmYzOGNmODI2ZmIzZTFjZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNzQxMWVlNzVlN2Y3ZTc1ZTVkNmNhNzIzN2EzYmQ5NzNmZTY0YmVkYzI2NTdkZmM5MzRjZTc5MTcwOGY3Y2E3ZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYTU2ZDY2ZmE1MDJiN2E2NDAzYTM3YTA3M2Y5NjIxNTliY2JlZjg0MzllYWQ0N2RhMTAyZmI3MmVmNWY5NzRkOCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_5fc2dc2626414e129efa3340bf17bd2a",
+      "statement": "Benchmarking is strictly performed under Release configuration, using Bench.fightSplitCost to drive the simulation and isolate fixture overhead from pure SimTick.step cost.",
+      "evidence": [
+        {
+          "resource": "repo://docs/HANDOFF.md#L147-L153",
+          "version": "repo-lines-v1:sha256:df448a38bfda9bf4e2dda417a0ba15b62ba4f588dbbfae72f22f166af3a7ed9f:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiM2E3YTQ5ZTc2YWRkMDg1MjNmYWViYzRkZDljNTM1OTgwZWUxYTA0ZjJiODc2MjE3MzRjMDYyZTZiNzUwMTYxZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYmQ0YjgyMGM4NWZmM2UwNmZlOTliYTkzYjVlMTA5Mjc3ZmE4Mzc0NmFiNjU5Mjc1MmFlZWM1MTNlMDFiNzU2ZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZGJkYjA5ZWJlZTY5MTJjYmY5ZTk2MmNkZDBmY2JkNTA0Y2Y5NWNmY2VjNGIzNDZiZmVlMzk4OTFhY2Y0OWNhYiJ9"
+        },
+        {
+          "resource": "repo://mise.toml#L28-L30",
+          "version": "repo-lines-v1:sha256:e0237b62512a48b4c2dac70dcc28fc91c99fa14a06d61766dd42ceafb315f827:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNzM2NGE0NTliNTQ5MzIwYWYwYTE1M2Q5ZWY2YjFkNzU0ODFkY2VlNTMzOTIzMGVhZTNlNTE2ZTk3MTJjZDIzMiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzg0YmI2ZjVhYmVhNThiYTE2MGFhNTYxOWZmMWVlZmFjNDFmZjkyZGI3OTkzOTkzMDkxZGYwMjRiYmMxYzZmNSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZGRhYzkyYjI5NjI3Njg3OTIxOTRkNWZlZjg3YjBkYzA4YmY5ZGVkZWMwYTJlMDk1MmY2MDhkNDQxMGNhNzk2OSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDE4NGIxZTRiNTkwYjYzNWI3MzA3YWE0N2I0YWUzZDU2YWZkODJiZGM0OGNmNjcwY2Y3YWIxZmFiMmU3OTI0MCJ9"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-15T19:24:01.244Z"
+  }
+}

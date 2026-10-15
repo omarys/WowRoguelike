@@ -278,6 +278,27 @@ let ``a taunt wakes a sleeper`` () =
   let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.taunt w
   Assert.False(SimState.isSleeping (mobOf w))
 
+/// Taunt is a shout, not a poke: every hostile in the taunter's range is forced
+/// onto them. The clicked target is just how the shout is aimed.
+[<Fact>]
+let ``a taunt forces every hostile in range`` () =
+  let w = arena 0 0 { X = 7; Y = 5 }
+  let m = mobOf w
+
+  // Content.taunt has Range 8 from the Tank at 5,5: 6,6 is inside, 18,9 is not.
+  let second = { m with Id = EntityId 101; Name = "Second"; Pos = { X = 6; Y = 6 } }
+  let far = { m with Id = EntityId 102; Name = "Far"; Pos = { X = 18; Y = 9 } }
+
+  let w = { w with Entities = w.Entities @ [ second; far ] }
+  let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.taunt w
+
+  let forced (id: EntityId) =
+    w.Entities |> List.find (fun e -> e.Id = id) |> _.ForcedTarget
+
+  Assert.Equal(Some(EntityId 1), forced (EntityId 100))
+  Assert.Equal(Some(EntityId 1), forced (EntityId 101))
+  Assert.Equal(None, forced (EntityId 102))
+
 // ===========================================================================
 // Determinism and golden replay (ADR-0001 / Q25a)
 // ===========================================================================

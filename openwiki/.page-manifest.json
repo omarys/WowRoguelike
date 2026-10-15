@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "pages": {
+    "/openwiki/architecture/overview.md": {
+      "pageVersion": "sha256:7c79598ba49207dccfbcd68a7a934452f327a075963b1aea9a508677bca932da",
+      "completedBy": "antigravity",
+      "completedRunId": "c9e25cc4-1005-4968-a942-563a5d17e1fa",
+      "gitHead": "5e2581b2f9434a5b558a375dfe58e34aed97aca5",
+      "sourceFingerprint": "sha256:8a2659dc66180f63ca60f3420f68f22dfd7e60b793715e1cc2ec60143c8e1f93"
+    },
+    "/openwiki/concepts/combat-and-threat.md": {
+      "pageVersion": "sha256:393d82a5d5867900e10a63cf83f80231cdc9c7e27aa89804d0dfb7e67230b2f7",
+      "completedBy": "antigravity",
+      "completedRunId": "c9e25cc4-1005-4968-a942-563a5d17e1fa",
+      "gitHead": "5e2581b2f9434a5b558a375dfe58e34aed97aca5",
+      "sourceFingerprint": "sha256:8a2659dc66180f63ca60f3420f68f22dfd7e60b793715e1cc2ec60143c8e1f93"
+    },
+    "/openwiki/concepts/dungeon-and-pathfinding.md": {
+      "pageVersion": "sha256:8b58a51e821cf123f2a6be60c48bcde021092e360378b0ad4ff5249a1f576969",
+      "completedBy": "antigravity",
+      "completedRunId": "c9e25cc4-1005-4968-a942-563a5d17e1fa",
+      "gitHead": "5e2581b2f9434a5b558a375dfe58e34aed97aca5",
+      "sourceFingerprint": "sha256:8a2659dc66180f63ca60f3420f68f22dfd7e60b793715e1cc2ec60143c8e1f93"
+    },
+    "/openwiki/concepts/simulation-core.md": {
+      "pageVersion": "sha256:46e3d39d22c16206f4480128b0d1c8a92835448f0730bc6336c4303c293d211c",
+      "completedBy": "antigravity",
+      "completedRunId": "c9e25cc4-1005-4968-a942-563a5d17e1fa",
+      "gitHead": "5e2581b2f9434a5b558a375dfe58e34aed97aca5",
+      "sourceFingerprint": "sha256:8a2659dc66180f63ca60f3420f68f22dfd7e60b793715e1cc2ec60143c8e1f93"
+    },
+    "/openwiki/quickstart.md": {
+      "pageVersion": "sha256:cb283ae8f09d2552099fefa65b09099914aa1adf97fe3005a4caf05bbab76607",
+      "completedBy": "antigravity",
+      "completedRunId": "c9e25cc4-1005-4968-a942-563a5d17e1fa",
+      "gitHead": "5e2581b2f9434a5b558a375dfe58e34aed97aca5",
+      "sourceFingerprint": "sha256:8a2659dc66180f63ca60f3420f68f22dfd7e60b793715e1cc2ec60143c8e1f93"
+    },
+    "/openwiki/workflows/verification-and-benchmarking.md": {
+      "pageVersion": "sha256:e57aef54ed16743c04cf8122a1a0e186dec12edde580c1d6a0f4f091da1120a2",
+      "completedBy": "antigravity",
+      "completedRunId": "c9e25cc4-1005-4968-a942-563a5d17e1fa",
+      "gitHead": "5e2581b2f9434a5b558a375dfe58e34aed97aca5",
+      "sourceFingerprint": "sha256:8a2659dc66180f63ca60f3420f68f22dfd7e60b793715e1cc2ec60143c8e1f93"
+    }
+  }
+}

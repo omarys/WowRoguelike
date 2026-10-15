@@ -192,19 +192,25 @@ module SimCombat =
         | Shapeshift(Humanoid, _, _) -> w
 
         | Taunt ->
-          match tryEntity targetId w with
-          | Some m when m.Faction = Hostile && actor.Faction = Party ->
-            let highest = m.Threat |> Map.toList |> List.map snd |> List.fold max 0
-
+          // A shout: every hostile in range is forced, not just the one clicked.
+          // Distance only — a taunt carries around a corner where a bolt would not.
+          if actor.Faction <> Party then
             w
-            |> mapEntity targetId (fun mob ->
-              { mob with
-                  ForcedTarget = Some actorId
-                  Engaged = true
-                  Threat = mob.Threat |> Map.add actorId (max highest (threatOf actorId mob)) })
-            |> wake targetId
-            |> logLine (sprintf "%s taunts %s" actor.Name m.Name)
-          | _ -> w
+          else
+            w.Entities
+            |> List.filter (fun m ->
+              m.Faction = Hostile && alive m && withinRange ability.Range actor m)
+            |> List.fold (fun w m ->
+              let highest = m.Threat |> Map.toList |> List.map snd |> List.fold max 0
+
+              w
+              |> mapEntity m.Id (fun mob ->
+                { mob with
+                    ForcedTarget = Some actorId
+                    Engaged = true
+                    Threat = mob.Threat |> Map.add actorId (max highest (threatOf actorId mob)) })
+              |> wake m.Id
+              |> logLine (sprintf "%s taunts %s" actor.Name m.Name)) w
 
         | AreaDamage(radius, lo, hi) ->
           // One roll and one crit for the whole area, applied to every hostile

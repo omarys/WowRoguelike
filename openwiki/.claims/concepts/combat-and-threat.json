@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:393d82a5d5867900e10a63cf83f80231cdc9c7e27aa89804d0dfb7e67230b2f7",
+  "claims": [
+    {
+      "id": "claim_322a154982874f6593e9d2d62ffe26df",
+      "statement": "Target selection for hostiles requires challengers to exceed the current target's threat by 10% in melee range or 30% outside melee range, evaluated through integer cross-multiplication.",
+      "evidence": [
+        {
+          "resource": "repo://src/WowRoguelike.Core/SimState.fs#L134-L147",
+          "version": "repo-lines-v1:sha256:702c9762f01df36dbf4aace6bbea620e063d7f3e2cee2b1c918cad35998702d7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJmOGMxOGQzYjg3NzEwODdmNDc2YzgyYmZiZjk5NGVkMjljNmI1ZjVlNmUyM2ZmMTZhOWFlZTRjOWZmMmQyYzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk4ZWJiMzQ0MGU1ZGYyODA4MWNmYTAzOWUzNjQxMGQ3NjhkODhmMmM4ZTg5MDZlZjY3ZjdmNTM1NDRiNWQzN2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY1NjdhN2Y5NGRmOGMyNTk5ZTQyNDZiZmU5ZDE4NGFhZjVjY2NjZjNiMzVlOTM0MmRiYjFkNWJkNDRmYzk5NjcifQ"
+        },
+        {
+          "resource": "repo://src/WowRoguelike.Core/SimState.fs#L18-L23",
+          "version": "repo-lines-v1:sha256:22c2cf12134ed3014cc9885868596c8a0fe35c1c5f3017da26ffbe439ccf7ac9:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNWNhODgxNjZmNDEyMmZjNTVjMWI5YWVkNTFjN2Y0MDQ5ZDQzNzcyYTJjYmM2YTg1ZmUwMDczYjY0ODViZGMzYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYzYwYTQ3NjE0YTEyNjkzYzJhYjVmZWNiMWM2NmM0ZjVhZTdjYzE2ZTNkMWQzNjA5ZjAxZWRkMTM0OGFhMGM0YyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNzE1NDIzN2NiMTYwZTRiMmUyMDljNWRiM2Q1NjM2ZWViMDQ1ZjAzZjAxYzBlMWQxOWZkZWZkY2MwMmMzNmExNSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_e88c5cbfa459450f95ed606dd37db04b",
+      "statement": "The tank stance provides a 5.0x threat multiplier in basis points, while effective healing generates 0.5x threat distributed among engaged hostiles.",
+      "evidence": [
+        {
+          "resource": "repo://src/WowRoguelike.Core/Content.fs#L15-L18",
+          "version": "repo-lines-v1:sha256:b7f67504f9ab94fbd73fee5fc8b091c969b0b94f6e83c08644ec90bfdd8a2bf2:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYWVjZTA4MTI4ZTA5MjQzMTllNWQ1NWZlZGIyNDZiMWY1YzYxMDYyYTFlY2Q5Yjk5NDdkZmY0ZDNiN2NmNzIzNCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiM2YwNjA0NWQ1MjJjMDIzZDQ5ZTQxZDZlYzQzYjViMWFhODA0ZjVlM2MzMDg0ZmJlZmFjYTZmMjZjM2VlNDQxMCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODkwY2IzNGY0YjEyZThjM2Q2N2Y3MmY0NzBjY2RmZTUxZTBhNzk3N2JmMGE2OTA1MjMyODE3ODljY2RjNDUzMiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiN2I4N2E1MTk1MDZhOWIxMjVhMzRmNmFkMmU1MGRiMzA2YWM0YjBkMWE2YzFkNjQ5NzBjMGE5MzI5ODI2ZjU0ZiJ9"
+        },
+        {
+          "resource": "repo://src/WowRoguelike.Core/Content.fs#L416-L420",
+          "version": "repo-lines-v1:sha256:1ba306259e3b12c7926bc54cda5645de5c8303d53ae13e4e1384c1bfd84ec495:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjc4MGEzMDMyY2QxZmI5OGViMTViMzA0MGIzOTk5M2QxNDc5YTdkMmRjYjM1NDYxOGYzMzJjOTFiNTliNDljNCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNzI1NmY0OGUwODJhZGYxOWY0NzNlZjNiZGE4N2M5ZDU2MjUwZWJkZjhjZjg2NTcwM2U0ZTAzOTQ0MzFmYjdhZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNGE2NjZjMjJlYTVjZjM4NjJkNzM4NThiNWZkYjYyZmEwMGM3MWZkYzU1OWFjZTBmYTI2OGM4YWExYWIyODAzZiJ9"
+        },
+        {
+          "resource": "repo://src/WowRoguelike.Core/SimState.fs#L210-L222",
+          "version": "repo-lines-v1:sha256:488e26b37d9e467475c32c53f5bbe88d6227adec2c491d5509a04cee55ef7b77:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5NGEyNmM3MzYyN2EzNDQ5ZTY5NDc2MDIxMzE5ZWMxNjFmMjM5ZjA0YTQyYjA0MDc3NjNlMmFmZTBiYWE2OGUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIxZWQ4ZjAyZTQ1YzBiYzc1ZWU3OTAxMGQ1MmZiYTQzYjdiMTczNThkZDVlZTJiZmVhNWNmYjFjNDgzZGQ5YTMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4bd0a79e3b7a4bed85ef7046a84ac90c",
+      "statement": "Physical incoming damage is mitigated sequentially by Dodge (full avoid), Block (flat reduction), and Armor (10 basis points per point, capped at 75%), whereas spell damage bypasses physical mitigation.",
+      "evidence": [
+        {
+          "resource": "repo://src/WowRoguelike.Core/SimCombat.fs#L30-L53",
+          "version": "repo-lines-v1:sha256:d007809753931ea05e2319cdf4bc8d586afe9210a5ea7ab459d5417ee759e65d:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQzNDk3MjcxZjdlMmI3OWI1YzU3MDlmZTcyMGI1NDg2NDMxMzYyZGI2MmJlNjhlMzM5MTYxZDRhM2ZmZDE5MjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY1OTFlYzE0ZjU2MGEzY2ZiZTUwMTIzMmQ4MjEzMDE4NjZmMWEyOTk5MzVhMjFlMmVmMWI4ZmNlMDIyYTRiYjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE2MWUxZDhhNDlkMzg2YTQ4ODA2NGI1M2NkNDY3MzI4MDM0ZjNjNmE1M2MxMTVjY2RlMmJiMWNiMzQ4ZDZiMWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_bce6085f9561470097851b4bc2df9eae",
+      "statement": "Abilities deduct their resource cost only upon successful resolution, meaning an interrupted cast costs nothing, and interrupts apply a 4.0-second school lockout.",
+      "evidence": [
+        {
+          "resource": "repo://src/WowRoguelike.Core/SimCombat.fs#L98-L111",
+          "version": "repo-lines-v1:sha256:e06af575549d64311476196b82e4327ccea14f3464bddddd67255e72f8fc45b3:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg4NGIwYzFhNWU3MzY3MDE3M2U5MThkYzdiOTcyZDBhNWM2OTc5NDc5ZGYzMmY2MTMzMzVkYjBkZWViNWIyY2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjExN2YzOGFlZmZlMzcyNTU0YWFiYmIzNzc4ZDkyMDk2MWNlNTNhYjhiNGIxYTI4ZjJmN2FhOTZiOWIzMDE4YTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg0Y2NlYzYyODM2ZGJkZDhjMDlkNmZmMmRmMzgzYjg3ODU4OWE1Mzc1MjU2YTFkM2ZhZTVlZDI1ZmJkODZhNTUifQ"
+        },
+        {
+          "resource": "repo://src/WowRoguelike.Core/SimState.fs#L24-L28",
+          "version": "repo-lines-v1:sha256:50b4d92521a8190925db8bda223b28dafbad3ba543063da57afa414257d634a0:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiN2U1MWM5NjJiZjA5NGFlMjdiZGRmZWZkODMwMTc4ZmI0OWNlYzU2NzFjZTRkZDg5M2I3OWZjM2U2Nzg2YmE2NSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGFkNDNhYmZhNzU3NTAxYjBhYjg4MTQwODdiZWJkNWVlZDVlNDYzNjA1NjQ5OGE2YTZhM2MyMGViYmE3MTlkYSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTQyNTM1N2E3ODg5OTY2YTgyMTgwY2RhYTk0ZGY5MTMwYjAxODU5N2U2MjEwYjg4OWE3YWU3ZDAwMTM1ZjkzMCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_79069d6445334e8eacc3e40046f3fe42",
+      "statement": "Numeric values in Content.fs are categorized in a top-level VERIFY block as sourced Classic WoW values versus placeholders, with cast times, cooldowns, and health pools explicitly marked as pacing placeholders.",
+      "evidence": [
+        {
+          "resource": "repo://src/WowRoguelike.Core/Content.fs#L7-L38",
+          "version": "repo-lines-v1:sha256:204205f211a76605db5b281c066726540fac9bd886f88b673d159d308b469893:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM2M2ZlYjBhNTkyZGE5NGZjYTNjZDA3NGNmM2Q0NmU4MDk1MTI1ZDQ1ZmY0YThlYjdiNmQ1ZTI5NTFmMGEzYjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQyY2QyYmU0NTVkMGRhYTA4YTA0NmM2MDM0NTM5MmNkYTY3YzdiODU2MDQ1ZTRkODljNjFkZjYyOTU4OWM5YzYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdmYjg5ZGYwYTYwNmZlNzM4OWRiYjA5ZGU5M2Q3ZGU2NzMwY2FlMTMyNmJiYTIyMzRkZjIwZmMzY2MyNTViYmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiYzMzN2FjZmMxZDExYmNhYmY0OWZjODFhNGRjMDJiNDkyYzA0MTcyOWJhODhiMmU2NjlkNTllYTM3OWExZmIifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-15T19:24:01.244Z"
+  }
+}

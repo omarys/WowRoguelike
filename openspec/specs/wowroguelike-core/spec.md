@@ -711,9 +711,10 @@ The system SHALL the service shall deduct resource costs and resolve ability eff
 - **THEN** Target's cast is cancelled, the ability is placed on lockout cooldown, and sleeper status is broken
 
 #### Scenario: TauntOverridesThreatAndForcesTarget
-- **GIVEN** A party tank using Taunt on an engaged hostile mob
+- **GIVEN** A party tank using Taunt while hostile mobs stand within its range
 - **WHEN** resolveAbility executes a Taunt effect
-- **THEN** The mob's threat towards the tank matches the highest threat on the table and forced target is set
+- **THEN** Every living hostile within range has its forced target set to the tank and its threat towards the tank raised to the
+highest threat on that mob's table, while hostiles outside the range are left alone
 
 ### Requirement: ApplyCommand
 
