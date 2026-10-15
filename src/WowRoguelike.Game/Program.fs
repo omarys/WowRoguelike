@@ -162,6 +162,10 @@ type RoguelikeGame() as this =
   let uiTop = rows * tile + 8
   let uiHeight = 140
 
+  /// The side panel to the right of the grid that lists queued orders.
+  let queueX = columns * tile + 8
+  let queueW = 248
+
   /// Ceiling on ticks per rendered frame. Without it a slow frame becomes a
   /// longer frame, which is the classic spiral. Falling behind in real time is
   /// correct; dropping Ticks would break determinism (ADR-0001).
@@ -312,6 +316,33 @@ type RoguelikeGame() as this =
           let size = if e.Faction = Party then 22 else 20
           abs (mx - cx) <= size / 2 + 4 && abs (my - cy) <= size / 2 + 4))
 
+  let nameOf (id: EntityId) =
+    SimState.tryEntity id world |> Option.map (fun e -> e.Name) |> Option.defaultValue "?"
+
+  let shorten (maxChars: int) (text: string) =
+    if text.Length <= maxChars then text
+    else text.Substring(0, max 0 (maxChars - 2)) + ".."
+
+  /// A queued order as (what it is, who it is on).
+  let describeQueued (kind: CommandKind) : string * string =
+    match kind with
+    | UseAbility(actor, ability, target) -> (sprintf "%s %s" (nameOf actor) ability, sprintf "on %s" (nameOf target))
+    | MoveTo(actor, dest) -> (sprintf "%s move" (nameOf actor), sprintf "to %d,%d" dest.X dest.Y)
+    | Stop actor -> (sprintf "%s stop" (nameOf actor), "")
+
+  /// One clickable row per queued order: its rectangle and its index in
+  /// `pending`. Only the rows that fit the panel are shown.
+  let queueRows () =
+    let rowH = 34
+    let top = 34
+    let visible = max 1 ((uiTop - top) / rowH)
+
+    pending
+    |> Seq.indexed
+    |> Seq.truncate visible
+    |> Seq.map (fun (i, _) -> Rectangle(queueX + 8, top + i * rowH, queueW - 16, rowH - 4), i)
+    |> Seq.toList
+
   /// The buttons for this frame: the global controls, plus the selected member's
   /// Move and abilities (or a Cancel while a click is pending). Wraps onto rows.
   let uiButtons () =
@@ -411,7 +442,7 @@ type RoguelikeGame() as this =
     world <- SimTick.step commands world
 
   do
-    graphics.PreferredBackBufferWidth <- columns * tile + 24
+    graphics.PreferredBackBufferWidth <- queueX + queueW
     graphics.PreferredBackBufferHeight <- uiTop + uiHeight
     this.Content.RootDirectory <- "Content"
     this.IsMouseVisible <- true
@@ -462,8 +493,12 @@ type RoguelikeGame() as this =
     if mouse.LeftButton = ButtonState.Pressed && prevMouse.LeftButton = ButtonState.Released then
       let mx, my = mouse.X, mouse.Y
 
-      match uiButtons () |> List.tryFind (fun (r, _, _) -> r.Contains(mx, my)) with
-      | Some (_, _, action) ->
+      match
+        queueRows () |> List.tryFind (fun (r, _) -> r.Contains(mx, my)),
+        uiButtons () |> List.tryFind (fun (r, _, _) -> r.Contains(mx, my))
+        with
+      | Some (_, i), _ -> pending.RemoveAt i
+      | None, Some (_, _, action) ->
         match action with
         | TogglePause ->
           if ticksPerSecond > 0.0 then ticksPerSecond <- 0.0 else ticksPerSecond <- 20.0
@@ -474,7 +509,7 @@ type RoguelikeGame() as this =
         | ChooseAbility(aid, ability) -> pendingAction <- Some(Targeting(aid, ability))
         | ChooseMove aid -> pendingAction <- Some(Moving aid)
         | CancelPending -> pendingAction <- None
-      | None ->
+      | None, None ->
         match entityAt mx my with
         | Some e ->
           match pendingAction with
@@ -607,18 +642,29 @@ type RoguelikeGame() as this =
       else
         spriteBatch.Draw(pixel, Rectangle(cx - 6, cy - 6, 12, 12), colour)
 
+    // The queued orders: click a row to cancel it.
+    spriteBatch.Draw(pixel, Rectangle(queueX, 0, queueW, uiTop), Color(18, 20, 28))
+    drawText "QUEUE" (queueX + 8) 10 (Color(180, 180, 200))
+    let m = Mouse.GetState()
+    let rowChars = max 1 ((queueW - 24) / cellW)
+
+    for (rect, i) in queueRows () do
+      let hover = rect.Contains(m.X, m.Y)
+      spriteBatch.Draw(pixel, rect, if hover then Color(96, 62, 62) else Color(34, 30, 38))
+      let line1, line2 = describeQueued pending.[i]
+      drawText (shorten rowChars line1) (rect.X + 4) (rect.Y + 3) (Color(224, 224, 232))
+
+      if line2 <> "" then
+        drawText (shorten rowChars line2) (rect.X + 4) (rect.Y + 17) (Color(150, 150, 165))
+
     // The clickable strip.
     let panelW = this.GraphicsDevice.Viewport.Width
     spriteBatch.Draw(pixel, Rectangle(0, uiTop, panelW, uiHeight), Color(20, 22, 30))
-    let m = Mouse.GetState()
 
     for (rect, label, _) in uiButtons () do
       let hover = rect.Contains(m.X, m.Y)
       spriteBatch.Draw(pixel, rect, if hover then Color(70, 78, 96) else Color(42, 46, 60))
       drawText label (rect.X + 6) (rect.Y + 5) (if hover then Color.White else Color(210, 210, 220))
-
-    let nameOf aid =
-      SimState.tryEntity aid world |> Option.map (fun e -> e.Name) |> Option.defaultValue "?"
 
     let hint =
       match selected, pendingAction with
