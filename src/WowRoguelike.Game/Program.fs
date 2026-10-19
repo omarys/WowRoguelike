@@ -581,11 +581,14 @@ type RoguelikeGame() as this =
 
     pending.Clear()
 
-    let commands =
-      due
+    let playerOrders kinds =
+      kinds
       |> List.map (fun kind ->
         { ApplyAt = world.Tick + ticks 1
           Kind = kind })
+
+    // The player's orders win; the script covers whoever was left idle this Tick.
+    let commands = PartyAi.supplement (playerOrders due) world
 
     world <- SimTick.step commands world
 
@@ -783,6 +786,9 @@ type RoguelikeGame() as this =
     let drawOrder =
       world.Entities |> List.sortBy (fun e -> SimState.alive e, snd (drawnAt e))
 
+    let mouse = Mouse.GetState()
+    let hover = entityAt mouse.X mouse.Y |> Option.map (fun e -> e.Id)
+
     for e in drawOrder do
       let fx, fy = drawnAt e
 
@@ -825,14 +831,40 @@ type RoguelikeGame() as this =
         if e.Casting.IsSome then
           bar (cx - 16) (top - 11) 32 3 1.0 (Color(240, 200, 90))
 
+        // What is on it: one chip per aura, so a slept, stunned or sundered
+        // enemy reads at a glance. Green helps the holder, amber hurts it.
+        let auras = e.Auras
+
+        if not auras.IsEmpty then
+          let chipW = 6
+          let span = auras.Length * chipW + (auras.Length - 1) * 2
+
+          auras
+          |> List.iteri (fun i a ->
+            let tint =
+              if Aura.isHelpful a then Color(110, 240, 150) else Color(235, 165, 70)
+
+            spriteBatch.Draw(pixel, Rectangle(cx - span / 2 + i * (chipW + 2), top - 16, chipW, 4), tint))
+
         if e.Faction = Party then
           drawTextShadow e.Name (cx - measure e.Name / 2) (feet + 2) (Color(220, 220, 230))
+
+        // The chips are a tally, not a name: spell the auras out for the one
+        // under the mouse, which is the only entity they cannot be misread on.
+        if hover = Some e.Id && not auras.IsEmpty then
+          let text =
+            auras
+            |> List.map (fun a -> sprintf "%s %ds" (Aura.label a) (Aura.remainingSeconds a))
+            |> String.concat "  "
+
+          let y = if e.Faction = Party then feet + 18 else feet + 2
+          drawTextShadow text (cx - measure text / 2) y (Color(255, 235, 180))
       else
         drawArt (Color(70, 70, 70) * 0.55f)
 
     // The side panel: the party's health and mana, then the queue.
     panel (Rectangle(panelX, 0, panelW, uiTop))
-    let m = Mouse.GetState()
+    let m = mouse
     let rowChars = max 1 ((panelW - 24) / cellW)
 
     drawTextShadow "PARTY" (panelX + 8) 8 (Color(190, 214, 160))

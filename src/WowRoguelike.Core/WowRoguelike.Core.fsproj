@@ -23,6 +23,7 @@
     <Compile Include="SimState.fs" />
     <Compile Include="SimCombat.fs" />
     <Compile Include="SimTick.fs" />
+    <Compile Include="PartyAi.fs" />
     <Compile Include="Dump.fs" />
     <Compile Include="Bench.fs" />
   </ItemGroup>

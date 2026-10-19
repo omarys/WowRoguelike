@@ -27,9 +27,18 @@ module SimCombat =
   /// Base chance (basis points) that damage interrupts a cast in progress (Q5a).
   let pushbackBaseBp = 1000
 
-  /// Armour: each point is 10 basis points of physical reduction, capped at 75%
-  /// (Q1a).
-  let private armorMitigationBp (armor: int) = min 7500 (armor * 10)
+  /// The level of the attacker in the armour curve. Wailing Caverns trash sits
+  /// at 20-22 and the Party at 24, so one constant covers both directions to
+  /// within about three percentage points — the curve only reads the attacker's
+  /// level, and the sim does not carry a Level on entities.
+  let private drAttackerLevel = 21
+
+  /// Armour mitigation, WoW's real curve: A / (A + 400 + 85 * attackerLevel),
+  /// capped at 75%. A level-24 tank in plate (1248 armour) takes 36% less
+  /// physical damage; a cloth caster (352) about 14%.
+  let private armorMitigationBp (armor: int) =
+    if armor <= 0 then 0
+    else min 7500 (armor * 10000 / (armor + 400 + 85 * drAttackerLevel))
 
   /// Dodge (full avoid), block (flat value), then armour (linear, capped). This
   /// is the physical-only pipeline (Q2a/Q4a); spells skip it entirely.
@@ -114,6 +123,23 @@ module SimCombat =
         match effect with
         | Damage(lo, hi) ->
           let amount, w = rollRange lo hi w
+          let critBonus = if ability.Name = "Backstab" then actor.BackstabCritBonusBp else 0
+          let amount, w = rollCrit (actor.CritChanceBp + critBonus) amount w
+          let amount, w = mitigatePhysical targetId amount w
+          let w = dealDamage targetId amount w
+          // Only the Party builds threat on Mobs.
+          let w = if actor.Faction = Party then addThreat targetId actor amount w else w
+          w |> logLine (sprintf "%s hits %s for %d" actor.Name targetName amount)
+
+        | WeaponDamage(multiplierBp, bonus) ->
+          // The same roll a swing would make, scaled, plus Strength and the
+          // ability's own bonus.
+          let rolled, w =
+            match actor.AutoAttack with
+            | Some a -> rollRange a.Min a.Max w
+            | None -> 0, w
+
+          let amount = rolled * multiplierBp / 10000 + actor.MeleeDamageBonus + bonus
           let critBonus = if ability.Name = "Backstab" then actor.BackstabCritBonusBp else 0
           let amount, w = rollCrit (actor.CritChanceBp + critBonus) amount w
           let amount, w = mitigatePhysical targetId amount w

@@ -838,14 +838,14 @@ let ``sunder armor reduces physical mitigation`` () =
     arena 0 0 { X = 7; Y = 5 }
     |> SimState.mapEntity (EntityId 100) (fun e -> { e with Armor = 500 })
 
-  // 500 armour -> 50% mitigation: 100 becomes 50.
+  // 500 armour against a level-21 attacker is 18.6% mitigation: 100 becomes 81.
   let before, _ = SimCombat.mitigatePhysical (EntityId 100) 100 w
-  Assert.Equal(50, before)
+  Assert.Equal(81, before)
 
   let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.sunderArmor w
-  // 500 - 100 = 400 armour -> 40% mitigation: 100 becomes 60.
+  // 500 - 180 = 320 armour -> 12.8% mitigation: 100 becomes 87.
   let after, _ = SimCombat.mitigatePhysical (EntityId 100) 100 w
-  Assert.Equal(60, after)
+  Assert.Equal(87, after)
 
 /// Armour mitigates physical damage and leaves spells alone (Q2a).
 [<Fact>]
@@ -855,13 +855,13 @@ let ``armor mitigates physical but not spell damage`` () =
     |> SimState.mapEntity (EntityId 100) (fun e -> { e with Armor = 500 })
 
   let physical, _ = SimCombat.mitigatePhysical (EntityId 100) 100 w
-  Assert.Equal(50, physical)
+  Assert.Equal(81, physical)
 
   let before = (mobOf w).Health
   let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.fireball w
   let dealt = before - (mobOf w).Health
-  // Fireball is a spell: full 48..66, not halved to 24..33.
-  Assert.True(dealt >= 48, sprintf "dealt %d" dealt)
+  // Fireball is a spell: full 146..195, not reduced to 118..159.
+  Assert.True(dealt >= 146, sprintf "dealt %d" dealt)
 
 /// Dodge is full avoidance (Q4a).
 [<Fact>]
@@ -897,13 +897,37 @@ let ``pushback resistance stops damage interrupting a cast`` () =
   let w = SimCombat.dealDamage (EntityId 100) 50 w
   Assert.True((mobOf w).Casting.IsSome)
 
-/// The Rogue's trait gives Backstab 60% extra crit (Q1 of the trait model).
+/// Crit and dodge come from Agility: roughly 10 Agility per point of crit and 20
+/// per point of dodge at level 24, on top of the 5% every character starts with.
 [<Fact>]
-let ``the rogue's backstab has extra crit chance`` () =
+let ``agility drives crit and dodge`` () =
   let rogue = (Content.gully 1UL).Entities |> List.find (fun e -> e.Name = "Rogue")
-  Assert.Equal(6000, rogue.BackstabCritBonusBp)
-  // Agility 120 through Mark of the Wild becomes 126 -> 630bp crit, +60% backstab.
-  Assert.Equal(6630, rogue.CritChanceBp + rogue.BackstabCritBonusBp)
+  // Agility 100 + Mark of the Wild 4 = 104 -> 5% + 10.4% crit, 5% + 5.2% dodge.
+  Assert.Equal(1540, rogue.CritChanceBp)
+  Assert.Equal(1020, rogue.DodgeChanceBp)
+  Assert.Equal(0, rogue.BackstabCritBonusBp)
+
+/// Backstab is 150% weapon damage plus a flat bonus, scaled by Strength the way
+/// a swing is. The crit half of the trait is pinned by the test above.
+[<Fact>]
+let ``backstab deals 150 percent of weapon damage plus a bonus`` () =
+  let swing = { Min = 16; Max = 24; Ticks = ticks 100000; Range = 1 }
+
+  let w =
+    arena 0 0 { X = 7; Y = 5 }
+    |> SimState.mapEntity (EntityId 1) (fun e ->
+      { e with
+          AutoAttack = Some swing
+          MeleeDamageBonus = 18
+          CritChanceBp = 0 })
+
+  let before = (mobOf w).Health
+  let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.backstab w
+  let dealt = before - (mobOf w).Health
+
+  // 16..24 x1.5 = 24..36, + 18 Strength + the 48 rank-3 bonus = 90..102, on an
+  // unarmoured Mob that cannot dodge.
+  Assert.True(dealt >= 90 && dealt <= 102, sprintf "dealt %d" dealt)
 
 /// Armour classes give armour and nothing else, as asked.
 [<Fact>]
@@ -939,16 +963,17 @@ let ``polymorph breaks on damage`` () =
   let w = SimCombat.dealDamage (EntityId 100) 10 w
   Assert.True(SimState.canAct (mobOf w))
 
-/// Rejuvenation heals a flat amount every Tick.
+/// Rejuvenation is a heal-over-time, so it heals once a second — health is paid
+/// out on the Ticks a periodic aura actually fires.
 [<Fact>]
-let ``a heal over time heals each tick`` () =
+let ``a heal over time heals once a second`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
   let w = SimState.mapEntity (EntityId 1) (fun e -> { e with Health = 100 }) w
   let w = SimCombat.resolveAbility (EntityId 2) (EntityId 1) Content.rejuvenation w
-  let w = SimTick.run 5 w
+  let w = SimTick.run 40 w
   let tank = w.Entities |> List.find (fun e -> e.Id = EntityId 1)
-  // Rejuvenation heals 14 per tick, 5 ticks = 70.
-  Assert.Equal(170, tank.Health)
+  // 22 a second for 12 s: two seconds in, 100 + 44.
+  Assert.Equal(144, tank.Health)
 
 /// Arcane Explosion hits every hostile in radius and no ally (Q5a).
 [<Fact>]
@@ -970,18 +995,21 @@ let ``a guaranteed crit deals 150 percent`` () =
   let before = (mobOf w).Health
   let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.heroicStrike w
   let dealt = before - (mobOf w).Health
-  // Heroic Strike rolls 22..30; a crit takes it to 33..45.
-  Assert.True(dealt >= 33 && dealt <= 45, sprintf "dealt %d" dealt)
+  // A 1..1 swing plus Heroic Strike's 44 is 45; a crit takes it to 67.
+  Assert.Equal(67, dealt)
 
-/// The Mage's Arcane Intellect (+10% Intellect) plus Mark of the Wild (+5% all)
-/// both land on the resource pool (Q1a/Q2a).
+/// The party passives land on the pools: Arcane Intellect rank 2 (+7 Intellect),
+/// Mark of the Wild rank 3 (+4 to every stat) and Power Word: Fortitude rank 3
+/// (+20 Stamina).
 [<Fact>]
 let ``party buffs raise the mage's resource pool`` () =
   let mage = (Content.dungeon 1UL).Entities |> List.find (fun e -> e.Name = "Mage")
-  // Intellect 240 -> x1.10 -> x1.05 = 277 -> MaxResource 1385.
-  Assert.Equal(1385, mage.MaxResource)
-  // Stamina 60 -> x1.05 = 63 -> MaxHealth 630.
-  Assert.Equal(630, mage.MaxHealth)
+  // Intellect 131 + 7 + 4 = 142 -> 20 points at 1 mana, 122 at 15 = 1850, plus
+  // the base 523 -> 2373.
+  Assert.Equal(2373, mage.MaxResource)
+  // Stamina 56 + 4 + 20 = 80 -> 20 points at 1 health, 60 at 10 = 620, plus the
+  // base 288 -> 908.
+  Assert.Equal(908, mage.MaxHealth)
 
 [<Fact>]
 let ``the wailing caverns story plays through all five encounters`` () =
@@ -1114,7 +1142,7 @@ let ``a damage-over-time hurts the target each tick`` () =
   let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.shadowWordPain (arena 0 0 { X = 7; Y = 5 })
   Assert.True((mobOf w).Auras |> List.exists (fun a -> Aura.flatDamagePerTick a <> 0))
   let before = (mobOf w).Health
-  let w = SimTick.step [] w
+  let w = SimTick.run 20 w
   Assert.True((mobOf w).Health < before, "the DoT should keep ticking")
 
 [<Fact>]
@@ -1176,11 +1204,113 @@ let ``the mage's auto-attack is a ranged wand`` () =
 let ``Battle Shout buffs the party`` () =
   Assert.Contains(BattleShout, Content.partyBuffs)
   let warrior = (Content.gully 1UL).Entities |> List.find (fun e -> e.Name = "Warrior")
-  // Strength 100 -> Mark of the Wild x1.05 = 105 -> Battle Shout +10% = 115; /5 = 23.
-  Assert.Equal(23, warrior.MeleeDamageBonus)
+  // Strength 87 + Mark of the Wild 4 = 91 at 2 attack power per point, plus Battle
+  // Shout's 55 = 237 AP. Per swing that is 237/14 x 2.70 s = 45.
+  Assert.Equal(45, warrior.MeleeDamageBonus)
 
 [<Fact>]
 let ``the warrior starts in front of the party`` () =
   let party = (Content.gully 1UL).Entities |> List.filter (fun e -> e.Faction = Party)
   let warriorX = (party |> List.find (fun e -> e.Name = "Warrior")).Pos.X
   Assert.Equal(party |> List.map (fun e -> e.Pos.X) |> List.max, warriorX)
+
+// ===========================================================================
+// The scripted party (PartyAi)
+// ===========================================================================
+
+/// Warrior, Priest and two mobs in an open room. The Warrior is on the first
+/// mob; the second is one tile further away.
+let private partyWorld (tankTarget: EntityId option) (auras: Aura list) (tankHealth: int) : World =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  let tank =
+    { Content.hero 1 "Warrior" Tank 1000 1000 tap 50000 [ Content.sunderArmor; Content.heroicStrike ] { X = 5; Y = 5 } with
+        Target = tankTarget }
+
+  let priest =
+    Content.hero 2 "Priest" Healer 1000 1000 tap 10000 [ Content.heal; Content.renew ] { X = 5; Y = 6 }
+
+  let near = { Content.mob 100 "Near" 1000 1000 (Some tap) [] None { X = 6; Y = 5 } with Engaged = true; Target = Some(EntityId 1) }
+  let far = { Content.mob 101 "Far" 1000 1000 (Some tap) [] None { X = 5; Y = 4 } with Engaged = true; Target = Some(EntityId 1) }
+
+  let tank = { tank with Health = tankHealth; Auras = auras }
+
+  { Tick = ticks 0
+    Grid = Grid.create 12 10
+    Entities = [ tank; priest; near; far ]
+    Pending = []
+    Rng = Rng.streamsOf 3UL
+    PartyBuffs = []
+    Log = [] }
+
+let private abilitiesFor (actor: EntityId) (cmds: Command list) =
+  cmds
+  |> List.choose (fun c ->
+    match c.Kind with
+    | UseAbility(a, n, _) when a = actor -> Some n
+    | _ -> None)
+
+[<Fact>]
+let ``the party hits what the warrior is on`` () =
+  let w = partyWorld (Some(EntityId 101)) [] 1000
+  let cmds = PartyAi.decide w
+  let order = cmds |> List.pick (fun c -> match c.Kind with UseAbility(EntityId 1, n, t) -> Some(n, t) | _ -> None)
+  Assert.Equal<(string * EntityId)>(("Sunder Armor", EntityId 101), order)
+
+/// Armour already stripped off a target is damage already paid for, so it
+/// outranks whatever the Warrior happens to be facing.
+[<Fact>]
+let ``a sundered target outranks the warrior's current target`` () =
+  let w =
+    partyWorld (Some(EntityId 100)) [] 1000
+    |> SimState.mapEntity (EntityId 101) (fun e -> { e with Auras = [ Sundered(secTicks 20.0, 180) ] })
+
+  Assert.Equal<EntityId option>(Some(EntityId 101), PartyAi.strikeTarget (SimState.aliveHostiles w) (Some(EntityId 100)) |> Option.map (fun e -> e.Id))
+
+/// A heal-over-time with ten seconds to run is worth 120 more health: casting it
+/// again is mana set on fire, so the healer waits.
+[<Fact>]
+let ``the healer does not re-apply a heal-over-time that still has time left`` () =
+  let w = partyWorld None [ Rejuvenation(secTicks 10.0, 12) ] 700
+  Assert.Empty(abilitiesFor (EntityId 2) (PartyAi.decide w))
+
+[<Fact>]
+let ``the healer refreshes the heal-over-time as it lapses`` () =
+  let w = partyWorld None [ Rejuvenation(secTicks 1.0, 12) ] 700
+  Assert.Contains("Renew", abilitiesFor (EntityId 2) (PartyAi.decide w))
+
+/// Three seconds of cast that starts when the bar is empty has started too late.
+[<Fact>]
+let ``the healer starts a direct heal once the deficit outruns the heals in flight`` () =
+  let w = partyWorld None [ Rejuvenation(secTicks 10.0, 12) ] 400
+  Assert.Contains("Heal", abilitiesFor (EntityId 2) (PartyAi.decide w))
+
+/// The player's order is the last word: a member the player just commanded gets
+/// no scripted second order in the same Tick.
+[<Fact>]
+let ``the script leaves a member the player already commanded alone`` () =
+  let w = partyWorld None [] 400
+  let mine = [ { ApplyAt = ticks 1; Kind = UseAbility(EntityId 2, "Heal", EntityId 1) } ]
+  let cmds = PartyAi.supplement mine w
+
+  let priestOrders =
+    cmds
+    |> List.filter (fun c ->
+      match c.Kind with
+      | UseAbility(EntityId 2, _, _) -> true
+      | _ -> false)
+
+  Assert.Equal<int>(1, List.length priestOrders)
+
+[<Fact>]
+let ``aura labels show a readable name, side and clock`` () =
+  let sunder = Sundered(ticks 245, 20)
+  Assert.Equal("SUNDER", Aura.label sunder)
+  Assert.False(Aura.isHelpful sunder)
+  Assert.Equal(245, int (Aura.remaining sunder))
+  // 245 Ticks is 12.25s at 20Hz: rounded up, so a live aura never reads 0s.
+  Assert.Equal(13, Aura.remainingSeconds sunder)
+  Assert.True(Aura.isHelpful (Rejuvenation(ticks 40, 5)))
+  // Exactly one second left is "1s", not "2s": the round-up is for leftovers.
+  Assert.Equal(1, Aura.remainingSeconds (SerpentForm(ticks 20, 4)))
+  Assert.Equal(2, Aura.remainingSeconds (SerpentForm(ticks 21, 4)))

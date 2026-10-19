@@ -170,6 +170,42 @@ module Aura =
     | Corrupted(r, n) -> sprintf "dot(%d,%d)" r n
     | Disarmed r -> sprintf "disarm(%d)" r
 
+  /// The name a player sees, short enough to fit over a sprite.
+  let label =
+    function
+    | Sleeping _ -> "SLEEP"
+    | SerpentForm _ -> "SERPENT"
+    | Stunned _ -> "STUN"
+    | Rooted _ -> "ROOTED"
+    | Polymorphed _ -> "POLYMORPH"
+    | Rejuvenation _ -> "REJUV"
+    | Sundered _ -> "SUNDER"
+    | Corrupted _ -> "CORRUPTION"
+    | Disarmed _ -> "DISARMED"
+
+  /// True when the aura helps its holder rather than hurting it.
+  let isHelpful =
+    function
+    | Rejuvenation _ -> true
+    | _ -> false
+
+  /// Ticks left before it falls off.
+  let remaining =
+    function
+    | Sleeping r
+    | Stunned r
+    | Rooted r
+    | Polymorphed r
+    | Disarmed r -> r
+    | SerpentForm(r, _)
+    | Rejuvenation(r, _)
+    | Sundered(r, _)
+    | Corrupted(r, _) -> r
+
+  /// Whole seconds left, rounded up so a live aura never reads "0s".
+  let remainingSeconds (a: Aura) : int =
+    int (Math.Ceiling(float (int (remaining a)) / float tickRate))
+
   let isSleeping =
     function
     | Sleeping _ -> true
@@ -217,11 +253,46 @@ module Aura =
     | Rejuvenation(_, n) -> n
     | _ -> 0
 
+  /// True on the Ticks where a periodic aura actually fires. WoW's heal- and
+  /// damage-over-time effects tick once a second, and the sim runs at 20 Ticks
+  /// per second, so lasting effects apply on every 20th Tick. Without this the
+  /// per-second numbers would be paid twenty times over.
+  let firesThisTick (a: Aura) =
+    let remaining =
+      match a with
+      | Rejuvenation(r, _) -> r
+      | Corrupted(r, _) -> r
+      | Polymorphed r -> r
+      | _ -> ticks 0
+
+    remaining > ticks 0 && remaining % secTicks 1.0 = ticks 0
+
   /// A fraction of max health healed each Tick, in basis points (Polymorph).
   let maxHealthHealBpPerTick =
     function
     | Polymorphed _ -> 125
     | _ -> 0
+
+  /// Healing still to come from heal-over-time auras, in health points. Periodic
+  /// effects fire once a second, so remaining Ticks are converted to seconds
+  /// before the per-second amount is multiplied in.
+  let healOverTimePending (auras: Aura list) =
+    auras
+    |> List.sumBy (function
+      | Rejuvenation(r, n) -> (r / secTicks 1.0) * n
+      | _ -> 0)
+
+  /// Ticks left on a heal-over-time, zero when there is none. What a healer asks
+  /// before it refreshes one: re-casting into a HoT with ten seconds left is
+  /// mana set on fire.
+  let healOverTimeRemaining (auras: Aura list) =
+    auras
+    |> List.fold
+      (fun acc aura ->
+        match aura with
+        | Rejuvenation(r, _) -> max acc r
+        | _ -> acc)
+      (ticks 0)
 
   /// A key grouping auras of the same kind, so re-applying refreshes instead of
   /// stacking. Exhaustive, like everything here.
@@ -266,6 +337,10 @@ module Aura =
 type Effect =
   /// Physical damage, mitigated by armour, dodge and block.
   | Damage of min: int * max: int
+  /// A weapon strike: the actor's auto-attack roll scaled by `multiplierBp`
+  /// (10000 = 100%), plus its Strength bonus and a flat `bonus`. Physical, so
+  /// it runs the same dodge/block/armour pipeline a swing does.
+  | WeaponDamage of multiplierBp: int * bonus: int
   /// Spell damage, mitigated by nothing (Q2a).
   | SpellDamage of min: int * max: int
   | Heal of min: int * max: int
@@ -499,15 +574,19 @@ type Outcome =
   | PartyWiped
   | EncounterCleared
 
-/// A passive the party has because some class is present (Q2a).
+/// A passive the party has because some class is present (Q2a). Each case is a
+/// real Classic buff at the highest rank a level-24 caster can train.
 type PartyBuffKind =
-  /// Mage: +10% Intellect.
+  /// Mage: Arcane Intellect rank 2, +7 Intellect.
   | ArcaneIntellect
-  /// Priest: +10% Spirit.
+  /// Priest: Divine Spirit rank 1. Level 30 — out of reach at 24, kept for the
+  /// day the encounter roster outgrows that ceiling.
   | DivineSpirit
-  /// Druid: +5% to all five stats.
+  /// Priest: Power Word: Fortitude rank 3, +20 Stamina.
+  | PowerWordFortitude
+  /// Druid: Mark of the Wild rank 3, +105 armour and +4 to all five stats.
   | MarkOfTheWild
-  /// Warrior: +10% Strength (Battle Shout).
+  /// Warrior: Battle Shout rank 3, +55 melee attack power to the party.
   | BattleShout
 
 type World =

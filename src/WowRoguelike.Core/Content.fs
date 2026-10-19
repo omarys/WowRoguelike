@@ -68,25 +68,42 @@ module Content =
   // Abilities
   // =========================================================================
 
+  /// The mob version of Lightning Bolt (spell 9532): 64-86 Nature on a 3 s cast,
+  /// re-cast every 2 s. Every Wailing Caverns caster uses this one rank.
   let lightningBolt =
     { Name = "Lightning Bolt"
       CastTicks = secTicks 3.0
-      CooldownTicks = ticks 0
+      CooldownTicks = secTicks 2.0
       ResourceCost = 60
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ SpellDamage(28, 42) ] }
+      Effects = [ SpellDamage(64, 86) ] }
 
+  /// Healing Touch as the Wailing Caverns druids cast it (spell 5187, unranked):
+  /// a flat 195 on a 2.5 s cast, roughly every 15 s. The rank-3 player spell's
+  /// 204-253 range does not apply to the NPC version.
   let healingTouch =
     { Name = "Healing Touch"
       CastTicks = secTicks 2.5
-      CooldownTicks = secTicks 10.0
-      ResourceCost = 100
+      CooldownTicks = secTicks 15.0
+      ResourceCost = 90
       Interruptible = true
       Range = 8
       TargetKind = Ally
-      Effects = [ Heal(195, 243) ] }
+      Effects = [ Heal(195, 195) ] }
+
+  /// Lord Serpentis heals with spell 6778 instead: a flat 742 on a 3.5 s cast.
+  /// That heal is the reason his fight is an interrupt fight.
+  let healingTouchR6 =
+    { Name = "Healing Touch"
+      CastTicks = secTicks 3.5
+      CooldownTicks = secTicks 15.0
+      ResourceCost = 240
+      Interruptible = true
+      Range = 8
+      TargetKind = Ally
+      Effects = [ Heal(742, 742) ] }
 
   let serpentForm =
     { Name = "Serpent Form"
@@ -98,91 +115,116 @@ module Content =
       TargetKind = Self
       Effects = [ Shapeshift(Serpent, secTicks 10.0, 25) ] }
 
+  /// Druid's Slumber (spell 8040), the Druid-of-the-Fang version: a 2.5 s cast
+  /// that sleeps one non-tank for 15 s. This is the pull-killer the guides warn
+  /// about.
   let druidsSlumber =
     { Name = "Druid's Slumber"
-      CastTicks = secTicks 1.5
-      CooldownTicks = secTicks 20.0
+      CastTicks = secTicks 2.5
+      CooldownTicks = secTicks 15.0
       ResourceCost = 80
       Interruptible = true
       Range = 8
       TargetKind = Foe
       Effects = [ Sleep(secTicks 15.0) ] }
 
+  /// Sleep (spell 700), the shorter cast the Fanglords and Anacondra use: 1.5 s
+  /// for a 20 s sleep.
+  let fangSleep =
+    { Name = "Sleep"
+      CastTicks = secTicks 1.5
+      CooldownTicks = secTicks 15.0
+      ResourceCost = 80
+      Interruptible = true
+      Range = 8
+      TargetKind = Foe
+      Effects = [ Sleep(secTicks 20.0) ] }
+
   // -- Party abilities ------------------------------------------------------
+
+  // Every party ability below is the highest rank a level-24 character can
+  // train, with its real mana/rage/energy cost, cast time and tooltip numbers.
+  // Sources: per-spell Classic DB rows collected in .pi/research/level24/.
 
   let taunt =
     { Name = "Taunt"
       CastTicks = ticks 0
       CooldownTicks = secTicks 10.0
-      ResourceCost = 50
+      ResourceCost = 10
       Interruptible = false
       Range = 8
       TargetKind = Foe
       Effects = [ Taunt ] }
 
+  /// Rank 4: the swing plus 44 damage, for 15 rage. The cooldown is the weapon's
+  /// own 2.70 s, because Heroic Strike replaces the next swing rather than
+  /// adding one.
   let heroicStrike =
     { Name = "Heroic Strike"
       CastTicks = ticks 0
-      CooldownTicks = secTicks 6.0
-      ResourceCost = 100
+      CooldownTicks = secTicks 2.7
+      ResourceCost = 15
       Interruptible = false
       Range = 1
       TargetKind = Foe
-      Effects = [ Damage(22, 30) ] }
+      Effects = [ WeaponDamage(10000, 44) ] }
 
+  /// Rank 3: 135-158 for 75 mana.
   let lesserHeal =
     { Name = "Lesser Heal"
-      CastTicks = secTicks 1.5
-      CooldownTicks = ticks 0
-      ResourceCost = 105
-      Interruptible = true
-      Range = 8
-      TargetKind = Ally
-      Effects = [ Heal(110, 150) ] }
-
-  /// Priest: a strong direct heal.
-  let heal =
-    { Name = "Heal"
       CastTicks = secTicks 2.5
       CooldownTicks = ticks 0
-      ResourceCost = 160
+      ResourceCost = 75
       Interruptible = true
       Range = 8
       TargetKind = Ally
-      Effects = [ Heal(220, 300) ] }
+      Effects = [ Heal(135, 158) ] }
 
-  /// Priest: a weak heal-over-time.
+  /// Priest rank 2: 429-492 for 205 mana, plus the set's +24 healing.
+  let heal =
+    { Name = "Heal"
+      CastTicks = secTicks 3.0
+      CooldownTicks = ticks 0
+      ResourceCost = 205
+      Interruptible = true
+      Range = 8
+      TargetKind = Ally
+      Effects = [ Heal(453, 516) ] }
+
+  /// Priest rank 3: 175 over 15 s for 105 mana, plus the set's +24 healing.
   let renew =
     { Name = "Renew"
       CastTicks = ticks 0
       CooldownTicks = secTicks 5.0
-      ResourceCost = 80
+      ResourceCost = 105
       Interruptible = false
       Range = 8
       TargetKind = Ally
-      Effects = [ HealOverTime(secTicks 15.0, 10) ] }
+      Effects = [ HealOverTime(secTicks 15.0, 12) ] }
 
   /// The Party's only interrupt, and it is melee range — so using it is a
-  /// positioning decision, not a cooldown to press.
+  /// positioning decision, not a cooldown to press. Rank 1: 15 damage, 25
+  /// energy, 10 s.
   let kick =
     { Name = "Kick"
       CastTicks = ticks 0
       CooldownTicks = secTicks 10.0
-      ResourceCost = 75
+      ResourceCost = 25
       Interruptible = false
       Range = 1
       TargetKind = Foe
-      Effects = [ Interrupt ] }
+      Effects = [ Damage(15, 15); Interrupt ] }
 
   let fireball =
     { Name = "Fireball"
-      CastTicks = secTicks 2.5
+      CastTicks = secTicks 3.5
       CooldownTicks = ticks 0
-      ResourceCost = 120
+      ResourceCost = 140
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ SpellDamage(48, 66) ] }
+      // Rank 5: 146-195 plus 20 over 8 s.
+      Effects = [ SpellDamage(146, 195); DamageOverTime(secTicks 8.0, 3) ] }
 
   let arcaneShot =
     { Name = "Arcane Shot"
@@ -196,81 +238,83 @@ module Content =
 
   // -- Warrior --------------------------------------------------------------
 
-  /// Sunder Armour: a vulnerability stack, and flat threat to hold aggro.
+  /// Sunder Armour rank 2: 180 armour per stack, five stacks, 30 s, 15 rage —
+  /// plus flat threat so the Tank holds the pull.
   let sunderArmor =
     { Name = "Sunder Armor"
       CastTicks = ticks 0
       CooldownTicks = secTicks 6.0
-      ResourceCost = 60
+      ResourceCost = 15
       Interruptible = false
       Range = 1
       TargetKind = Foe
-      Effects = [ Sunder(secTicks 20.0, 100); Threat(200) ] }
+      Effects = [ Sunder(secTicks 30.0, 180); Threat(200) ] }
 
+  /// Rank 1: 6 damage and a 6 s school lockout, for 10 rage.
   let shieldBash =
     { Name = "Shield Bash"
       CastTicks = ticks 0
       CooldownTicks = secTicks 12.0
-      ResourceCost = 80
+      ResourceCost = 10
       Interruptible = false
       Range = 1
       TargetKind = Foe
-      Effects = [ Damage(10, 16); Interrupt ] }
+      Effects = [ Damage(6, 6); Interrupt ] }
 
   // -- Rogue ----------------------------------------------------------------
 
+  /// Rank 3: 150% weapon damage plus 48, for 60 energy. The swing carries the
+  /// Rogue's attack power, which is what makes Backstab hit — it scales with
+  /// weapons and stats, not with a flat number.
   let backstab =
     { Name = "Backstab"
       CastTicks = ticks 0
       CooldownTicks = secTicks 6.0
-      ResourceCost = 70
-      Interruptible = false
-      Range = 1
-      TargetKind = Foe
-      Effects = [ Damage(30, 46) ] }
-
-  let gouge =
-    { Name = "Gouge"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 15.0
       ResourceCost = 60
       Interruptible = false
       Range = 1
       TargetKind = Foe
-      Effects = [ Stun(secTicks 4.0) ] }
+      Effects = [ WeaponDamage(15000, 48) ] }
 
-  let cheapShot =
-    { Name = "Cheap Shot"
+  /// Rank 2: 20 damage and a 4 s stun, for 45 energy.
+  let gouge =
+    { Name = "Gouge"
       CastTicks = ticks 0
-      CooldownTicks = secTicks 20.0
-      ResourceCost = 80
+      CooldownTicks = secTicks 10.0
+      ResourceCost = 45
       Interruptible = false
       Range = 1
       TargetKind = Foe
-      Effects = [ Stun(secTicks 2.0) ] }
+      Effects = [ Damage(20, 20); Stun(secTicks 4.0) ] }
+
+  // Cheap Shot is trained at level 26, so a level-24 Rogue does not have it.
 
   // -- Mage ----------------------------------------------------------------
 
+  /// Rank 4: 74-83 Frost for 65 mana.
   let frostbolt =
     { Name = "Frostbolt"
-      CastTicks = secTicks 2.5
+      CastTicks = secTicks 2.6
       CooldownTicks = ticks 0
-      ResourceCost = 100
+      ResourceCost = 65
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ SpellDamage(38, 52) ] }
+      Effects = [ SpellDamage(74, 83) ] }
 
-  let magicMissile =
-    { Name = "Magic Missile"
-      CastTicks = secTicks 1.5
+  /// Rank 3: a five-second channel, 56 Arcane each second, for 235 mana. The sim
+  /// has no channel, so the whole channel lands as one hit.
+  let arcaneMissiles =
+    { Name = "Arcane Missiles"
+      CastTicks = secTicks 5.0
       CooldownTicks = ticks 0
-      ResourceCost = 80
+      ResourceCost = 235
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ SpellDamage(24, 34) ] }
+      Effects = [ SpellDamage(280, 280) ] }
 
+  /// Rank 2: 57-64 Arcane to everything within 10 yards, for 120 mana.
   let arcaneExplosion =
     { Name = "Arcane Explosion"
       CastTicks = ticks 0
@@ -279,24 +323,26 @@ module Content =
       Interruptible = false
       Range = 0
       TargetKind = Self
-      Effects = [ AreaDamage(3, 24, 36) ] }
+      Effects = [ AreaDamage(3, 57, 64) ] }
 
-  /// Blizzard is the same area effect with a larger radius (Q5a).
+  /// Rank 1: 200 Frost over an eight-second channel in an 8-yard radius, for 320
+  /// mana. Same channel caveat as Arcane Missiles.
   let blizzard =
     { Name = "Blizzard"
-      CastTicks = secTicks 2.0
+      CastTicks = secTicks 8.0
       CooldownTicks = secTicks 15.0
-      ResourceCost = 150
+      ResourceCost = 320
       Interruptible = true
       Range = 0
       TargetKind = Self
-      Effects = [ AreaDamage(5, 30, 44) ] }
+      Effects = [ AreaDamage(5, 200, 200) ] }
 
+  /// Rank 2: 90 mana, 1.5 s cast, up to 30 s.
   let polymorph =
     { Name = "Polymorph"
       CastTicks = secTicks 1.5
       CooldownTicks = secTicks 30.0
-      ResourceCost = 100
+      ResourceCost = 90
       Interruptible = true
       Range = 8
       TargetKind = Foe
@@ -304,84 +350,103 @@ module Content =
 
   // -- Druid ----------------------------------------------------------------
 
+  /// Level-22 rank: 244 over 12 s for 135 mana, plus the staff's +24 healing.
   let rejuvenation =
     { Name = "Rejuvenation"
       CastTicks = ticks 0
       CooldownTicks = secTicks 3.0
-      ResourceCost = 90
+      ResourceCost = 135
       Interruptible = false
       Range = 8
       TargetKind = Ally
-      Effects = [ HealOverTime(secTicks 15.0, 14) ] }
+      Effects = [ HealOverTime(secTicks 12.0, 22) ] }
 
+  /// Rank 3: 240-275 up front plus 259 over 21 s, for 280 mana.
   let regrowth =
     { Name = "Regrowth"
       CastTicks = secTicks 2.0
       CooldownTicks = ticks 0
-      ResourceCost = 140
+      ResourceCost = 280
       Interruptible = true
       Range = 8
       TargetKind = Ally
-      Effects = [ Heal(150, 210) ] }
+      Effects = [ Heal(264, 299); HealOverTime(secTicks 21.0, 12) ] }
 
+  /// Rank 4: 363-446 for 185 mana over three seconds, plus the staff's +24.
+  /// The mobs' weaker Healing Touch keeps its own record above.
+  let healingTouchR4 =
+    { Name = "Healing Touch"
+      CastTicks = secTicks 3.0
+      CooldownTicks = secTicks 10.0
+      ResourceCost = 185
+      Interruptible = true
+      Range = 8
+      TargetKind = Ally
+      Effects = [ Heal(387, 470) ] }
+
+  /// Rank 2: roots for 15 s and 50 Nature damage, for 65 mana.
   let entanglingRoots =
     { Name = "Entangling Roots"
       CastTicks = secTicks 1.5
       CooldownTicks = secTicks 20.0
-      ResourceCost = 90
+      ResourceCost = 65
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ Root(secTicks 10.0) ] }
+      Effects = [ Root(secTicks 15.0); DamageOverTime(secTicks 15.0, 3) ] }
 
   // -- casters' damage, and the Warrior's cooldowns ---------------------------
 
+  /// Rank 4: 63-74 Nature for 70 mana.
   let wrath =
     { Name = "Wrath"
-      CastTicks = secTicks 2.0
-      CooldownTicks = ticks 0
-      ResourceCost = 60
-      Interruptible = true
-      Range = 8
-      TargetKind = Foe
-      Effects = [ SpellDamage(40, 55) ] }
-
-  let moonfire =
-    { Name = "Moonfire"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 6.0
-      ResourceCost = 80
-      Interruptible = false
-      Range = 8
-      TargetKind = Foe
-      Effects = [ SpellDamage(30, 45); DamageOverTime(secTicks 12.0, 8) ] }
-
-  let smite =
-    { Name = "Smite"
       CastTicks = secTicks 2.0
       CooldownTicks = ticks 0
       ResourceCost = 70
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ SpellDamage(45, 60) ] }
+      Effects = [ SpellDamage(63, 74) ] }
 
+  /// Rank 4: 40-49 Arcane plus 80 over 12 s, for 105 mana.
+  let moonfire =
+    { Name = "Moonfire"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 6.0
+      ResourceCost = 105
+      Interruptible = false
+      Range = 8
+      TargetKind = Foe
+      Effects = [ SpellDamage(40, 49); DamageOverTime(secTicks 12.0, 7) ] }
+
+  /// Rank 4: 91-106 for 95 mana.
+  let smite =
+    { Name = "Smite"
+      CastTicks = secTicks 2.5
+      CooldownTicks = ticks 0
+      ResourceCost = 95
+      Interruptible = true
+      Range = 8
+      TargetKind = Foe
+      Effects = [ SpellDamage(91, 106) ] }
+
+  /// Rank 3: 132 Shadow over 18 s for 95 mana.
   let shadowWordPain =
     { Name = "Shadow Word: Pain"
       CastTicks = ticks 0
       CooldownTicks = secTicks 6.0
-      ResourceCost = 90
+      ResourceCost = 95
       Interruptible = false
       Range = 8
       TargetKind = Foe
-      Effects = [ DamageOverTime(secTicks 18.0, 12) ] }
+      Effects = [ DamageOverTime(secTicks 18.0, 7) ] }
 
-  /// Charge leaps to the target, so its range is the charge distance.
+  /// Charge generates rage rather than costing it: rank 1 refunds 9.
   let charge =
     { Name = "Charge"
       CastTicks = ticks 0
       CooldownTicks = secTicks 15.0
-      ResourceCost = 0
+      ResourceCost = -9
       Interruptible = false
       Range = 8
       TargetKind = Foe
@@ -391,23 +456,23 @@ module Content =
     { Name = "Disarm"
       CastTicks = ticks 0
       CooldownTicks = secTicks 20.0
-      ResourceCost = 100
+      ResourceCost = 20
       Interruptible = false
       Range = 1
       TargetKind = Foe
-      Effects = [ Disarm(secTicks 8.0); Threat(200) ] }
+      Effects = [ Disarm(secTicks 10.0); Threat(200) ] }
 
-  /// Execute is a plain heavy hit here; the real one is gated on the target's
-  /// health, which is a mechanic this sim does not have yet.
+  /// Rank 1: 125 damage, plus 3 per point of rage; the rage scaling and the
+  /// 20%-health gate are mechanics this sim does not model yet.
   let execute =
     { Name = "Execute"
       CastTicks = ticks 0
       CooldownTicks = secTicks 10.0
-      ResourceCost = 150
+      ResourceCost = 15
       Interruptible = false
       Range = 1
       TargetKind = Foe
-      Effects = [ Damage(90, 120) ] }
+      Effects = [ Damage(125, 125) ] }
 
   // =========================================================================
   // Builders
@@ -418,11 +483,12 @@ module Content =
   let private tankStanceBp = 50000
   let private mobThreatBp = 10000
 
-  /// Resource regeneration per Tick. Mobs do not regenerate at all, and that is
-  /// the whole reason a fight can now end: a Druid of the Fang can afford four
-  /// Healing Touches and then it is out. WoW's casters do regenerate slowly;
-  /// this is the knob to turn if fights should become endurance tests.
-  let private partyRegen = 2
+  /// Resource regeneration per Tick. A Tick is 1/20 s, so this is 20 a second:
+  /// the closest whole number to a level-24 priest's ~86 mana per 5 s out of the
+  /// five-second rule and to a Rogue's 10 energy a second. Mobs do not
+  /// regenerate at all, and that is the whole reason a fight can end: a Druid of
+  /// the Fang can afford a handful of casts and then it is spent.
+  let private partyRegen = 1
   let private mobRegen = 0
 
   let hero
@@ -528,47 +594,88 @@ module Content =
       CallForHelpBelowHealthPct = callForHelpBelowPct
       HasCalledForHelp = false }
 
-  /// Derive combat values from the five stats (Q1a). Faithful in shape, not in
-  /// scale — these are pacing placeholders.
-  let private derive (armorClass: ArmorClass) (traits: Traits) (s: Stats) =
-    {| MaxHealth = s.Stamina * 10
-       MaxResource = s.Intellect * 5
-       RegenPerTick = s.Spirit / 10
-       CritChanceBp = s.Agility * 5 + traits.CritBonusBp
-       DodgeChanceBp = s.Agility * 3 + traits.DodgeBonusBp
-       Armor = ArmorClass.baseArmor armorClass + s.Agility / 4 + traits.ArmorBonus
+  /// The sourced level-24 sheet behind one party member. Base pools and base
+  /// attributes come from the vanilla class+race table at level 24
+  /// (`wow_world_base` base_stats); the gear totals are the best-in-slot set a
+  /// level-24 twink can actually wear; the attack-power conversion is the
+  /// class's own. See `.pi/research/level24/` for the per-item sources.
+  type Sheet =
+    { Stats: Stats
+      BaseHealth: int
+      BaseMana: int
+      GearArmor: int
+      ApPerStrength: int
+      ApPerAgility: int
+      /// Rage and energy are fixed pools; mana is computed from Intellect.
+      FixedPool: int option }
+
+  /// The party-wide passives, one per class present (Q2a), each at the highest
+  /// rank a level-24 caster can train.
+  let partyBuffs: PartyBuffKind list =
+    [ ArcaneIntellect; MarkOfTheWild; BattleShout; PowerWordFortitude ]
+
+  /// Apply the party passives. Armour and attack power come back separately:
+  /// they are not one of the five stats, but they are just as real.
+  let private buffed (stats: Stats) =
+    partyBuffs
+    |> List.fold
+      (fun (acc: Stats, armor: int, ap: int) b ->
+        match b with
+        | ArcaneIntellect -> { acc with Intellect = acc.Intellect + 7 }, armor, ap
+        | DivineSpirit -> { acc with Spirit = acc.Spirit + 17 }, armor, ap
+        | PowerWordFortitude -> { acc with Stamina = acc.Stamina + 20 }, armor, ap
+        | MarkOfTheWild ->
+          { acc with
+              Strength = acc.Strength + 4
+              Agility = acc.Agility + 4
+              Stamina = acc.Stamina + 4
+              Intellect = acc.Intellect + 4
+              Spirit = acc.Spirit + 4 },
+          armor + 105,
+          ap
+        | BattleShout -> acc, armor, ap + 55)
+      (stats, 0, 0)
+
+  /// Health or mana from an attribute: the first 20 points are worth 1 each and
+  /// every point after that is worth `perPoint` (10 health, 15 mana).
+  let private pool (n: int) (perPoint: int) = min 20 n + (max 0 (n - 20)) * perPoint
+
+  /// Derive combat values from the sheet and traits with Classic's real
+  /// formulas: health and mana from Stamina and Intellect, 2 armour per Agility
+  /// on top of item armour, and crit and dodge per Agility. The agility-to-crit
+  /// rate is the one interpolated number here (~10 Agility per 1% at level 24).
+  let private derive (sheet: Sheet) (traits: Traits) =
+    let s, armorBp, attackPower = buffed sheet.Stats
+
+    {| MaxHealth = sheet.BaseHealth + pool s.Stamina 10
+       MaxResource = defaultArg sheet.FixedPool (sheet.BaseMana + pool s.Intellect 15)
+       RegenPerTick = partyRegen
+       CritChanceBp = 500 + s.Agility * 10 + traits.CritBonusBp
+       DodgeChanceBp = 500 + s.Agility * 5 + traits.DodgeBonusBp
+       Armor = sheet.GearArmor + armorBp + s.Agility * 2 + traits.ArmorBonus
        BlockChanceBp = traits.BlockChanceBp
        BlockValue = traits.BlockValue
-       MeleeBonus = s.Strength / 5 |}
+       AttackPower = s.Strength * sheet.ApPerStrength + s.Agility * sheet.ApPerAgility + attackPower |}
 
-  /// The party-wide passives, one per class present (Q2a).
-  let partyBuffs: PartyBuffKind list = [ ArcaneIntellect; DivineSpirit; MarkOfTheWild; BattleShout ]
-
-  /// Apply the party passives to a class's base stats.
-  let private buffed (stats: Stats) =
-    (stats, partyBuffs)
-    ||> List.fold (fun acc b ->
-      match b with
-      | ArcaneIntellect -> { acc with Intellect = acc.Intellect * 110 / 100 }
-      | DivineSpirit -> { acc with Spirit = acc.Spirit * 110 / 100 }
-      | MarkOfTheWild -> Stats.scaleBp 10500 acc
-      | BattleShout -> { acc with Strength = acc.Strength * 110 / 100 })
-
-  /// A Party member specified by the five stats rather than raw values. The
-  /// passives are applied to the stats before the derived values are computed.
+  /// A Party member specified by its level-24 sheet. The passives are applied to
+  /// the stats before the derived values are computed.
   let heroStats
     (id: int)
     (name: string)
     (role: Role)
     (armorClass: ArmorClass)
     (traits: Traits)
-    (stats: Stats)
+    (sheet: Sheet)
     (attack: AutoAttack)
     (threatBp: int)
     (abilities: Ability list)
     (pos: Pos)
     : Entity =
-    let d = derive armorClass traits (buffed stats)
+    let d = derive sheet traits
+
+    // Attack power adds damage per swing at AP/14 per second, scaled by the
+    // weapon's own speed: 14 * 20 Ticks in the denominator.
+    let meleeBonus = d.AttackPower * int attack.Ticks / (14 * 20)
 
     { Id = EntityId id
       Name = name
@@ -597,9 +704,9 @@ module Content =
       Target = None
       ForcedTarget = None
       ThreatMultiplierBp = threatBp
-      Stats = stats
+      Stats = sheet.Stats
       CritChanceBp = d.CritChanceBp
-      MeleeDamageBonus = d.MeleeBonus
+      MeleeDamageBonus = meleeBonus
       Armor = d.Armor
       ArmorClass = armorClass
       DodgeChanceBp = d.DodgeChanceBp
@@ -615,73 +722,242 @@ module Content =
   // The encounter
   // =========================================================================
 
-  // Skill-tree traits, distinct from the party Buffs: the "assumed" per-class
-  // bonuses. Warrior's threat is covered by the Tank stance, not here.
+  // The one per-class bonus that is not a stat: a shield's own block. Every
+  // other class fights with what the gear and the formulas give it.
   let private warriorTraits =
     { Traits.none with
-        ArmorBonus = 150
-        BlockChanceBp = 800
-        BlockValue = 30 }
+        BlockChanceBp = 500
+        BlockValue = 8 }
 
-  let private rogueTraits = { Traits.none with BackstabCritBonusBp = 6000 }
-  let private casterTraits = { Traits.none with PushbackResistanceBp = 8000 }
+  // Sourced level-24 sheets. Base attributes and base health/mana are the
+  // vanilla class+race row for level 24 (Human Warrior, Night Elf Rogue, Gnome
+  // Mage, Human Priest, Night Elf Druid); the gear totals and weapons are the
+  // best-in-slot level-24 set, item by item, in .pi/research/level24/.
 
+  /// Human Warrior, 87 Str / 54 Agi / 91 Sta: 1248 armour (765 from the set plus
+  /// the Tower Shield's 483), Shadowfang 29-55 at 2.70 s. Rage is a flat 100.
   let private warrior =
-    heroStats 1 "Warrior" Tank Plate warriorTraits { Strength = 100; Agility = 50; Stamina = 90; Intellect = 60; Spirit = 20 } { Min = 18; Max = 26; Ticks = secTicks 2.0; Range = 1 } tankStanceBp [ taunt; heroicStrike; sunderArmor; shieldBash; charge; disarm; execute ] { X = 1; Y = 5 }
+    heroStats
+      1
+      "Warrior"
+      Tank
+      Plate
+      warriorTraits
+      { Stats = { Strength = 87; Agility = 54; Stamina = 91; Intellect = 23; Spirit = 38 }
+        BaseHealth = 253
+        BaseMana = 0
+        GearArmor = 1248
+        ApPerStrength = 2
+        ApPerAgility = 0
+        FixedPool = Some 100 }
+      { Min = 29; Max = 55; Ticks = secTicks 2.7; Range = 1 }
+      tankStanceBp
+      [ taunt; heroicStrike; sunderArmor; shieldBash; charge; disarm; execute ]
+      { X = 1; Y = 5 }
 
+  /// Human Priest, 28 Str / 35 Agi / 73 Sta / 104 Int / 86 Spi: 253 armour from
+  /// the set, Staff of the Blessed Seer 47-71 at 3.00 s with +24 healing, which
+  /// is folded into the heals above.
   let private priest =
-    heroStats 2 "Priest" Healer Cloth casterTraits { Strength = 20; Agility = 30; Stamina = 64; Intellect = 180; Spirit = 200 } { Min = 6; Max = 10; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ heal; renew; smite; shadowWordPain ] { X = 1; Y = 6 }
+    heroStats
+      2
+      "Priest"
+      Healer
+      Cloth
+      Traits.none
+      { Stats = { Strength = 28; Agility = 35; Stamina = 73; Intellect = 104; Spirit = 86 }
+        BaseHealth = 283
+        BaseMana = 540
+        GearArmor = 253
+        ApPerStrength = 1
+        ApPerAgility = 0
+        FixedPool = None }
+      { Min = 47; Max = 71; Ticks = secTicks 3.0; Range = 1 }
+      partyThreatBp
+      [ heal; renew; smite; shadowWordPain ]
+      { X = 1; Y = 6 }
 
+  /// Night Elf Rogue, 46 Str / 100 Agi / 50 Sta: 221 armour from the set plus 200
+  /// from Agility, Assassin's Blade 20-39 at 1.90 s, 100 energy.
   let private rogue =
-    heroStats 3 "Rogue" Dps Leather rogueTraits { Strength = 80; Agility = 120; Stamina = 70; Intellect = 80; Spirit = 20 } { Min = 16; Max = 24; Ticks = secTicks 1.8; Range = 1 } partyThreatBp [ backstab; kick; gouge; cheapShot ] { X = 1; Y = 7 }
+    heroStats
+      3
+      "Rogue"
+      Dps
+      Leather
+      Traits.none
+      { Stats = { Strength = 46; Agility = 100; Stamina = 50; Intellect = 25; Spirit = 29 }
+        BaseHealth = 301
+        BaseMana = 0
+        GearArmor = 221
+        ApPerStrength = 1
+        ApPerAgility = 1
+        FixedPool = Some 100 }
+      { Min = 20; Max = 39; Ticks = secTicks 1.9; Range = 1 }
+      partyThreatBp
+      [ backstab; kick; gouge ]
+      { X = 1; Y = 7 }
 
+  /// Gnome Mage, 18 Str / 35 Agi / 56 Sta / 131 Int / 99 Spi: 282 armour from the
+  /// set, and a Gravestone Scepter wand (30-57 at 1.50 s) as the auto-attack,
+  /// which is why the Mage has no attack-power contribution.
   let private mage =
-    // The mage's auto-attack is a wand: the same swing, at range.
-    heroStats 4 "Mage" Dps Cloth casterTraits { Strength = 20; Agility = 40; Stamina = 60; Intellect = 240; Spirit = 40 } { Min = 4; Max = 8; Ticks = secTicks 3.0; Range = 8 } partyThreatBp [ fireball; frostbolt; magicMissile; arcaneExplosion; blizzard; polymorph ] { X = 2; Y = 6 }
+    heroStats
+      4
+      "Mage"
+      Dps
+      Cloth
+      Traits.none
+      { Stats = { Strength = 18; Agility = 35; Stamina = 56; Intellect = 131; Spirit = 99 }
+        BaseHealth = 288
+        BaseMana = 523
+        GearArmor = 282
+        ApPerStrength = 0
+        ApPerAgility = 0
+        FixedPool = None }
+      { Min = 30; Max = 57; Ticks = secTicks 1.5; Range = 8 }
+      partyThreatBp
+      [ fireball; frostbolt; arcaneMissiles; arcaneExplosion; blizzard; polymorph ]
+      { X = 2; Y = 6 }
 
+  /// Night Elf Druid, 31 Str / 44 Agi / 53 Sta / 94 Int / 78 Spi: 238 armour from
+  /// the set, the same staff as the Priest.
   let private druid =
-    heroStats 5 "Druid" Healer Leather casterTraits { Strength = 30; Agility = 40; Stamina = 68; Intellect = 200; Spirit = 180 } { Min = 8; Max = 12; Ticks = secTicks 3.0; Range = 1 } partyThreatBp [ rejuvenation; regrowth; entanglingRoots; wrath; moonfire ] { X = 2; Y = 7 }
+    heroStats
+      5
+      "Druid"
+      Healer
+      Leather
+      Traits.none
+      { Stats = { Strength = 31; Agility = 44; Stamina = 53; Intellect = 94; Spirit = 78 }
+        BaseHealth = 303
+        BaseMana = 449
+        GearArmor = 238
+        ApPerStrength = 1
+        ApPerAgility = 0
+        FixedPool = None }
+      { Min = 47; Max = 71; Ticks = secTicks 3.0; Range = 1 }
+      partyThreatBp
+      [ healingTouchR4; regrowth; rejuvenation; entanglingRoots; wrath; moonfire ]
+      { X = 2; Y = 7 }
 
+  // Wailing Caverns creatures. Health, per-swing melee damage and armour are the
+  // real Classic values from the classicdb.ch and Wowhead Classic NPC pages
+  // collected in .pi/research/level24/mobs.md, with the armour values and the
+  // unranked NPC spell numbers in mobs_armour_and_spells.md.
+  //
+  // Two gaps, both marked where they bite: attack speed is not published for any
+  // of these creatures, so every mob swings at the common 2.0 s elite rate; and
+  // Mutanus is the one creature whose armour no page lists, so his is fitted at
+  // 40 per level through the sourced points around him. Mana pools are unsourced
+  // and exist only to stop a mob casting forever.
+
+  /// Druid of the Fang, the trash caster: 1280 health (1235-1332), 145-172 a
+  /// swing, 780 armour. Serpent Form at 30% health replaces its casts with a
+  /// harder melee — which the sim models as a bounded shapeshift.
   let private druidOfTheFang id pos =
-    { mob id "Druid of the Fang" 480 400 (Some { Min = 12; Max = 18; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; serpentForm; druidsSlumber ] None pos with
-        Armor = 100 }
+    { mob id
+        "Druid of the Fang"
+        1280
+        400
+        (Some { Min = 145; Max = 172; Ticks = secTicks 2.0; Range = 1 })
+        [ lightningBolt; healingTouch; serpentForm; druidsSlumber ]
+        None
+        pos with
+        Armor = 683 }
 
-  /// Raptors close faster than the casting mobs.
+  /// The cave raptor is the Deviate Ravager (NPC 3636): 1310 health (1248-1375),
+  /// 70-82 a swing and the one sourced armour value, 800. Its Thrash proc is not
+  /// modelled. Raptors close faster than the casting mobs.
   let private raptor id pos =
-    { mob id "Raptor" 380 0 (Some { Min = 20; Max = 28; Ticks = secTicks 1.8; Range = 1 }) [] (Some 20) pos with
+    { mob id
+        "Deviate Ravager"
+        1310
+        0
+        (Some { Min = 70; Max = 82; Ticks = secTicks 2.0; Range = 1 })
+        []
+        (Some 20)
+        pos with
         MoveTicksPerTile = secTicks 0.3
-        Armor = 200 }
+        Armor = 800 }
 
+  /// Lady Anacondra, level 20 elite: 2214 health, 154-183 a swing. She also
+  /// carries a Thorns aura in Classic; a reflect-damage effect is not modelled.
   let private ladyAnacondra id pos =
-    { mob id "Lady Anacondra" 900 600 (Some { Min = 14; Max = 20; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos with
-        Armor = 120 }
+    { mob id
+        "Lady Anacondra"
+        2214
+        600
+        (Some { Min = 154; Max = 183; Ticks = secTicks 2.0; Range = 1 })
+        [ lightningBolt; healingTouch; fangSleep ]
+        None
+        pos with
+        Armor = 712 }
 
   /// The four Fanglords share the Druid of the Fang kit — their differences are
-  /// pacing-only health and armour until sourced numbers exist.
+  /// health, swing and (for Serpentis) a rank-6 heal. Cobrahn's Serpent Form and
+  /// Pythas' Thunderclap are not modelled yet.
   let private lordSerpentis id pos =
-    { mob id "Lord Serpentis" 1200 600 (Some { Min = 16; Max = 24; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos with
-        Armor = 150 }
+    { mob id
+        "Lord Serpentis"
+        2770
+        600
+        (Some { Min = 154; Max = 183; Ticks = secTicks 2.0; Range = 1 })
+        [ lightningBolt; healingTouchR6; fangSleep ]
+        None
+        pos with
+        Armor = 712 }
 
   let private lordCobrahn id pos =
-    { mob id "Lord Cobrahn" 1100 600 (Some { Min = 15; Max = 23; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos with
-        Armor = 140 }
+    { mob id
+        "Lord Cobrahn"
+        2279
+        600
+        (Some { Min = 145; Max = 172; Ticks = secTicks 2.0; Range = 1 })
+        [ lightningBolt; healingTouch; fangSleep ]
+        None
+        pos with
+        Armor = 712 }
 
   let private lordPythas id pos =
-    { mob id "Lord Pythas" 1000 600 (Some { Min = 14; Max = 22; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos with
-        Armor = 130 }
+    { mob id
+        "Lord Pythas"
+        2409
+        600
+        (Some { Min = 154; Max = 183; Ticks = secTicks 2.0; Range = 1 })
+        [ lightningBolt; healingTouch; fangSleep ]
+        None
+        pos with
+        Armor = 712 }
 
-  /// Naralex, the sleeping dreamer at the heart of the Caverns. His nightmare
-  /// fights back with the Fang kit until a Nightmare mechanic is modelled.
+  /// Naralex, level 25 and not an elite: 1240 health, 47-56 a swing. The real one
+  /// is a sleeping quest NPC rather than a fight — he is here with the Fang kit
+  /// only because the Nightmare mechanic is not modelled.
   let private naralex id pos =
-    { mob id "Naralex" 1500 800 (Some { Min = 12; Max = 18; Ticks = secTicks 2.0; Range = 1 }) [ lightningBolt; healingTouch; druidsSlumber ] None pos with
-        Armor = 100 }
+    { mob id
+        "Naralex"
+        1240
+        800
+        (Some { Min = 47; Max = 56; Ticks = secTicks 2.0; Range = 1 })
+        [ lightningBolt; healingTouch; druidsSlumber ]
+        None
+        pos with
+        Armor = 960 }
 
-  /// Mutanus the Devourer, the final boss: a heavy melee aberration with no
-  /// cast. The real fight is a summoning event with no sourced numbers, so this
-  /// is a pacing placeholder.
+  /// Mutanus the Devourer, level 22 elite: 4555 health, 179-213 a swing. His
+  /// Thundercrack (94-107 area Nature plus a stun), Terrify (fear) and Naralex's
+  /// Nightmare (sleep) are real and unmodelled, so this is his melee only. He is
+  /// also the one creature here with no published armour (fitted, 40/level).
   let private mutanus id pos =
-    { mob id "Mutanus the Devourer" 2200 0 (Some { Min = 24; Max = 34; Ticks = secTicks 1.8; Range = 1 }) [] None pos with
-        Armor = 250 }
+    { mob id
+        "Mutanus the Devourer"
+        4555
+        0
+        (Some { Min = 179; Max = 213; Ticks = secTicks 2.0; Range = 1 })
+        []
+        None
+        pos with
+        Armor = 880 }
 
   /// Build the Screaming Gully encounter. The only randomness at generation is
   /// which of Anacondra's four positions she takes, drawn from the Generation

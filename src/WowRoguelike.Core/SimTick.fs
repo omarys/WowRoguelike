@@ -18,15 +18,16 @@ module SimTick =
   let advanceAuras (w: World) =
     mapAll (fun e -> { e with Auras = e.Auras |> List.choose Aura.advance }) w
 
-  /// Heal-over-time and Polymorph's regen tick down each Tick.
+  /// Heal-over-time and Polymorph's regen tick down once a second.
   let advanceAuraHealing (w: World) =
     mapAll
       (fun e ->
         if not (alive e) then
           e
         else
-          let flat = e.Auras |> List.sumBy Aura.flatHealPerTick
-          let pctBp = e.Auras |> List.sumBy Aura.maxHealthHealBpPerTick
+          let firing = e.Auras |> List.filter Aura.firesThisTick
+          let flat = firing |> List.sumBy Aura.flatHealPerTick
+          let pctBp = firing |> List.sumBy Aura.maxHealthHealBpPerTick
           let heal = flat + (e.MaxHealth * pctBp / 10000)
 
           if heal <= 0 then
@@ -35,15 +36,15 @@ module SimTick =
             { e with Health = min e.MaxHealth (e.Health + heal) })
       w
 
-  /// Damage-over-time ticks down each Tick, applied unmitigated. It routes
+  /// Damage-over-time ticks down once a second, applied unmitigated. It routes
   /// through dealDamage so the target wakes and, if it dies, drops its orders.
   let advanceAuraDamage (w: World) =
-    let burning =
-      w.Entities
-      |> List.filter (fun e -> alive e && (e.Auras |> List.sumBy Aura.flatDamagePerTick) > 0)
+    let perTick (e: Entity) =
+      e.Auras |> List.filter Aura.firesThisTick |> List.sumBy Aura.flatDamagePerTick
 
-    (w, burning)
-    ||> List.fold (fun w e -> dealDamage e.Id (e.Auras |> List.sumBy Aura.flatDamagePerTick) w)
+    let burning = w.Entities |> List.filter (fun e -> alive e && perTick e > 0)
+
+    (w, burning) ||> List.fold (fun w e -> dealDamage e.Id (perTick e) w)
 
   let advanceCooldowns (w: World) =
     mapAll
@@ -266,9 +267,13 @@ module SimTick =
 
     (w, acting)
     ||> List.fold (fun w m ->
-      // Proximity aggro: a Mob notices the Party before any threat exists.
+      // Proximity aggro: a Mob notices the Party before any threat exists — and
+      // only what it can actually see, so a pack in the next room stays asleep
+      // until the Party walks in (Q: aggro through walls is not a pull mechanic).
       let noticed =
-        aliveParty w |> List.exists (fun p -> Pos.chebyshev m.Pos p.Pos <= aggroRadius)
+        aliveParty w
+        |> List.exists (fun p ->
+          Pos.chebyshev m.Pos p.Pos <= aggroRadius && Path.lineOfSight w.Grid m.Pos p.Pos)
 
       let w, m =
         if not m.Engaged && noticed then
