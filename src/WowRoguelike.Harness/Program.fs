@@ -12,7 +12,9 @@ let private usage () =
   printfn "sim dungeon [seed]          generate a floorplan and render it as ASCII"
   printfn "sim maps                   render the Wailing Caverns rooms extracted from images/"
   printfn "sim wc                     render the stitched Wailing Caverns dungeon"
+  printfn "sim sm [wing] [min|median|max]  render a Scarlet Monastery wing at one difficulty"
   printfn "sim runs [n] [maxTicks]     run n seeds and summarise outcomes"
+  printfn "sim snapshots [n]           one stable line per seed, the snapshot test's input"
   printfn "sim story [-i]             play the Wailing Caverns story (auto-picks choices)"
 
 let private nth (args: string list) (i: int) = args |> List.tryItem i
@@ -39,7 +41,9 @@ let private demo (seed: uint64) (maxTicks: int) =
   printfn "seed=%d tick=%d outcome=%A" seed w.Tick (SimState.outcome w)
   printfn ""
   printfn "--- combat log (oldest first) ---"
-  printfn "%s" (Dump.log w)
+  // The whole log, not `Dump.log`'s tail: the harness is where a fight is read,
+  // and a truncated log cannot be summed per attacker.
+  printfn "%s" (w.Log |> List.rev |> String.concat "\n")
   printfn ""
   printfn "--- final state ---"
   printfn "%s" (Dump.world w)
@@ -175,6 +179,78 @@ let main argv =
   | [ "wc" ] ->
     wc ()
     0
+  | "smrun" :: rest ->
+    let wing = rest |> List.tryItem 0 |> Option.defaultValue "graveyard"
+
+    let difficulty =
+      match rest |> List.tryItem 1 with
+      | Some "min" -> Content.Minimum
+      | Some "max" -> Content.Maximum
+      | _ -> Content.Median
+
+    let limit = rest |> List.tryItem 2 |> Option.map int |> Option.defaultValue 12000
+    let mutable w = Content.scarletMonasteryAt wing difficulty 1UL
+    let hostiles = w.Entities |> List.filter (fun e -> e.Faction = Hostile) |> List.length
+    let party = SimState.aliveParty w |> List.map (fun e -> e.Pos)
+    let mutable tick = 0
+
+    while tick < limit && not (SimState.aliveHostiles w |> List.isEmpty) do
+      w <- SimTick.step (Bench.autoPilot w) w
+      tick <- tick + 1
+
+    let alive = SimState.aliveParty w |> List.map (fun e -> sprintf "%s %d/%d" e.Name e.Health e.MaxHealth)
+    let now = SimState.aliveParty w |> List.map (fun e -> e.Pos)
+
+    // How far the Tank ended from the nearest surviving mob: the difference
+    // between a wipe and a Party that never found the fight.
+    let nearest =
+      match now, SimState.aliveHostiles w with
+      | tank :: _, hostiles when not hostiles.IsEmpty ->
+        hostiles |> List.map (fun e -> Pos.chebyshev e.Pos tank) |> List.min |> sprintf " nearest=%d"
+      | _ -> ""
+
+    printfn
+      "%s %A level=%d ticks=%d/%d mobs=%d left=%d party=[%s]%s spawn=[%s] end=[%s]"
+      wing
+      difficulty
+      (Content.levelOf difficulty (Content.wingOf wing))
+      tick
+      limit
+      hostiles
+      (SimState.aliveHostiles w |> List.length)
+      (String.concat ", " alive)
+      nearest
+      (party |> List.map (fun p -> sprintf "%d,%d" p.X p.Y) |> String.concat " ")
+      (now |> List.map (fun p -> sprintf "%d,%d" p.X p.Y) |> String.concat " ")
+
+    0
+  | "sm" :: rest ->
+    let wing = rest |> List.tryItem 0 |> Option.defaultValue "graveyard"
+
+    let difficulty =
+      match rest |> List.tryItem 1 with
+      | Some "min" -> Content.Minimum
+      | Some "max" -> Content.Maximum
+      | _ -> Content.Median
+
+    let w = Content.scarletMonasteryAt wing difficulty 1UL
+
+    let party =
+      w.Entities
+      |> List.filter (fun e -> e.Faction = Party)
+      |> List.map (fun e -> e.Name)
+
+    printfn
+      "%s %A  level=%d  %dx%d  party=%s"
+      wing
+      difficulty
+      (Content.levelOf difficulty (Content.wingOf wing))
+      w.Grid.Width
+      w.Grid.Height
+      (String.concat ", " party)
+
+    printfn "%s" (renderGrid w.Grid)
+    0
   | [ "diagnose" ] ->
     printfn "%s" (Bench.searchFailureCost 200)
     printfn ""
@@ -216,6 +292,12 @@ let main argv =
     0
   | "runs" :: rest ->
     runs (intOf rest 0 20) (intOf rest 1 2000)
+    0
+  | "snapshots" :: rest ->
+    // The same lines the snapshot test compares, so a baseline can be produced
+    // without running the test runner.
+    [ 1UL .. uint64 (intOf rest 0 30) ]
+    |> List.iter (fun s -> printfn "%d %s" s (Bench.summary (Bench.runEncounter s 3000)))
     0
   | "story" :: rest ->
     playStory (List.contains "-i" rest || List.contains "--interactive" rest)

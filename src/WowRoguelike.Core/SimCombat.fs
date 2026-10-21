@@ -19,7 +19,7 @@ module SimCombat =
     let v, rng = Rng.drawCombat lo hi w.Rng
     v, { w with Rng = rng }
 
-  /// Roll for a critical hit against `critChanceBp`. A crit deals 150% damage.
+  /// Roll for a critical hit against `critChanceBp`. A spell crit deals 150%.
   let rollCrit (critChanceBp: int) (amount: int) (w: World) : int * World =
     let roll, w = rollRange 0 9999 w
     if roll < critChanceBp then amount * 150 / 100, w else amount, w
@@ -27,42 +27,197 @@ module SimCombat =
   /// Base chance (basis points) that damage interrupts a cast in progress (Q5a).
   let pushbackBaseBp = 1000
 
-  /// The level of the attacker in the armour curve. Wailing Caverns trash sits
-  /// at 20-22 and the Party at 24, so one constant covers both directions to
-  /// within about three percentage points — the curve only reads the attacker's
-  /// level, and the sim does not carry a Level on entities.
-  let private drAttackerLevel = 21
+  // -------------------------------------------------------------------------
+  // The attack table
+  // -------------------------------------------------------------------------
 
-  /// Armour mitigation, WoW's real curve: A / (A + 400 + 85 * attackerLevel),
-  /// capped at 75%. A level-24 tank in plate (1248 armour) takes 36% less
-  /// physical damage; a cloth caster (352) about 14%.
-  let private armorMitigationBp (armor: int) =
+  /// Where a swing landed. Vanilla resolves a melee attack with ONE roll whose
+  /// bands descend in this order, so a dodged attack was never a crit in the
+  /// first place and a blocked hit cannot crit.
+  type SwingResult =
+    | Missed
+    | Dodged
+    | Parried
+    | Glanced
+    | Blocked
+    | Critical
+    | Hit
+
+  /// The chance of each band, in basis points, for one attacker/target pair.
+  type SwingChances =
+    { Miss: int
+      Dodge: int
+      Parry: int
+      Glancing: int
+      Block: int
+      Crit: int }
+
+  /// Defence minus weapon skill. Both are five per level, so this is five times
+  /// the level gap: a level-24 attacker against a level-19 mob is -25.
+  let levelDelta (attacker: Entity) (target: Entity) = target.Level * 5 - attacker.Level * 5
+
+  /// Chance (basis points) that a swing misses.
+  ///
+  /// The two coefficients are not interchangeable: 0.1% per skill point when the
+  /// DEFENDER is a mob, 0.04% per point when the defender is a player (less
+  /// 0.02% per point the attacker has over it). Vanilla floors it at 1%.
+  let missChanceBp (attacker: Entity) (target: Entity) =
+    let delta = levelDelta attacker target
+
+    let bp =
+      if target.Faction = Party then
+        500 + max 0 delta * 4 - max 0 -delta * 2
+      elif delta <= 10 then
+        500 + delta * 10
+      else
+        600 + (delta - 10) * 40
+
+    max 100 bp
+
+  /// A player's dodge is its agility term plus 0.04% per point of defence over
+  /// the attacker's skill; a mob's is 5% flat plus 0.1% per level it has on you.
+  let dodgeChanceBp (attacker: Entity) (target: Entity) =
+    let delta = levelDelta attacker target
+
+    if target.Faction = Party then target.DodgeChanceBp + max 0 delta * 4
+    else max 0 (target.DodgeChanceBp + 500 + delta * 10)
+
+  /// Mobs parry; the Party does not, so its parry is zero and needs no field.
+  let parryChanceBp (attacker: Entity) (target: Entity) =
+    if target.Faction = Party then 0
+    else max 0 (500 + levelDelta attacker target * 10)
+
+  /// Glancing blows are a penalty for fighting something at or above your level:
+  /// the chance is 10% at equal level and falls to nothing two levels below, so
+  /// a level-24 party never glances off level-19 trash.
+  let glancingChanceBp (attacker: Entity) (target: Entity) =
+    if target.Faction = Party then 0
+    else max 0 (1000 + levelDelta attacker target * 200)
+
+  /// Damage multiplier on a glancing blow, in basis points.
+  let glancingMultiplierBp (attacker: Entity) (target: Entity) =
+    let reduction = 50 * max 0 (-levelDelta attacker target)
+    min 9900 (max 4000 (13000 - reduction))
+
+  /// Hitting something below your level is a real crit bonus, not suppression:
+  /// 0.04% per point of weapon skill over its defence.
+  let levelCritBonusBp (attacker: Entity) (target: Entity) =
+    if target.Faction = Party then 0 else max 0 (-levelDelta attacker target) * 4
+
+  /// The table as a pure function of the roll, so the bands can be tested
+  /// without a World or a seed.
+  let attackTable (c: SwingChances) (roll: int) : SwingResult =
+    let dodge = c.Miss + c.Dodge
+    let parry = dodge + c.Parry
+    let glancing = parry + c.Glancing
+    let block = glancing + c.Block
+    let crit = block + c.Crit
+
+    if roll < c.Miss then Missed
+    elif roll < dodge then Dodged
+    elif roll < parry then Parried
+    elif roll < glancing then Glanced
+    elif roll < block then Blocked
+    elif roll < crit then Critical
+    else Hit
+
+  /// Every band except the ability's own crit bonus, which the caller adds.
+  let chanceOf (attacker: Entity) (target: Entity) : SwingChances =
+    { Miss = missChanceBp attacker target
+      Dodge = dodgeChanceBp attacker target
+      Parry = parryChanceBp attacker target
+      Glancing = glancingChanceBp attacker target
+      Block = target.BlockChanceBp + (target.Auras |> List.sumBy Aura.blockBonusBp)
+      Crit = attacker.CritChanceBp + levelCritBonusBp attacker target }
+
+  /// Chance (basis points) a spell misses or is fully resisted, by level
+  /// difference. A miss is a full resist — partial resists come only from
+  /// resistance, which nothing here carries — and vanilla floors it at 1%.
+  let spellMissChanceBp (caster: Entity) (target: Entity) =
+    match target.Level - caster.Level with
+    | d when d <= 0 -> 100
+    | 1 -> 500
+    | 2 -> 600
+    | 3 -> 1700
+    | 4 -> 2800
+    | d -> min 9900 (2800 + (d - 4) * 1100)
+
+  /// Physical damage reduction, WoW's real curve: A / (A + 400 + 85 * attacker
+  /// level), capped at 75%. The ATTACKER's level goes in the denominator: a
+  /// level-24 tank in plate (1248 armour) takes 36% less from a level-19 mob.
+  let armorMitigationBp (attackerLevel: int) (armor: int) =
     if armor <= 0 then 0
-    else min 7500 (armor * 10000 / (armor + 400 + 85 * drAttackerLevel))
+    else min 7500 (armor * 10000 / (armor + 400 + 85 * attackerLevel))
 
-  /// Dodge (full avoid), block (flat value), then armour (linear, capped). This
-  /// is the physical-only pipeline (Q2a/Q4a); spells skip it entirely.
-  let mitigatePhysical (targetId: EntityId) (amount: int) (w: World) : int * World =
+  /// Roll a spell through the hit table. Vanilla resists are all-or-nothing: a
+  /// miss deals zero, never a fraction, because partial resists come only from
+  /// resistance and nothing here carries resistance.
+  let spellHit
+    (spellName: string)
+    (caster: Entity)
+    (targetId: EntityId)
+    (amount: int)
+    (w: World)
+    : int * World =
     match tryEntity targetId w with
     | None -> amount, w
     | Some t ->
-      if not (alive t) || amount <= 0 then
-        amount, w
-      else
-        let dodgeRoll, w = rollRange 0 9999 w
+      let roll, w = rollRange 0 9999 w
 
-        if dodgeRoll < t.DodgeChanceBp then
-          (0, w |> logLine (sprintf "%s dodges" t.Name))
-        else
-          let blockRoll, w = rollRange 0 9999 w
-          let blocked = if blockRoll < t.BlockChanceBp then t.BlockValue else 0
-          let effectiveArmor = max 0 (t.Armor - (t.Auras |> List.sumBy Aura.armorReduction))
-          let afterBlock = max 0 (amount - blocked)
-          afterBlock * (10000 - armorMitigationBp effectiveArmor) / 10000, w
+      if roll < spellMissChanceBp caster t then
+        0, logLine (sprintf "%s resists %s" t.Name spellName) w
+      else
+        amount, w
+
+  /// One physical hit from `attacker` on `targetId`: the attack table, then
+  /// armour. A melee crit is 200% — the spell multiplier is 150% and applying it
+  /// to swings too is what left physical damage short. Logs what it avoided and
+  /// returns the damage actually dealt.
+  let meleeStrike
+    (attacker: Entity)
+    (targetId: EntityId)
+    (amount: int)
+    (critBonusBp: int)
+    (w: World)
+    : int * World =
+    match tryEntity targetId w with
+    | None -> 0, w
+    | Some t when not (alive t) || amount <= 0 -> amount, w
+    | Some t ->
+      let chances = { chanceOf attacker t with Crit = attacker.CritChanceBp + critBonusBp + levelCritBonusBp attacker t }
+      let roll, w = rollRange 0 9999 w
+
+      let mitigate raw =
+        let armor = max 0 (t.Armor - (t.Auras |> List.sumBy Aura.armorReduction))
+        raw * (10000 - armorMitigationBp attacker.Level armor) / 10000
+
+      match attackTable chances roll with
+      | Missed -> 0, logLine (sprintf "%s misses %s" attacker.Name t.Name) w
+      | Dodged -> 0, logLine (sprintf "%s dodges %s" t.Name attacker.Name) w
+      | Parried -> 0, logLine (sprintf "%s parries %s" t.Name attacker.Name) w
+      | Glanced -> mitigate (amount * glancingMultiplierBp attacker t / 10000), w
+      | Blocked -> mitigate (max 0 (amount - t.BlockValue)), w
+      | Critical -> mitigate (amount * 200 / 100), w
+      | Hit -> mitigate amount, w
 
   /// Damage wakes a sleeper, as does any other hostile action — see `wake`. A
   /// corpse stops moving and stops casting, so it interpolates nowhere.
   let dealDamage (targetId: EntityId) (amount: int) (w: World) =
+    // Shield Wall takes its share before anything lands, so it covers every
+    // source: a swing, a spell, a DoT tick.
+    let amount =
+      match tryEntity targetId w with
+      | Some t ->
+        amount * (10000 - (t.Auras |> List.sumBy Aura.damageReductionBp)) / 10000
+      | None -> amount
+
+    // What a creature was before this hit: needed to notice a death, which is
+    // the one thing the quest tracker has to hear about.
+    let victim =
+      match tryEntity targetId w with
+      | Some t when t.Faction = Hostile && alive t -> Some t.Name
+      | _ -> None
+
     let w =
       mapEntity
         targetId
@@ -80,6 +235,14 @@ module SimCombat =
               MoveTicksLeft = if hp = 0 then ticks 0 else t.MoveTicksLeft
               MoveTicksTotal = if hp = 0 then ticks 0 else t.MoveTicksTotal })
         w
+
+    // A kill credits the objectives watching for it, and a quest that finishes
+    // here can wake a dormant boss.
+    let w =
+      match victim with
+      | Some name when (tryEntity targetId w |> Option.exists (fun t -> not (alive t))) ->
+        SimState.recordKill name w
+      | _ -> w
 
     // Pushback: damage can interrupt an interruptible cast in progress, reduced
     // by the target's resistance (Q5a).
@@ -122,34 +285,44 @@ module SimCombat =
       ||> List.fold (fun w effect ->
         match effect with
         | Damage(lo, hi) ->
-          let amount, w = rollRange lo hi w
+          let rolled, w = rollRange lo hi w
           let critBonus = if ability.Name = "Backstab" then actor.BackstabCritBonusBp else 0
-          let amount, w = rollCrit (actor.CritChanceBp + critBonus) amount w
-          let amount, w = mitigatePhysical targetId amount w
+          let amount, w = meleeStrike actor targetId rolled critBonus w
           let w = dealDamage targetId amount w
           // Only the Party builds threat on Mobs.
           let w = if actor.Faction = Party then addThreat targetId actor amount w else w
-          w |> logLine (sprintf "%s hits %s for %d" actor.Name targetName amount)
+
+          if amount > 0 then
+            w |> logLine (sprintf "%s hits %s for %d" actor.Name targetName amount)
+          else
+            w
 
         | WeaponDamage(multiplierBp, bonus) ->
-          // The same roll a swing would make, scaled, plus Strength and the
-          // ability's own bonus.
+          // The same roll a swing would make, scaled, plus the ability's own
+          // bonus. The attack-power part of a swing is weapon damage too, so it
+          // takes the multiplier: 150% of a Backstab is 150% of the whole swing,
+          // not 150% of the weapon's own dice plus a flat bonus. Without this a
+          // Backstab does less per point of energy than Sinister Strike.
           let rolled, w =
             match actor.AutoAttack with
             | Some a -> rollRange a.Min a.Max w
             | None -> 0, w
 
-          let amount = rolled * multiplierBp / 10000 + actor.MeleeDamageBonus + bonus
+          let swing = rolled + actor.MeleeDamageBonus
           let critBonus = if ability.Name = "Backstab" then actor.BackstabCritBonusBp else 0
-          let amount, w = rollCrit (actor.CritChanceBp + critBonus) amount w
-          let amount, w = mitigatePhysical targetId amount w
+          let amount, w = meleeStrike actor targetId (swing * multiplierBp / 10000 + bonus) critBonus w
           let w = dealDamage targetId amount w
           // Only the Party builds threat on Mobs.
           let w = if actor.Faction = Party then addThreat targetId actor amount w else w
-          w |> logLine (sprintf "%s hits %s for %d" actor.Name targetName amount)
+
+          if amount > 0 then
+            w |> logLine (sprintf "%s's %s hits %s for %d" actor.Name ability.Name targetName amount)
+          else
+            w
 
         | SpellDamage(lo, hi) ->
-          let amount, w = rollRange lo hi w
+          let rolled, w = rollRange lo hi w
+          let amount, w = spellHit ability.Name actor targetId rolled w
           let amount, w = rollCrit actor.CritChanceBp amount w
           let w = dealDamage targetId amount w
           let w = if actor.Faction = Party then addThreat targetId actor amount w else w
@@ -191,7 +364,7 @@ module SimCombat =
 
         | Sleep duration ->
           match tryEntity targetId w with
-          | Some t when not (isSleeping t) ->
+          | Some t when not (isSleeping t) && CreatureType.sleepable t.CreatureType ->
             w
             |> mapEntity targetId (fun e ->
               { e with
@@ -204,7 +377,8 @@ module SimCombat =
                   StallTicks = ticks 0
                   Destination = None })
             |> logLine (sprintf "%s puts %s to sleep" actor.Name t.Name)
-          | _ -> w
+          | Some t -> w |> logLine (sprintf "%s is immune to %s" t.Name ability.Name)
+          | None -> w
 
         | Shapeshift(Serpent, duration, bonus) ->
           w
@@ -251,9 +425,14 @@ module SimCombat =
             && alive e
             && Pos.chebyshev actor.Pos e.Pos <= radius)
           |> List.fold (fun w t ->
-            let w = dealDamage t.Id amount w
-            let w = if actor.Faction = Party then addThreat t.Id actor amount w else w
-            w |> logLine (sprintf "%s blasts %s for %d" actor.Name t.Name amount)) w
+            let dealt, w = spellHit ability.Name actor t.Id amount w
+            let w = dealDamage t.Id dealt w
+            let w = if actor.Faction = Party then addThreat t.Id actor dealt w else w
+
+            if dealt > 0 then
+              w |> logLine (sprintf "%s blasts %s for %d" actor.Name t.Name dealt)
+            else
+              w) w
 
         | Stun duration ->
           match tryEntity targetId w with
@@ -285,7 +464,7 @@ module SimCombat =
 
         | Polymorph duration ->
           match tryEntity targetId w with
-          | Some t ->
+          | Some t when CreatureType.polymorphable t.CreatureType ->
             w
             |> mapEntity targetId (fun e ->
               { e with
@@ -296,6 +475,7 @@ module SimCombat =
                   StallTicks = ticks 0
                   Destination = None })
             |> logLine (sprintf "%s polymorphs %s" actor.Name t.Name)
+          | Some t -> w |> logLine (sprintf "%s is immune to %s" t.Name ability.Name)
           | None -> w
 
         | HealOverTime(duration, perTick) ->
@@ -304,7 +484,7 @@ module SimCombat =
             w
             |> mapEntity targetId (fun e ->
               { e with
-                  Auras = Aura.refresh (Rejuvenation(duration, perTick)) e.Auras })
+                  Auras = Aura.refresh (Rejuvenation(duration, perTick, ability.Name)) e.Auras })
             |> logLine (sprintf "%s casts a heal-over-time on %s" actor.Name t.Name)
           | None -> w
 
@@ -323,6 +503,28 @@ module SimCombat =
 
           w |> logLine (sprintf "%s threatens %s for %d" actor.Name targetName amount)
 
+        | ComboPoint count ->
+          w
+          |> mapEntity actorId (fun e ->
+            { e with ComboPoints = min 5 (e.ComboPoints + count) })
+          |> logLine (sprintf "%s builds a combo point" actor.Name)
+
+        | Finisher(lo, hi, perPoint) ->
+          // The points are read off the actor as it stood when the ability was
+          // resolved, then spent: a finisher is a decision, not a formality.
+          let points = actor.ComboPoints
+          let extra = perPoint * max 0 (points - 1)
+          let rolled, w = rollRange (lo + extra) (hi + extra) w
+          let amount, w = meleeStrike actor targetId rolled 0 w
+          let w = dealDamage targetId amount w
+          let w = if actor.Faction = Party then addThreat targetId actor amount w else w
+
+          w
+          |> mapEntity actorId (fun e -> { e with ComboPoints = 0 })
+          |> logLine (
+            sprintf "%s spends %d combo points on %s for %d" actor.Name points targetName amount
+          )
+
         | DamageOverTime(duration, perTick) ->
           match tryEntity targetId w with
           | Some t ->
@@ -331,6 +533,86 @@ module SimCombat =
               { e with Auras = Aura.refresh (Corrupted(duration, perTick)) e.Auras })
             |> logLine (sprintf "%s afflicts %s" actor.Name t.Name)
           | None -> w
+
+        | Summon spec ->
+          // A pet is a real Party entity: it fights, it can be killed, and the
+          // existing Dps behaviour drives it without knowing it was summoned.
+          // It needs a free tile to appear on, which is why a summon can fail —
+          // the same reason a Hunter cannot call a pet into a full corridor.
+          let spot =
+            Path.neighbours
+              (fun p -> Grid.isFloor w.Grid p && not (claimedByOther w actorId p))
+              actor.Pos
+            |> List.sortBy (fun p -> Pos.chebyshev actor.Pos p)
+            |> List.tryHead
+
+          match spot with
+          | None ->
+            w |> logLine (sprintf "%s has no room to summon %s" actor.Name spec.Name)
+          | Some p ->
+            let id =
+              w.Entities
+              |> List.map (fun e -> match e.Id with EntityId n -> n)
+              |> List.fold max 0
+              |> (+) 1
+              |> EntityId
+
+            let summon =
+              { Id = id
+                Name = spec.Name
+                Level = actor.Level
+                CreatureType = CreatureType.Beast
+                OffHand = false
+                Faction = Party
+                Role = Some Dps
+                Dormant = false
+                MaxHealth = spec.Health
+                Health = spec.Health
+                Pos = p
+                Destination = None
+                MoveTicksLeft = ticks 0
+                MoveTicksTotal = ticks 0
+                MoveTicksPerTile = spec.MoveTicksPerTile
+                Goal = None
+                Path = []
+                StallTicks = ticks 0
+                Auras = []
+                Casting = None
+                Cooldowns = Map.empty
+                Resource = 0
+                MaxResource = 0
+                ResourceRegenPerTick = 0
+                ResourceKind = Mana
+                ComboPoints = 0
+                Abilities = []
+                AutoAttack =
+                  spec.Swing
+                  |> Option.map (fun (lo, hi, sw) ->
+                    { Min = lo; Max = hi; Ticks = sw; Range = 1 })
+                SwingTicksLeft = ticks 0
+                Threat = Map.empty
+                Target = None
+                ForcedTarget = None
+                ThreatMultiplierBp = 10000
+                Stats = Stats.zero
+                CritChanceBp = 0
+                MeleeDamageBonus = 0
+                Armor = spec.Armor
+                ArmorClass = Leather
+                DodgeChanceBp = 0
+                BlockChanceBp = 0
+                BlockValue = 0
+                PushbackResistanceBp = 0
+                BackstabCritBonusBp = 0
+                Engaged = true
+                CallForHelpBelowHealthPct = None
+                HasCalledForHelp = false
+                Owner = Some actorId
+                ExpiresInTicks = spec.Lifetime }
+
+            w
+            |> (fun w -> { w with Entities = summon :: w.Entities })
+            |> logLine (sprintf "%s summons %s" actor.Name spec.Name)
 
         | Charge ->
           match tryEntity actorId w, tryEntity targetId w with
@@ -363,7 +645,19 @@ module SimCombat =
             |> mapEntity targetId (fun e ->
               { e with Auras = Aura.refresh (Disarmed duration) e.Auras })
             |> logLine (sprintf "%s disarms %s" actor.Name t.Name)
-          | None -> w)
+          | None -> w
+
+        | Blocks duration ->
+          w
+          |> mapEntity actor.Id (fun e -> { e with Auras = Aura.refresh (Blocking duration) e.Auras })
+          |> logLine (sprintf "%s raises a shield" actor.Name)
+
+        | ReducesDamage(duration, reductionBp) ->
+          w
+          |> mapEntity actor.Id (fun e ->
+            { e with
+                Auras = Aura.refresh (ShieldWalled(duration, reductionBp)) e.Auras })
+          |> logLine (sprintf "%s braces behind the shield" actor.Name))
 
 
   // =========================================================================

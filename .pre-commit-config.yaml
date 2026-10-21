@@ -1,8 +1,8 @@
 # Install with: mise run hooks
 #
 # Two speeds, deliberately. Building is ~6s and catches compile errors and new
-# warnings on every commit; the test suite is ~12s and runs on push. Putting the
-# suite in pre-commit would make every commit slow enough to reach for
+# warnings on every commit; the test suite is ~4.5min and runs on push. Putting
+# the suite in pre-commit would make every commit slow enough to reach for
 # `--no-verify`, which is worse than not having the hook.
 #
 # There is no CI here, so these hooks are the only automated check. Keep them
@@ -32,6 +32,17 @@ repos:
         language: system
         pass_filenames: false
         files: \.(fs|fsproj|slnx)$
+
+      # The Story assembly embeds a *compiled* .ink.json, so an edited .ink that
+      # is not recompiled commits a narrative the game does not play. This runs
+      # only when a .ink file is staged, and it modifies the JSON — stage the
+      # regenerated file, which is the point.
+      - id: ink-compile
+        name: compile the ink narrative
+        entry: mise run ink
+        language: system
+        pass_filenames: false
+        files: \.ink$
 
       # Not `dotnet test` alone: the suite proves the invariants hold, but only
       # `runs 120 4000` proves the game still behaves. Kept off pre-commit

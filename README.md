@@ -48,23 +48,29 @@ Requires [mise](https://mise.jdx.dev/) (it installs the right .NET and
 `pre-commit`), or a .NET 10 SDK and `pre-commit` of your own.
 
 ```bash
-mise install            # .NET 10 + pre-commit, per mise.toml
+mise install            # .NET 10 + pre-commit + the ink compiler, per mise.toml
 mise run hooks          # install the git hooks — do this once
 mise run build          # solution, Release
-mise run test           # 75 tests, ~8s
+mise run test           # 160 tests, ~4.5min
 mise run run            # play it
+mise run publish        # dist/ — the game, runnable without the SDK
 ```
 
 `mise tasks ls` lists everything. The useful ones:
 
 | Task | What it does |
 |---|---|
-| `mise run run` | Play the game. MonoGame window shows the arena; **you type commands on stdin** — `party` to list entities, then e.g. `3 8 kick` |
+| `mise run build` | The whole solution in Release. Compiles the ink narrative first, so the embedded story cannot go stale |
+| `mise run publish` | Publish the playable game to `dist/` — the binary, `Assets/`, and MonoGame's native libraries. Runs `build` first |
+| `mise run run` | Play the game (the Release build). MonoGame window shows the arena; **you type commands on stdin** — `party` to list entities, then e.g. `3 8 kick` |
 | `mise run test` | The test suite |
 | `mise run runs` | Outcome distribution over 120 seeds — the behavioural regression signal |
+| `mise run ink` | Compile `Scripts/wailing_caverns.ink` into the JSON the Story assembly embeds. Skipped when the source is unchanged |
 | `mise run story` | Play the Wailing Caverns story (ink); add `-i` to pick choices interactively |
 | `mise run maps` | Render the Wailing Caverns rooms (extracted from `images/`) |
 | `mise run dungeon` | Generate a floorplan and render it as ASCII |
+| `mise run sim -- sm graveyard min` | Place a Scarlet Monastery wing at a difficulty band: `graveyard`, `library`, `armory`, `cathedral` (a wing at a band, entrance to boss) |
+| `mise run sim -- smrun cathedral med 16000` | **Run** a wing headless with the party AI and report what survived |
 | `mise run sim -- <args>` | Any other harness subcommand (`demo`, `fingerprint`, `profile`) |
 | `mise run bench` | Tick cost, search cost, and the hand-rolled heap against the BCL's |
 | `mise run diagnose` | Per-bucket tick cost, and the cost of a search that cannot succeed |
@@ -84,13 +90,24 @@ threshold · finite resource pools · symmetric line of sight, melee exempt · A
 pathfinding on a grid, 8-way, corner-cutting refused · rooms-and-corridors
 generation, connected by construction and verified by a BFS flood fill · a
 five-member party (Tank, Healer, 3 DPS) commanded directly, with no companion AI ·
-a MonoGame shell drawing primitives only, with no content pipeline.
+a MonoGame shell drawing primitives and per-dungeon art, with no content pipeline.
 
-**Not there yet** — boss phases (`Phase` is in the glossary with no
-implementation, and it is the next slice) · one encounter template set, WoW-derived;
-no other dungeons · no loot or between-run progression · no resurrection, so a wipe
-ends the run · rendering is coloured rectangles with no sprites and no text, which
-is why input happens in the terminal.
+The Scarlet Monastery is playable as four wings, each entered at one of three
+researched level bands from a menu (`graveyard` 30/33/34, `library` 33/36/37,
+`armory` 37/39/40, `cathedral` 38/41/42) — the band is the difficulty, and the
+party's gear follows from its level. Every wing's four battlemaps are thresholded
+from the art in `images/Maps/` into grid fixtures, sealed to one connected region,
+and populated from the 1.12 creature and ability numbers.
+
+**Not there yet** — the party stops improving above level 24, because the gear
+sets stop there: at level 41 it wears its level-24 best-in-slot against level-40
+elites, which is why the Armory and Cathedral kill it. Gear for the researched
+28-32, 33-37 and 38-40 bands is the next slice. Also: boss phases (`Phase` is in
+the glossary with no implementation) · no loot or between-run progression · no
+resurrection, so a wipe ends the run · no scripting for Scarlet Resurrection and
+the Cathedral gauntlet · per-dungeon tile art and class sprites load from
+`Assets/`, but there is no animation and no content pipeline, and input still
+happens in the terminal.
 
 ## Layout
 

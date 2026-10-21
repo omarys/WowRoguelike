@@ -212,3 +212,85 @@ module Dungeon =
       sb.AppendLine() |> ignore
 
     sb.ToString()
+
+// ===========================================================================
+// The dungeon catalog
+// ===========================================================================
+
+/// Which band of the levelling curve an instance belongs to. Drives which
+/// dungeons a party at a given level can be offered.
+type DungeonTier =
+  | LowTier
+  | MidTier
+  | HighTier
+
+/// One playable instance, or one wing of an instance that splits. The level
+/// range is the one the game states for it: it decides whether a party of a
+/// given level would go there, and later it will decide what spawns inside.
+type DungeonInfo =
+  { Name: string
+    Abbreviation: string
+    /// Wing name for instances that split (Scarlet Monastery, Dire Maul,
+    /// Stratholme); None for a single-wing instance.
+    Wing: string option
+    MinLevel: int
+    MaxLevel: int
+    Tier: DungeonTier
+    MaxPlayers: int }
+
+/// The vanilla instance list, by tier. Wings are separate entries with the
+/// parent's name and their own level range, because a group goes to the
+/// Graveyard and the Cathedral at different levels.
+module Dungeons =
+
+  let private d name abbr wing lo hi tier =
+    { Name = name
+      Abbreviation = abbr
+      Wing = wing
+      MinLevel = lo
+      MaxLevel = hi
+      Tier = tier
+      MaxPlayers = 5 }
+
+  let all: DungeonInfo list =
+    [ // Low level, 10-38.
+      d "Ragefire Chasm" "RFC" None 13 18 LowTier
+      d "Wailing Caverns" "WC" None 15 25 LowTier
+      d "The Deadmines" "VC" None 18 23 LowTier
+      d "Shadowfang Keep" "SFK" None 22 30 LowTier
+      d "The Stockade" "Stocks" None 22 30 LowTier
+      d "Blackfathom Deeps" "BFD" None 24 32 LowTier
+      d "Gnomeregan" "Gnome" None 29 38 LowTier
+      d "Razorfen Kraul" "RFK" None 30 40 LowTier
+      d "Scarlet Monastery" "SM" (Some "Graveyard") 26 36 LowTier
+      d "Scarlet Monastery" "SM" (Some "Library") 29 39 LowTier
+      d "Scarlet Monastery" "SM" (Some "Armory") 32 42 LowTier
+      d "Scarlet Monastery" "SM" (Some "Cathedral") 35 45 LowTier
+      // Mid level, 37-56.
+      d "Razorfen Downs" "RFD" None 40 50 MidTier
+      d "Uldaman" "Uld" None 42 52 MidTier
+      d "Zul'Farrak" "ZF" None 44 54 MidTier
+      d "Maraudon" "Mara" None 46 55 MidTier
+      d "Temple of Atal'Hakkar" "ST" None 50 60 MidTier
+      // High level and the 10-man.
+      d "Blackrock Depths" "BRD" None 52 60 HighTier
+      d "Lower Blackrock Spire" "LBRS" None 55 60 HighTier
+      { d "Upper Blackrock Spire" "UBRS" None 58 60 HighTier with MaxPlayers = 10 }
+      d "Dire Maul" "DM" (Some "East") 55 60 HighTier
+      d "Dire Maul" "DM" (Some "West") 55 60 HighTier
+      d "Dire Maul" "DM" (Some "North") 55 60 HighTier
+      d "Scholomance" "Scholo" None 58 60 HighTier
+      d "Stratholme" "Strat" (Some "Live") 58 60 HighTier
+      d "Stratholme" "Strat" (Some "Undead") 58 60 HighTier ]
+
+  /// The player-facing name, with the wing when there is one.
+  let displayName (d: DungeonInfo) =
+    match d.Wing with
+    | Some w -> sprintf "%s - %s" d.Name w
+    | None -> d.Name
+
+  /// Whether a character of this level would find the instance at their level.
+  let fits (level: int) (d: DungeonInfo) = level >= d.MinLevel && level <= d.MaxLevel
+
+  /// Every instance a character of this level could run.
+  let forLevel (level: int) = all |> List.filter (fits level)

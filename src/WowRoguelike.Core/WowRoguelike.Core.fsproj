@@ -17,9 +17,10 @@
     <Compile Include="Rng.fs" />
     <Compile Include="Dungeon.fs" />
     <Compile Include="Maps.fs" />
-    <Compile Include="Content.fs" />
+    <Compile Include="MapsScarlet.fs" />
     <Compile Include="Heap.fs" />
     <Compile Include="Path.fs" />
+    <Compile Include="Content.fs" />
     <Compile Include="SimState.fs" />
     <Compile Include="SimCombat.fs" />
     <Compile Include="SimTick.fs" />

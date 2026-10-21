@@ -47,6 +47,32 @@ Remaining work, newest first. Numbers `#12/#20/#22/#24` are carried over from
       drives a transition, how many phases, how it is modelled, which mechanics are
       new and sourced vs invented. Grill the user (see HANDOFF §8).
 
+## Classes — the roster
+
+- [x] **All nine kits.** Warrior, Paladin, Rogue, Hunter, Priest, Shaman, Mage,
+      Warlock, Druid — each on researched level-24 base stats and gear, each with
+      the rank-appropriate abilities, all nine asserted to build by a test.
+
+- [ ] **Give the pets and totems a body.** `Summon`/`SummonSpec` exist for a
+      Hunter's pet, a Warlock's demon and a Shaman's totem, and none of the three
+      has a caller yet. Each class's research file records exactly what it loses
+      without them: the Hunter its Growl/Bite/Mend Pet, the Warlock its demon, the
+      Shaman its totems.
+
+- [ ] **Teach `Effect` a movement slow.** Nothing in the vocabulary snares:
+      there is `Stun`, `Root`, `Sleep` and `Disarm`, but no 50 %-for-4-seconds, so
+      the Hunter's Concussive Shot and the Shaman's Frost Shock and Earthbind are
+      written down and not modelled.
+
+- [ ] **Give the roster a UI.** `defaultRoster` is still a constant: nothing lets
+      a player choose who goes in.
+
+> **Entity ids come from the roster slot, never from the class.** Party members
+> are seated 1..5 in roster order and mobs are numbered from 6. A class builder
+> that hard-codes its own id collides with a mob, and every `tryEntity` on that id
+> then finds whichever came first — which shows up as a mob's heal logged against
+> a party member's name.
+
 ## Known limitations
 
 - [ ] Loot and between-run progression.

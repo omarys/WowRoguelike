@@ -21,6 +21,27 @@ module Bench =
 
     loop (Content.gully seed) maxTicks
 
+  /// One stable, integer-only line describing how an encounter ended. The
+  /// snapshot test diffs these lines instead of a median, so that balance drift
+  /// shows up as "seed 11 moved" rather than as a single number that hides it.
+  /// Never put a timing in here: the snapshot must be identical on every machine.
+  let summary (w: World) : string =
+    let ofFaction f = w.Entities |> List.filter (fun e -> e.Faction = f)
+    let total pick xs = xs |> List.sumBy pick
+    let party = ofFaction Party
+    let mobs = ofFaction Hostile
+
+    sprintf
+      "ticks=%d outcome=%A party-hp=%d/%d party-res=%d/%d mobs-hp=%d/%d"
+      (int w.Tick)
+      (SimState.outcome w)
+      (total (fun e -> e.Health) party)
+      (total (fun e -> e.MaxHealth) party)
+      (total (fun e -> e.Resource) party)
+      (total (fun e -> e.MaxResource) party)
+      (total (fun e -> e.Health) mobs)
+      (total (fun e -> e.MaxHealth) mobs)
+
   // =========================================================================
   // Scale fixtures
   // =========================================================================
@@ -41,7 +62,7 @@ module Bench =
     let party =
       [ Content.hero 1 "Tank" Tank forever forever tap 50000 [ Content.heroicStrike; Content.taunt ] { X = 1; Y = 1 }
         Content.hero 2 "Healer" Healer forever forever tap 10000 [ Content.lesserHeal ] { X = 1; Y = 2 }
-        Content.hero 3 "Rogue" Dps forever forever tap 10000 [ Content.kick ] { X = 1; Y = 3 }
+        Content.hero 3 "Rogue" Dps forever forever tap 10000 (AbilityDef.kitAt 24 [ Content.kick ]) { X = 1; Y = 3 }
         Content.hero 4 "Mage" Dps forever forever tap 10000 [ Content.fireball ] { X = 2; Y = 1 }
         Content.hero 5 "Hunter" Dps forever forever tap 10000 [ Content.arcaneShot ] { X = 2; Y = 2 } ]
 
@@ -54,6 +75,8 @@ module Bench =
             Content.mob
               (100 + i)
               "Synthetic"
+              CreatureType.Humanoid
+              21
               forever
               forever
               (Some tap)
@@ -72,6 +95,7 @@ module Bench =
       Pending = []
       Rng = Rng.streamsOf seed
       PartyBuffs = []
+      Quests = []
       Log = [] }
 
   // =========================================================================

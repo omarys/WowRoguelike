@@ -5,6 +5,9 @@
 [tools]
 dotnet = "10"
 pre-commit = "latest"
+# The ink compiler. The Story assembly embeds a *compiled* .ink.json, so the
+# narrative is a build product like any other — nothing else here can produce it.
+"npm:inkjs" = "2.4.0"
 
 [env]
 # Keep the SDK out of the system-wide lookup path. Without this a plain `dotnet`
@@ -13,9 +16,33 @@ pre-commit = "latest"
 # tool already; it is stated here so the requirement is visible in the repo.
 DOTNET_MULTILEVEL_LOOKUP = "0"
 
+[tasks.ink]
+description = "Compile the ink narrative into the JSON the Story assembly embeds"
+sources = ["src/WowRoguelike.Story/Scripts/wailing_caverns.ink"]
+outputs = ["src/WowRoguelike.Story/Scripts/wailing_caverns.ink.json"]
+run = '''
+inkjs-compiler -o src/WowRoguelike.Story/Scripts/wailing_caverns.ink.json src/WowRoguelike.Story/Scripts/wailing_caverns.ink
+f=src/WowRoguelike.Story/Scripts/wailing_caverns.ink.json
+# The compiler writes a UTF-8 BOM and no final newline, while the repo's hooks
+# require no BOM and exactly one newline. Without this normalisation every
+# compile leaves the tree dirty and `end-of-file-fixer` rewrites the file.
+sed -i '1s/^\xEF\xBB\xBF//' "$f"
+printf '%s\n' "$(cat "$f")" > "$f.tmp" && mv "$f.tmp" "$f"
+'''
+
 [tasks.build]
 description = "Build the whole solution in Release"
+depends = ["ink"]
 run = "dotnet build WowRoguelike.slnx -c Release --nologo"
+
+# The whole game, runnable without the SDK: dist/WowRoguelike.Game with its
+# Assets/ folder and MonoGame's native libraries. Framework-dependent, so the
+# machine still needs the .NET 10 runtime; add `--self-contained -r linux-x64`
+# for a folder that needs nothing at all (~90 MB larger).
+[tasks.publish]
+description = "Publish the playable game to dist/"
+depends = ["build"]
+run = "dotnet publish src/WowRoguelike.Game/WowRoguelike.Game.fsproj -c Release -o dist --nologo"
 
 [tasks.test]
 description = "Run the test suite"
@@ -23,7 +50,7 @@ run = "dotnet test tests/WowRoguelike.Tests/WowRoguelike.Tests.fsproj --nologo -
 
 [tasks.run]
 description = "Play the game (MonoGame window, commands typed on stdin)"
-run = "dotnet run --project src/WowRoguelike.Game"
+run = "dotnet run --project src/WowRoguelike.Game -c Release"
 
 # The headless harness. Everything below runs in Release: Debug timings are
 # meaningless, and the benchmark numbers are only comparable in Release.
