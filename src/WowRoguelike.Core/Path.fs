@@ -52,7 +52,11 @@ module Path =
       /// Nodes pulled off the open list. For A* versus Dijkstra this is the
       /// whole point: the heuristic's value is measured here and nowhere else.
       /// For `greedy` it counts steps taken, since there is no open list.
-      Expanded: int }
+      Expanded: int
+      /// True when the search hit `nodeBudget` before reaching the goal, so
+      /// `Path` is a best-effort route to the closest tile it managed to look
+      /// at rather than the shortest one.
+      Truncated: bool }
 
   /// Walk the cameFrom chain back to the start. Returns the tiles *after* the
   /// start through the goal, which is what a mover wants: it is already standing
@@ -72,6 +76,15 @@ module Path =
 
       acc
 
+  /// Ceiling on expansions per search. A route that does not exist, or one much
+  /// longer than a room, otherwise expands the whole map — 14 ms measured — and
+  /// every entity that cannot reach its goal retries that forever, which is what
+  /// made a stalled dungeon run cost minutes of CPU. Past the ceiling the search
+  /// returns the route to the closest tile it looked at, so a mover still makes
+  /// progress towards a distant door instead of standing still.
+  [<Literal>]
+  let private nodeBudget = 1200
+
   /// The one search. A* and Dijkstra differ only in the heuristic, which is why
   /// they are the same function.
   ///
@@ -88,7 +101,8 @@ module Path =
     : Result =
     if start = goal then
       { Path = []
-        Expanded = 0 }
+        Expanded = 0
+        Truncated = false }
     else
       // The goal may be occupied by whatever is standing on it, so it is exempt
       // from the blocker — but it must still be a floor tile. Exempting it from
@@ -110,8 +124,10 @@ module Path =
 
       let mutable expanded = 0
       let mutable found = false
+      let mutable closest = index start
+      let mutable closestH = heuristic start goal
 
-      while not found && not openList.IsEmpty do
+      while not found && not openList.IsEmpty && expanded < nodeBudget do
         match openList.Pop() with
         | None -> ()
         | Some(_, current) ->
@@ -125,6 +141,11 @@ module Path =
             expanded <- expanded + 1
             let currentPos = { X = current % width; Y = current / width }
             let gCurrent = best.[current]
+            let h = heuristic currentPos goal
+
+            if h < closestH then
+              closestH <- h
+              closest <- current
 
             for n in neighbours passable currentPos do
               let nIndex = index n
@@ -139,8 +160,12 @@ module Path =
                   // decrease-key, and the stale-entry check above covers it.
                   openList.Push(tentative + heuristic n goal, nIndex)
 
-      { Path = walkBack cameFrom width (if found then goalIndex else -1)
-        Expanded = expanded }
+      // A drained open list means the goal is genuinely unreachable, and an
+      // empty path is how every caller spells that. Only a search the budget cut
+      // short is allowed to hand back a partial route.
+      { Path = walkBack cameFrom width (if found then goalIndex elif expanded >= nodeBudget then closest else -1)
+        Expanded = expanded
+        Truncated = not found && expanded >= nodeBudget }
 
   let astar (g: Grid) (blocked: (Pos -> bool)) (start: Pos) (goal: Pos) : Result =
     search octile g blocked start goal
@@ -186,7 +211,8 @@ module Path =
         steps <- steps + 1
 
     { Path = (if current = goal then List.rev trail else [])
-      Expanded = steps }
+      Expanded = steps
+      Truncated = current <> goal }
 
   /// Walk a Bresenham line from `a` towards `b`, testing every tile strictly
   /// between them. Reports false as soon as something blocks.

@@ -18,6 +18,21 @@ module SimTick =
   let advanceAuras (w: World) =
     mapAll (fun e -> { e with Auras = e.Auras |> List.choose Aura.advance }) w
 
+  /// Summoned things live on their owner's clock: a totem runs out of time, and a
+  /// pet dies when the Hunter that called it does. Neither can be modelled as an
+  /// aura, because both are entities that hostiles can attack.
+  let advanceSummons (w: World) =
+    mapAll
+      (fun e ->
+        match e.Owner, e.ExpiresInTicks with
+        | None, _ -> e
+        | Some owner, _ when not (tryEntity owner w |> Option.exists alive) ->
+          { e with Health = 0 }
+        | _, Some left when left <= ticks 1 -> { e with Health = 0 }
+        | _, Some left -> { e with ExpiresInTicks = Some(left - ticks 1) }
+        | _, None -> e)
+      w
+
   /// Heal-over-time and Polymorph's regen tick down once a second.
   let advanceAuraHealing (w: World) =
     mapAll
@@ -58,16 +73,45 @@ module SimTick =
 
   /// Resource accumulates. Mob regeneration is zero, and that is the entire
   /// reason a fight can now end: a Druid of the Fang can afford four Healing
-  /// Touches and then it is spent.
+  /// Touches and then it is spent. A Rogue's energy does not work that way: it
+  /// comes back 20 per 2 s on its own clock, which at 20 Ticks to the second is
+  /// one point every other Tick, whatever his Spirit or the content says.
   let advanceResource (w: World) =
+    let energyTick = w.Tick % ticks 2 = ticks 0
+
     mapAll
       (fun e ->
         if not (alive e) then
           e
         else
-          { e with
-              Resource = min e.MaxResource (e.Resource + e.ResourceRegenPerTick) })
+          let gain =
+            match e.ResourceKind with
+            | Energy -> if energyTick then 1 else 0
+            | Mana -> e.ResourceRegenPerTick
+            | Rage -> 0
+
+          { e with Resource = min e.MaxResource (e.Resource + gain) })
       w
+
+  /// Out of combat the party eats and drinks: health and resource come back at
+  /// a percentage of the pool, so a full heal is a short walk rather than a
+  /// wait. Combat regeneration is the slow, per-Tick kind above.
+  let advanceOutOfCombatRegen (w: World) =
+    mapAll
+      (fun e ->
+        if e.Faction <> Party || not (alive e) then
+          e
+        else
+          { e with
+              Health =
+                min e.MaxHealth (e.Health + e.MaxHealth * Content.outOfCombatHealthBpPerTick / 10000)
+              Resource =
+                min e.MaxResource (e.Resource + e.MaxResource * Content.outOfCombatResourceBpPerTick / 10000) })
+      w
+
+  /// Regeneration is the one phase that asks whose fight it is.
+  let advanceRegen (w: World) =
+    if inCombat w then advanceResource w else advanceOutOfCombatRegen w
 
   /// One tile of progress. A moving entity loses its cast — and a sleeping one
   /// neither moves nor keeps a goal.
@@ -231,22 +275,43 @@ module SimTick =
         match target with
         | None -> w
         | Some t ->
-          let amount, w = rollRange attack.Min attack.Max w
-          let amount, w = rollCrit e.CritChanceBp amount w
-          let total = amount + bonus + e.MeleeDamageBonus
-          let total, w = mitigatePhysical t.Id total w
+          let rolled, w = rollRange attack.Min attack.Max w
+          // The auto-attack runs the same attack table every physical special
+          // does, so a mob dodges both identically.
+          let total = rolled + bonus + e.MeleeDamageBonus
+          let total, w = SimCombat.meleeStrike e t.Id total 0 w
 
           w
           |> dealDamage t.Id total
           |> fun w -> if e.Faction = Party then addThreat t.Id e total w else w
-          |> logLine (sprintf "%s swings at %s for %d" e.Name t.Name total))
+          |> fun w ->
+            if total > 0 then logLine (sprintf "%s swings at %s for %d" e.Name t.Name total) w else w
+          // A dual-wielder's off-hand swings on the same cadence for half the
+          // damage. shortcut: the off-hand rolls the main-hand table, so it
+          // misses 5% rather than vanilla's 24% — worth about 6% of a Rogue's
+          // damage; give `meleeStrike` a miss-penalty parameter if that matters.
+          |> fun w ->
+            if not e.OffHand then
+              w
+            else
+              let rolled, w = rollRange attack.Min attack.Max w
+              let offHand, w = SimCombat.meleeStrike e t.Id ((rolled + bonus + e.MeleeDamageBonus) / 2) 0 w
+
+              w
+              |> dealDamage t.Id offHand
+              |> fun w -> if e.Faction = Party then addThreat t.Id e offHand w else w
+              |> fun w ->
+                if offHand > 0 then
+                  logLine (sprintf "%s's off hand hits %s for %d" e.Name t.Name offHand) w
+                else
+                  w)
 
   /// Recompute every Hostile's aggression target, honoring the margins and
   /// clearing a Taunt whose taunter has died.
   let retarget (w: World) =
     mapAll
       (fun e ->
-        if e.Faction <> Hostile || not (alive e) then
+        if e.Faction <> Hostile || not (alive e) || e.Dormant then
           e
         elif not e.Engaged then
           { e with
@@ -263,7 +328,7 @@ module SimTick =
   /// Mobs decide. Ability priority is expressed by effect shape, so the caster
   /// rotation reads heal → slumber → bolt → serpent form.
   let mobDecisions (w: World) =
-    let acting = w.Entities |> List.filter (fun e -> e.Faction = Hostile && canAct e)
+    let acting = w.Entities |> List.filter (fun e -> e.Faction = Hostile && not e.Dormant && canAct e)
 
     (w, acting)
     ||> List.fold (fun w m ->
@@ -295,12 +360,17 @@ module SimTick =
         match currentTarget m w with
         | None -> w
         | Some target ->
-          let byEffect (pred: Effect -> bool) =
-            m.Abilities |> List.tryFind (fun a -> List.exists pred a.Effects)
-
           let ready (a: Ability) =
             (m.Cooldowns |> Map.tryFind a.Name |> Option.defaultValue (ticks 0)) <= ticks 0
             && canAfford m a
+
+          // Prefer a ready one, so two control spells on the same Mob take turns
+          // instead of the first match starving the second.
+          let byEffect (pred: Effect -> bool) =
+            let matching =
+              m.Abilities |> List.filter (fun a -> List.exists pred a.Effects)
+
+            matching |> List.tryFind ready |> Option.orElse (List.tryHead matching)
 
           let healAbility = byEffect (function Heal _ -> true | _ -> false)
           let sleepAbility = byEffect (function Sleep _ -> true | _ -> false)
@@ -309,6 +379,12 @@ module SimTick =
           let shiftAbility =
             byEffect (function Shapeshift(Serpent, _, _) -> true | _ -> false)
 
+          let areaAbility =
+            byEffect (function AreaDamage _ -> true | _ -> false)
+
+          let stunAbility =
+            byEffect (function Stun _ -> true | _ -> false)
+
           // Only one Party member may be slept at a time.
           let anyoneAsleep = aliveParty w |> List.exists isSleeping
 
@@ -316,6 +392,16 @@ module SimTick =
             [ healAbility
               |> Option.filter (fun a -> ready a && canCast m)
               |> Option.bind (fun a -> usableTarget m a w |> Option.map (fun t -> a, t))
+
+              // Area damage and stuns are aimed at the current target and only
+              // when it is in reach, so a clap is never cast at nothing.
+              areaAbility
+              |> Option.filter (fun a -> ready a && canCast m && canReach a.Range m target w)
+              |> Option.map (fun a -> a, target.Id)
+
+              stunAbility
+              |> Option.filter (fun a -> ready a && canCast m && canReach a.Range m target w)
+              |> Option.map (fun a -> a, target.Id)
 
               sleepAbility
               |> Option.filter (fun a -> ready a && canCast m && not anyoneAsleep)
@@ -441,7 +527,8 @@ module SimTick =
     w
     |> fun w -> (w, due) ||> List.fold (fun w c -> applyCommand c w)
     |> advanceCooldowns
-    |> advanceResource
+    |> advanceRegen
+    |> advanceSummons
     |> advanceAuras
     |> advanceAuraHealing
     |> advanceAuraDamage

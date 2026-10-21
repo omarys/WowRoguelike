@@ -30,22 +30,32 @@ jobs:
         # mermaid + jsdom are optional; they add high-fidelity validation of Mermaid diagrams. Remove if your wiki has none.
         run: npm install --global openwiki@0.7.2 mermaid@11.16.0 jsdom@29.1.1
 
+      - name: Check for an OpenWiki credential
+        id: credential
+        # Non-interactive OpenWiki runs require a key. Without this guard every
+        # scheduled run died at the step below with "OPENAI_API_KEY is required
+        # for non-interactive runs", so a red workflow meant "no secret" rather
+        # than "OpenWiki is broken". Set the secret with:
+        #   gh secret set OPENAI_API_KEY
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=OpenWiki skipped::No OPENAI_API_KEY repository secret is set. Run 'gh secret set OPENAI_API_KEY' to enable the scheduled wiki update."
+          fi
+
       - name: Run OpenWiki
         id: openwiki
+        if: ${{ steps.credential.outputs.ready == 'true' }}
         continue-on-error: true
         run: openwiki code --update --print
         env:
           OPENWIKI_PROVIDER: openai
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENWIKI_MODEL_ID: "gpt-5.6-terra"
-          # Required for the LangSmith connector's code-mode pull to authenticate.
-          # For extra workspaces, add OPENWIKI_LANGSMITH_API_KEY_2, _3, ... as repo
-          # secrets and env entries here.
-          OPENWIKI_LANGSMITH_API_KEY: ${{ secrets.OPENWIKI_LANGSMITH_API_KEY }}
-          # Optional: also trace this workflow's own OpenWiki run to LangSmith.
-          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
-          LANGCHAIN_PROJECT: openwiki
-          LANGCHAIN_TRACING_V2: "true"
 
       - name: Remove transient OpenWiki run state
         if: ${{ !cancelled() }}

@@ -28,6 +28,10 @@ type private UiAction =
   | ChooseAbility of EntityId * string
   | ChooseMove of EntityId
   | CancelPending
+  /// Hand a member over to the player, or give it back to the script.
+  | ToggleControl of EntityId
+  /// A group heading. Rendered, not clickable.
+  | Heading
 
 /// What a click is waiting on: an ability awaiting a target, or a move awaiting
 /// a destination tile. Both are queued per character, the same way.
@@ -145,6 +149,53 @@ module private Font5x7 =
 
   let ofChar (c: char) = glyphs.TryFind c |> Option.defaultValue block
 
+/// The player's selection: a dungeon, then (where it has a band) the level. The
+/// band is the difficulty, from .pi/research/levelscale/dungeon-bands.md.
+module private Menu =
+
+  /// Which menu the player is in.
+  type Stage =
+    | Closed
+    | PickDungeon of int
+    | PickDifficulty of int * int
+
+  /// One playable dungeon and the levels it can be entered at.
+  type Entry =
+    { Label: string
+      Bands: (string * int) list
+      /// The folder under Assets/ holding this dungeon's sliced creature art;
+      /// empty where the art is hand-named at the sprites root instead.
+      Art: string
+      /// Take the band index; the Party's level follows from the band.
+      Start: int -> World }
+
+  let private scarletStart (wing: string) (band: int) : World =
+    let difficulty =
+      match band with
+      | 0 -> Content.Minimum
+      | 1 -> Content.Median
+      | _ -> Content.Maximum
+
+    Content.scarletMonasteryAt wing difficulty 1UL
+
+  let entries () : Entry list =
+    [ { Label = "Screaming Gully"
+        Bands = [ "level", 24 ]
+        Art = ""
+        Start = fun _ -> Content.gully 1UL }
+      { Label = "Wailing Caverns"
+        Bands = [ "minimum", 17; "median", 21; "maximum", 22 ]
+        Art = ""
+        Start = fun band -> Content.wailingCavernsAt ([ 17; 21; 22 ] |> List.item band) 1UL } ]
+    @ [ for wing in Content.scarletWings ->
+          { Label = "Scarlet Monastery — " + wing.Name
+            Bands =
+              [ "minimum", wing.Minimum
+                "median", wing.Median
+                "maximum", wing.Maximum ]
+            Art = "sprites/scarlet-monastery"
+            Start = scarletStart wing.Name } ]
+
 type RoguelikeGame() as this =
   inherit Game()
 
@@ -167,11 +218,17 @@ type RoguelikeGame() as this =
 
   /// The strip below the grid that holds the clickable controls.
   let uiTop = rows * tile + 8
-  let uiHeight = 140
+  let uiHeight = 264
 
   /// The combat log box below the control strip. The window is taller than the
   /// board so the log gets its own room rather than covering it.
   let logHeight = 188
+
+  /// Members the player has taken over: their AI orders are suppressed until
+  /// they are handed back. Held here rather than in the World because it is an
+  /// input policy, not simulation state — a replay records the commands it
+  /// produced, and they are the same commands either way.
+  let mutable manual = Set.empty<EntityId>
 
   /// The side panel to the right of the grid: the party roster on top, the
   /// queue below.
@@ -248,6 +305,33 @@ type RoguelikeGame() as this =
        float e.Pos.Y + (float dest.Y - float e.Pos.Y) * progress)
     | _ -> (float e.Pos.X, float e.Pos.Y)
 
+  /// The camera is a window on the grid: a Scarlet Monastery wing is a hundred
+  /// tiles tall and the view is thirteen, so the map has to scroll. It centres on
+  /// the selection, else on the Warrior, and clamps so the grid's edge never
+  /// shows as void.
+  let mutable camX = 0
+  let mutable camY = 0
+
+  let followCamera () =
+    let target =
+      selected
+      |> Option.bind (fun id -> SimState.tryEntity id world)
+      |> Option.orElse (
+        world.Entities
+        |> List.tryFind (fun e -> e.Faction = Party && e.Name = "Warrior")
+      )
+
+    match target with
+    | Some e ->
+      camX <- max 0 (min (world.Grid.Width - columns) (e.Pos.X - columns / 2))
+      camY <- max 0 (min (world.Grid.Height - rows) (e.Pos.Y - rows / 2))
+    | None -> ()
+
+  /// An entity's position on screen, in tiles, once the camera is applied.
+  let screenAt (e: Entity) =
+    let fx, fy = drawnAt e
+    (fx - float camX, fy - float camY)
+
   let entityColour (e: Entity) =
     if not (SimState.alive e) then
       Color(70, 70, 75)
@@ -263,7 +347,10 @@ type RoguelikeGame() as this =
     else
       Color(210, 80, 80)
 
-  /// Every PNG under Assets/, keyed by file name without extension.
+  /// Every PNG under Assets/, keyed by its path below Assets/ without extension
+  /// ("sprites/classes/warrior"). Bare file names would collide: fifty of them
+  /// are reused across dungeons and the Party, and the map would keep whichever
+  /// one the filesystem happened to list last.
   let loadTextures () : Map<string, Texture2D> =
     let root = IO.Path.Combine(AppContext.BaseDirectory, "Assets")
 
@@ -284,44 +371,92 @@ type RoguelikeGame() as this =
           data.[i] <- Color(int c.R * a / 255, int c.G * a / 255, int c.B * a / 255, a)
 
         tex.SetData data
-        IO.Path.GetFileNameWithoutExtension path, tex)
+
+        let key =
+          path.Substring(root.Length + 1).Replace('\\', '/').Replace(".png", "")
+
+        key, tex)
       |> Map.ofArray
+
+  /// Creature art for the dungeon in play, by creature name. A sheet names its
+  /// creatures by slot (mob-1-1 ...) and carries no creature names, so each
+  /// distinct name takes a slot in a stable order: the same creature always
+  /// wears the same art within a run.
+  let mutable creatureArt: Map<string, string> = Map.empty
+
+  let bindCreatureArt (dungeon: string) (w: World) : Map<string, string> =
+    let slots =
+      textures
+      |> Map.toList
+      |> List.map fst
+      |> List.filter (fun k -> k.StartsWith(dungeon + "/mob-"))
+      |> List.sort
+
+    let names =
+      w.Entities
+      |> List.filter (fun e -> e.Faction <> Party)
+      |> List.map (fun e -> e.Name)
+      |> List.distinct
+      |> List.sort
+
+    if slots.IsEmpty then
+      Map.empty
+    else
+      names |> List.mapi (fun i n -> n, slots.[i % slots.Length]) |> Map.ofList
 
   /// Which sliced sprite stands for an entity. Serpent Form swaps the caster
   /// for the snake; names with no art fall back to a disc.
   let spriteKey (e: Entity) =
-    if SimState.isShifted e then
-      "serpent"
-    else
+    let named =
       match e.Name with
-      | "Warrior" -> "warrior"
-      | "Priest" -> "priest"
-      | "Rogue" -> "rogue"
-      | "Mage" -> "mage"
+      | "Warrior" -> "sprites/classes/warrior"
+      | "Priest" -> "sprites/classes/priest"
+      | "Rogue" -> "sprites/classes/rogue"
+      | "Mage" -> "sprites/classes/mage"
       | "Druid"
-      | "Naralex" -> "druid"
-      | "Raptor" -> (let (EntityId i) = e.Id in if i % 2 = 0 then "raptor0" else "raptor1")
-      | "Druid of the Fang" -> "fang_druid"
-      | "Lady Anacondra" -> "anacondra"
-      | "Lord Cobrahn" -> "cobra_lord"
-      | "Lord Pythas" -> "pythas"
-      | "Lord Serpentis" -> "serpentis"
-      | "Mutanus the Devourer" -> "mutanus"
-      | n when n.Contains "Turtle" -> "deviate_turtle"
+      | "Naralex" -> "sprites/classes/druid"
+      | "Paladin" -> "sprites/classes/paladin"
+      | "Hunter" -> "sprites/classes/hunter"
+      | "Warlock" -> "sprites/classes/warlock"
+      | "Shaman" -> "sprites/classes/shaman"
+      | "Raptor" -> (let (EntityId i) = e.Id in if i % 2 = 0 then "sprites/raptor0" else "sprites/raptor1")
+      | "Druid of the Fang" -> "sprites/fang_druid"
+      | "Lady Anacondra" -> "sprites/anacondra"
+      | "Lord Cobrahn" -> "sprites/cobra_lord"
+      | "Lord Pythas" -> "sprites/pythas"
+      | "Lord Serpentis" -> "sprites/serpentis"
+      | "Mutanus the Devourer" -> "sprites/mutanus"
+      | n when n.Contains "Turtle" -> "sprites/deviate_turtle"
       | _ -> ""
 
-  /// The art faces right; flip it to face the current target, or by default
-  /// the party faces right and the hostiles face left, towards each other.
+    if SimState.isShifted e then
+      "sprites/serpent"
+    elif named <> "" then
+      named
+    else
+      creatureArt.TryFind e.Name |> Option.defaultValue ""
+
+  /// Where each entity's art was drawn last frame. A walk to the left turns a
+  /// sprite even while it holds a target standing behind it.
+  let mutable lastSeenX: Map<EntityId, float> = Map.empty
+
+  /// The art faces right; flip it to face the way it is walking, else its
+  /// target, else the default (the party faces right, hostiles face left).
   let facesLeft (e: Entity) =
-    match e.Target |> Option.bind (fun t -> SimState.tryEntity t world) with
-    | Some t when t.Pos.X <> e.Pos.X -> t.Pos.X < e.Pos.X
-    | _ -> e.Faction <> Party
+    let nowX, _ = drawnAt e
+
+    match lastSeenX.TryFind e.Id with
+    | Some was when abs (nowX - was) > 0.02 -> nowX < was
+    | _ ->
+      match e.Target |> Option.bind (fun t -> SimState.tryEntity t world) with
+      | Some t when t.Pos.X <> e.Pos.X -> t.Pos.X < e.Pos.X
+      | _ -> e.Faction <> Party
 
   /// The rectangle an entity's art actually covers: a sprite is taller than its
   /// tile and stands on it, while the disc fallback sits lower. Drawing and
   /// hit-testing both measure from here, so a click lands on what is on screen.
   let artRect (e: Entity) =
-    let fx, fy = drawnAt e
+    let fx, fy = screenAt e
     let cx = int (fx * float tile + float tile / 2.0)
     let feet = int (fy * float tile) + tile - 3
 
@@ -336,7 +471,7 @@ type RoguelikeGame() as this =
 
   /// Fill `area` with the dark cobble texture, then a mossy two-tone rim.
   let panel (area: Rectangle) =
-    match textures.TryFind "panel" with
+    match textures.TryFind "tiles/panel" with
     | Some t ->
       let mutable y = area.Y
 
@@ -434,7 +569,7 @@ type RoguelikeGame() as this =
   /// click away from the tile below.
   let entityAt (mx: int) (my: int) =
     let tileRect (e: Entity) =
-      let fx, fy = drawnAt e
+      let fx, fy = screenAt e
       Rectangle(int (fx * float tile), int (fy * float tile), tile, tile)
 
     world.Entities
@@ -491,22 +626,27 @@ type RoguelikeGame() as this =
       | None -> "no auto-attack"
     | None -> "no orders"
 
-  /// The buttons for this frame: the global controls, plus the selected member's
-  /// Move and abilities (or a Cancel while a click is pending). Wraps onto rows.
+  /// The buttons for this frame: the global controls, then the selected
+  /// member's control toggle, Move and abilities — the abilities filed under
+  /// what they do, one heading per group. Wraps onto rows.
   let uiButtons () =
     let panelW = this.GraphicsDevice.Viewport.Width
     let mutable x = 8
     let mutable row = 0
     let y0 = uiTop + 6
+    let rowH = 26
+
+    let newRow () =
+      x <- 8
+      row <- row + 1
 
     let add label action =
       let w = measure label + 12
 
       if x + w > panelW - 8 then
-        x <- 8
-        row <- row + 1
+        newRow ()
 
-      let b = Rectangle(x, y0 + row * 30, w, 26), label, action
+      let b = Rectangle(x, y0 + row * rowH, w, 22), label, action
       x <- x + w + 6
       b
 
@@ -521,9 +661,38 @@ type RoguelikeGame() as this =
       | None ->
         match SimState.tryEntity aid world with
         | Some e ->
-          globals
-          @ (add "Move" (ChooseMove aid)
-             :: (e.Abilities |> List.map (fun a -> add a.Name (ChooseAbility(aid, a.Name)))))
+          let controlLabel = if manual.Contains aid then "Return to AI" else "Take control"
+
+          let ordered =
+            [ AbilityGroup.Damage, "DAMAGE"
+              AbilityGroup.DamageOverTime, "DAMAGE OVER TIME"
+              AbilityGroup.Heal, "HEAL"
+              AbilityGroup.HealOverTime, "HEAL OVER TIME"
+              AbilityGroup.Defence, "DEFENCE"
+              AbilityGroup.Utility, "UTILITY" ]
+
+          // The control toggle and Move lead, then one row per group of
+          // abilities that is not empty.
+          newRow ()
+
+          let controls =
+            [ add controlLabel (ToggleControl aid); add "Move" (ChooseMove aid) ]
+
+          let groups =
+            ordered
+            |> List.collect (fun (g, heading) ->
+              e.Abilities
+              |> List.filter (fun a -> Ability.group a = g)
+              |> fun abilities ->
+                if List.isEmpty abilities then
+                  []
+                else
+                  newRow ()
+
+                  add heading Heading
+                  :: (abilities |> List.map (fun a -> add a.Name (ChooseAbility(aid, a.Name)))))
+
+          globals @ controls @ groups
         | None -> globals
 
   let printParty () =
@@ -587,8 +756,9 @@ type RoguelikeGame() as this =
         { ApplyAt = world.Tick + ticks 1
           Kind = kind })
 
-    // The player's orders win; the script covers whoever was left idle this Tick.
-    let commands = PartyAi.supplement (playerOrders due) world
+    // The player's orders win; the script covers whoever was left idle this Tick
+    // and stays off anyone the player has taken over.
+    let commands = PartyAi.supplementExcept manual (playerOrders due) world
 
     world <- SimTick.step commands world
 
@@ -609,6 +779,103 @@ type RoguelikeGame() as this =
     reader.IsBackground <- true
     reader.Start()
 
+  let menuItems = Menu.entries ()
+
+  /// A fresh run starts in the menu, so the dungeon and its level are chosen
+  /// rather than assumed.
+  let mutable menu = Menu.PickDungeon 0
+
+  /// Keys already down last frame, so a held key does not scroll at frame rate.
+  let mutable heldKeys = Set.empty<Keys>
+
+  let pressed (keyboard: KeyboardState) (key: Keys) =
+    keyboard.IsKeyDown key && not (heldKeys.Contains key)
+
+  let rememberKeys (keyboard: KeyboardState) =
+    heldKeys <-
+      [ for key in Enum.GetValues<Keys>() do
+          if keyboard.IsKeyDown key then key ]
+      |> Set.ofList
+
+  let startEntry (index: int) (band: int) =
+    let entry = menuItems |> List.item index
+    world <- entry.Start band
+    creatureArt <- bindCreatureArt entry.Art world
+    selected <- None
+    pendingAction <- None
+    pending.Clear()
+    printedLogLines <- 0
+    accumulator <- 0.0
+    menu <- Menu.Closed
+    Console.WriteLine(sprintf "[%s — level %d]" entry.Label (snd entry.Bands.[band]))
+
+  let updateMenu (keyboard: KeyboardState) =
+    let up = pressed keyboard Keys.Up || pressed keyboard Keys.W
+    let down = pressed keyboard Keys.Down || pressed keyboard Keys.S
+
+    let confirm =
+      pressed keyboard Keys.Enter || pressed keyboard Keys.Space
+
+    match menu with
+    | Menu.Closed -> ()
+    | Menu.PickDungeon i ->
+      if down then menu <- Menu.PickDungeon((i + 1) % menuItems.Length)
+      elif up then menu <- Menu.PickDungeon((i + menuItems.Length - 1) % menuItems.Length)
+      elif confirm then menu <- Menu.PickDifficulty(i, 0)
+      elif pressed keyboard Keys.Escape then menu <- Menu.Closed
+    | Menu.PickDifficulty(i, band) ->
+      let bands = menuItems.[i].Bands
+
+      if down then menu <- Menu.PickDifficulty(i, (band + 1) % bands.Length)
+      elif up then menu <- Menu.PickDifficulty(i, (band + bands.Length - 1) % bands.Length)
+      elif confirm then startEntry i band
+      elif pressed keyboard Keys.Escape then menu <- Menu.PickDungeon i
+
+  /// The menu is an opaque card: the dungeon list first, then the band, which is
+  /// the difficulty.
+  let drawMenu () =
+    let width = min (columns * tile - 40) 560
+    let height = 60 + 9 * 26
+    let x = (columns * tile - width) / 2
+    let y = 30
+
+    spriteBatch.Draw(pixel, Rectangle(x, y, width, height), Color(10, 12, 16) * 0.96f)
+    spriteBatch.Draw(pixel, Rectangle(x, y, width, 2), Color(190, 214, 160))
+
+    let rows =
+      match menu with
+      | Menu.Closed -> []
+      | Menu.PickDungeon i ->
+        [ yield "CHOOSE A DUNGEON", Color(190, 214, 160), false
+          for index, entry in List.indexed menuItems do
+            let detail =
+              match entry.Bands with
+              | [ _, level ] -> sprintf "level %d" level
+              | _ -> "three bands"
+
+            yield sprintf "  %s   (%s)" entry.Label detail, Color.White, index = i
+          yield "", Color.White, false
+          yield "Arrows move  -  Enter selects  -  Esc back", Color(140, 146, 130), false ]
+      | Menu.PickDifficulty(i, band) ->
+        let entry = menuItems.[i]
+
+        [ yield entry.Label.ToUpperInvariant(), Color(190, 214, 160), false
+          for index, (label, level) in List.indexed entry.Bands do
+            yield sprintf "  %-8s level %d" label level, Color.White, index = band
+          yield "", Color.White, false
+          yield "The band is the difficulty: the lowest level it opens at up", Color(140, 146, 130), false
+          yield "to the level of its highest boss.", Color(140, 146, 130), false
+          yield "Arrows move  -  Enter starts  -  Esc back", Color(140, 146, 130), false ]
+
+    rows
+    |> List.iteri (fun row (text, colour, highlight) ->
+      let rowY = y + 18 + row * 26
+
+      if highlight then
+        spriteBatch.Draw(pixel, Rectangle(x + 6, rowY - 4, width - 12, 24), Color(120, 200, 255) * 0.18f)
+
+      drawTextShadow text (x + 14) rowY colour)
+
   override _.Initialize() =
     // Set here rather than in the constructor: the window exists by now.
     this.Window.AllowUserResizing <- true
@@ -622,11 +889,9 @@ type RoguelikeGame() as this =
     fontTex <- buildFontTexture ()
     textures <- loadTextures ()
 
-  override _.Update(gameTime: GameTime) =
-    let keyboard = Keyboard.GetState()
-
+  member this.StepWorld (keyboard: KeyboardState) (gameTime: GameTime) =
     if keyboard.IsKeyDown(Keys.Escape) then
-      this.Exit()
+      menu <- Menu.PickDungeon 0
 
     if keyboard.IsKeyDown(Keys.Space) then
       if ticksPerSecond > 0.0 then
@@ -660,7 +925,16 @@ type RoguelikeGame() as this =
           pendingAction <- None
         | ChooseAbility(aid, ability) -> pendingAction <- Some(Targeting(aid, ability))
         | ChooseMove aid -> pendingAction <- Some(Moving aid)
+        | ToggleControl aid ->
+          if manual.Contains aid then
+            manual <- manual.Remove aid
+            Console.WriteLine(sprintf "[%s returned to the AI]" (nameOf aid))
+          else
+            manual <- manual.Add aid
+            pendingAction <- None
+            Console.WriteLine(sprintf "[%s under manual control]" (nameOf aid))
         | CancelPending -> pendingAction <- None
+        | Heading -> ()
       | None, None ->
         match entityAt mx my with
         | Some e ->
@@ -672,9 +946,13 @@ type RoguelikeGame() as this =
             pendingAction <- None
           | _ -> if e.Faction = Party then selected <- Some e.Id
         | None ->
-          let tx, ty = mx / tile, my / tile
+          let tx, ty = mx / tile + camX, my / tile + camY
 
-          if ty < rows && Grid.isFloor world.Grid { X = tx; Y = ty } then
+          if
+            ty < world.Grid.Height
+            && tx < world.Grid.Width
+            && Grid.isFloor world.Grid { X = tx; Y = ty }
+          then
             match pendingAction, selected with
             | Some (Moving aid), _ ->
               pending.Add(MoveTo(aid, { X = tx; Y = ty }))
@@ -735,10 +1013,18 @@ type RoguelikeGame() as this =
         accumulator <- 0.0
 
     flushNewLogLines ()
+
+  override _.Update(gameTime: GameTime) =
+    let keyboard = Keyboard.GetState()
+
+    if menu <> Menu.Closed then updateMenu keyboard else this.StepWorld keyboard gameTime
+
+    rememberKeys keyboard
     base.Update(gameTime)
 
   override _.Draw(gameTime: GameTime) =
     this.GraphicsDevice.Clear(Color(10, 10, 14))
+    followCamera ()
 
     let validIds =
       match pendingAction with
@@ -748,12 +1034,17 @@ type RoguelikeGame() as this =
 
     spriteBatch.Begin()
 
-    let decorations = [| "mushroom_green"; "mushroom_blue"; "mushroom_teal"; "fern" |]
+    let decorations = [|
+      "sprites/mushroom_green"
+      "sprites/mushroom_blue"
+      "sprites/mushroom_teal"
+      "sprites/fern"
+    |]
 
-    for y in 0 .. rows - 1 do
-      for x in 0 .. columns - 1 do
+    for y in camY .. min (camY + rows - 1) (world.Grid.Height - 1) do
+      for x in camX .. min (camX + columns - 1) (world.Grid.Width - 1) do
         let p = { X = x; Y = y }
-        let dest = Rectangle(x * tile, y * tile, tile, tile)
+        let dest = Rectangle((x - camX) * tile, (y - camY) * tile, tile, tile)
         let h = tileHash x y
 
         if Grid.isWall world.Grid p then
@@ -763,11 +1054,11 @@ type RoguelikeGame() as this =
             [ -1, 0; 1, 0; 0, -1; 0, 1 ]
             |> List.exists (fun (dx, dy) -> Grid.isFloor world.Grid { X = x + dx; Y = y + dy })
 
-          match textures.TryFind "wall" with
+          match textures.TryFind "tiles/wall" with
           | Some t -> spriteBatch.Draw(t, dest, (if exposed then Color(200, 200, 205) else Color(80, 80, 92)))
           | None -> spriteBatch.Draw(pixel, Rectangle(dest.X, dest.Y, tile - 1, tile - 1), Color(46, 44, 40))
         else
-          match textures.TryFind(if h % 3 = 0 then "floor1" else "floor0") with
+          match textures.TryFind(if h % 3 = 0 then "tiles/floor1" else "tiles/floor0") with
           | Some t ->
             // Mirroring by the tile hash hides the repeat.
             let flip = if (h >>> 3) % 2 = 0 then SpriteEffects.None else SpriteEffects.FlipHorizontally
@@ -790,13 +1081,14 @@ type RoguelikeGame() as this =
     let hover = entityAt mouse.X mouse.Y |> Option.map (fun e -> e.Id)
 
     for e in drawOrder do
-      let fx, fy = drawnAt e
+      let fx, fy = screenAt e
 
       let cx = int (fx * float tile + float tile / 2.0)
       let feet = int (fy * float tile) + tile - 3
       let top = feet - spriteSize
       let art = textures.TryFind(spriteKey e)
       let flip = if facesLeft e then SpriteEffects.FlipHorizontally else SpriteEffects.None
+      lastSeenX <- Map.add e.Id fx lastSeenX
       let box = artRect e
 
       let drawArt (tint: Color) =
@@ -930,21 +1222,33 @@ type RoguelikeGame() as this =
     let panelW = this.GraphicsDevice.Viewport.Width
     panel (Rectangle(0, uiTop, panelW, uiHeight))
 
-    for (rect, label, _) in uiButtons () do
-      let hover = rect.Contains(m.X, m.Y)
-      spriteBatch.Draw(pixel, rect, if hover then Color(120, 160, 84) else Color(60, 84, 46))
-      spriteBatch.Draw(pixel, Rectangle(rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2), if hover then Color(58, 78, 44) else Color(26, 30, 24))
-      spriteBatch.Draw(pixel, Rectangle(rect.X + 1, rect.Y + 1, rect.Width - 2, 1), Color.White * 0.08f)
-      drawTextShadow label (rect.X + 6) (rect.Y + 6) (if hover then Color.White else Color(214, 220, 200))
+    for (rect, label, action) in uiButtons () do
+      let hover = action <> Heading && rect.Contains(m.X, m.Y)
+
+      if action = Heading then
+        drawText label rect.X (rect.Y + 4) (Color(150, 176, 130))
+      else
+        spriteBatch.Draw(pixel, rect, if hover then Color(120, 160, 84) else Color(60, 84, 46))
+
+        spriteBatch.Draw(
+          pixel,
+          Rectangle(rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2),
+          if hover then Color(58, 78, 44) else Color(26, 30, 24)
+        )
+
+        spriteBatch.Draw(pixel, Rectangle(rect.X + 1, rect.Y + 1, rect.Width - 2, 1), Color.White * 0.08f)
+        drawTextShadow label (rect.X + 6) (rect.Y + 4) (if hover then Color.White else Color(214, 220, 200))
 
     let hint =
       match selected, pendingAction with
       | Some _, Some (Targeting(_, ability)) -> sprintf "Choose a target for %s - click a highlighted unit" ability
       | Some aid, Some (Moving _) -> sprintf "%s - click a destination tile" (nameOf aid)
+      | Some aid, None when manual.Contains aid ->
+        sprintf "%s under manual control - it will not act on its own until handed back" (nameOf aid)
       | Some aid, None -> sprintf "%s selected - Move, an ability, or click a tile to walk" (nameOf aid)
       | None, _ -> "Click a party member to command them"
 
-    drawTextWrapped hint 8 (uiTop + 100) (panelW - 16) (Color(160, 160, 170))
+    drawTextWrapped hint 8 (uiTop + uiHeight - 20) (panelW - 16) (Color(160, 160, 170))
 
     // The combat log. `world.Log` is newest-first, so reverse it to read the
     // way a log should: oldest visible line at the top, newest at the bottom.
@@ -965,6 +1269,8 @@ type RoguelikeGame() as this =
 
     if List.isEmpty world.Log then
       drawText "nothing has happened yet" 8 bodyTop (Color(120, 120, 138))
+
+    if menu <> Menu.Closed then drawMenu ()
 
     spriteBatch.End()
     base.Draw(gameTime)

@@ -114,6 +114,38 @@ type Form =
   | Humanoid
   | Serpent
 
+/// What a creature is, which decides which crowd control is legal on it. Vanilla
+/// gates the control spells by type: Polymorph takes beasts, humanoids and
+/// critters, Sleep takes beasts, humanoids and dragonkin. Everything else in the
+/// level-24 spellbook — stuns, roots, disarm — is physical and type-blind.
+[<RequireQualifiedAccess>]
+type CreatureType =
+  | Beast
+  | Critter
+  | Humanoid
+  | Undead
+  | Demon
+  | Elemental
+  | Dragonkin
+
+module CreatureType =
+
+  /// Polymorph (spell 118).
+  let polymorphable =
+    function
+    | CreatureType.Beast
+    | CreatureType.Humanoid
+    | CreatureType.Critter -> true
+    | _ -> false
+
+  /// Sleep (spell 700), and the Druid's Slumber that shares the effect.
+  let sleepable =
+    function
+    | CreatureType.Beast
+    | CreatureType.Humanoid
+    | CreatureType.Dragonkin -> true
+    | _ -> false
+
 [<Struct>]
 type EntityId = EntityId of int
 
@@ -129,8 +161,10 @@ type Aura =
   | Rooted of remaining: int<tick>
   /// Polymorph. Cannot act, breaks on any damage, and heals while transformed.
   | Polymorphed of remaining: int<tick>
-  /// A heal-over-time. heals `healPerTick` every Tick.
-  | Rejuvenation of remaining: int<tick> * healPerTick: int
+  /// A heal-over-time. Heals `healPerTick` every Tick, and remembers which spell
+  /// put it there: Renew, Rejuvenation and Regrowth are the same kind of effect
+  /// and they stack, so the source is what tells them apart.
+  | Rejuvenation of remaining: int<tick> * healPerTick: int * source: string
   /// Sunder Armour. Reduces the target's armour by a flat amount. Refreshed by
   /// another application rather than stacking.
   | Sundered of remaining: int<tick> * armorReduction: int
@@ -138,6 +172,10 @@ type Aura =
   | Corrupted of remaining: int<tick> * damagePerTick: int
   /// Disarm. The holder cannot swing its auto-attack while this lasts.
   | Disarmed of remaining: int<tick>
+  /// Shield Block: the holder blocks far more of what swings at it.
+  | Blocking of remaining: int<tick>
+  /// Shield Wall: a share of every point of damage taken is removed.
+  | ShieldWalled of remaining: int<tick> * reductionBp: int
 
 /// Every case of `Aura` is matched in exactly one place — here. Everywhere else
 /// asks this module a question, so adding an aura breaks compilation in this
@@ -152,10 +190,12 @@ module Aura =
     | Stunned r when r > ticks 1 -> Some(Stunned(r - ticks 1))
     | Rooted r when r > ticks 1 -> Some(Rooted(r - ticks 1))
     | Polymorphed r when r > ticks 1 -> Some(Polymorphed(r - ticks 1))
-    | Rejuvenation(r, n) when r > ticks 1 -> Some(Rejuvenation(r - ticks 1, n))
+    | Rejuvenation(r, n, s) when r > ticks 1 -> Some(Rejuvenation(r - ticks 1, n, s))
     | Sundered(r, reduction) when r > ticks 1 -> Some(Sundered(r - ticks 1, reduction))
     | Corrupted(r, n) when r > ticks 1 -> Some(Corrupted(r - ticks 1, n))
     | Disarmed r when r > ticks 1 -> Some(Disarmed(r - ticks 1))
+    | Blocking r when r > ticks 1 -> Some(Blocking(r - ticks 1))
+    | ShieldWalled(r, bp) when r > ticks 1 -> Some(ShieldWalled(r - ticks 1, bp))
     | _ -> None
 
   let describe =
@@ -165,10 +205,12 @@ module Aura =
     | Stunned r -> sprintf "stun(%d)" r
     | Rooted r -> sprintf "root(%d)" r
     | Polymorphed r -> sprintf "poly(%d)" r
-    | Rejuvenation(r, n) -> sprintf "rejuv(%d,+%d)" r n
+    | Rejuvenation(r, n, s) -> sprintf "rejuv(%d,+%d,%s)" r n s
     | Sundered(r, reduction) -> sprintf "sunder(%d,-%d)" r reduction
     | Corrupted(r, n) -> sprintf "dot(%d,%d)" r n
     | Disarmed r -> sprintf "disarm(%d)" r
+    | Blocking r -> sprintf "block(%d)" r
+    | ShieldWalled(r, bp) -> sprintf "wall(%d,-%d)" r bp
 
   /// The name a player sees, short enough to fit over a sprite.
   let label =
@@ -178,15 +220,19 @@ module Aura =
     | Stunned _ -> "STUN"
     | Rooted _ -> "ROOTED"
     | Polymorphed _ -> "POLYMORPH"
-    | Rejuvenation _ -> "REJUV"
+    | Rejuvenation(_, _, source) -> source
     | Sundered _ -> "SUNDER"
     | Corrupted _ -> "CORRUPTION"
     | Disarmed _ -> "DISARMED"
+    | Blocking _ -> "BLOCK"
+    | ShieldWalled _ -> "SHIELD WALL"
 
   /// True when the aura helps its holder rather than hurting it.
   let isHelpful =
     function
-    | Rejuvenation _ -> true
+    | Rejuvenation _
+    | Blocking _
+    | ShieldWalled _ -> true
     | _ -> false
 
   /// Ticks left before it falls off.
@@ -198,9 +244,11 @@ module Aura =
     | Polymorphed r
     | Disarmed r -> r
     | SerpentForm(r, _)
-    | Rejuvenation(r, _)
+    | Rejuvenation(r, _ , _)
     | Sundered(r, _)
-    | Corrupted(r, _) -> r
+    | Corrupted(r, _)
+    | Blocking r -> r
+    | ShieldWalled(r, _) -> r
 
   /// Whole seconds left, rounded up so a live aura never reads "0s".
   let remainingSeconds (a: Aura) : int =
@@ -250,7 +298,7 @@ module Aura =
   /// A flat amount healed each Tick (heal-over-time).
   let flatHealPerTick =
     function
-    | Rejuvenation(_, n) -> n
+    | Rejuvenation(_, n, _) -> n
     | _ -> 0
 
   /// True on the Ticks where a periodic aura actually fires. WoW's heal- and
@@ -260,7 +308,7 @@ module Aura =
   let firesThisTick (a: Aura) =
     let remaining =
       match a with
-      | Rejuvenation(r, _) -> r
+      | Rejuvenation(r, _, _) -> r
       | Corrupted(r, _) -> r
       | Polymorphed r -> r
       | _ -> ticks 0
@@ -279,7 +327,7 @@ module Aura =
   let healOverTimePending (auras: Aura list) =
     auras
     |> List.sumBy (function
-      | Rejuvenation(r, n) -> (r / secTicks 1.0) * n
+      | Rejuvenation(r, n, _) -> (r / secTicks 1.0) * n
       | _ -> 0)
 
   /// Ticks left on a heal-over-time, zero when there is none. What a healer asks
@@ -290,7 +338,19 @@ module Aura =
     |> List.fold
       (fun acc aura ->
         match aura with
-        | Rejuvenation(r, _) -> max acc r
+        | Rejuvenation(r, _, _) -> max acc r
+        | _ -> acc)
+      (ticks 0)
+
+  /// Ticks left on the heal-over-time a named spell put up, zero when it is not
+  /// running. A healer asks this per spell: a Tank wants Renew, Rejuvenation and
+  /// Regrowth rolling at once, and only the source tells them apart.
+  let healOverTimeRemainingFor (source: string) (auras: Aura list) =
+    auras
+    |> List.fold
+      (fun acc aura ->
+        match aura with
+        | Rejuvenation(r, _, s) when s = source -> max acc r
         | _ -> acc)
       (ticks 0)
 
@@ -307,16 +367,37 @@ module Aura =
     | Sundered _ -> 6
     | Corrupted _ -> 7
     | Disarmed _ -> 8
+    | Blocking _ -> 9
+    | ShieldWalled _ -> 10
 
-  /// Prepend `a`, dropping any existing aura of the same kind, so a re-application
-  /// refreshes rather than stacks.
+  /// Does casting `newer` overwrite `older`?
+  let replaces (older: Aura) (newer: Aura) =
+    match older, newer with
+    | Rejuvenation(_, _, a), Rejuvenation(_, _, b) -> a = b
+    | _ -> kind older = kind newer
+
+  /// Prepend `a`, dropping the aura it replaces, so a re-application refreshes
+  /// rather than stacks. Heal-over-times are keyed by the spell that cast them, so
+  /// different spells stack while the same spell only refreshes.
   let refresh (a: Aura) (auras: Aura list) =
-    a :: (auras |> List.filter (fun x -> kind x <> kind a))
+    a :: (auras |> List.filter (fun x -> not (replaces x a)))
 
   /// Flat armour reduction from Sunder Armour, summed over auras.
   let armorReduction =
     function
     | Sundered(_, reduction) -> reduction
+    | _ -> 0
+
+  /// Extra block chance from Shield Block, in basis points.
+  let blockBonusBp =
+    function
+    | Blocking _ -> 7500
+    | _ -> 0
+
+  /// Share of incoming damage Shield Wall removes, in basis points.
+  let damageReductionBp =
+    function
+    | ShieldWalled(_, bp) -> bp
     | _ -> 0
 
   /// A flat amount dealt as damage each Tick (damage-over-time).
@@ -330,6 +411,26 @@ module Aura =
     function
     | Disarmed _ -> true
     | _ -> false
+
+/// Something a caster calls to its side: a Hunter's pet, a Warlock's demon, a
+/// Shaman's totem. It becomes a real Entity — it has health, it can be attacked,
+/// and it is drawn on the grid — because a pet that cannot die and a totem that
+/// cannot be killed are not the abilities they are in WoW.
+///
+/// The swing is raw numbers rather than an `AutoAttack` because `AutoAttack` is
+/// declared later in this file; `SimCombat` builds the real one when it creates
+/// the entity.
+type SummonSpec =
+  { Name: string
+    Health: int
+    Armor: int
+    /// Its own swing: damage range and ticks between swings. A totem has no
+    /// swing at all, which is `None`.
+    Swing: (int * int * int<tick>) option
+    /// Ticks it lasts before expiring on its own. None = until killed.
+    Lifetime: int<tick> option
+    /// Ticks to cross one tile. A totem never moves, so it is immobile.
+    MoveTicksPerTile: int<tick> }
 
 /// The closed vocabulary of mechanics an Ability can have (Q28b). Adding a new
 /// *mechanic* means adding a case here; adding a new *ability* means writing a
@@ -365,6 +466,22 @@ type Effect =
   | Charge
   /// Disarm: the target cannot swing its auto-attack for `duration`.
   | Disarm of duration: int<tick>
+  /// Shield Block: raise the caster's block chance while it lasts.
+  | Blocks of duration: int<tick>
+  /// Shield Wall: cut the damage the caster takes by `reductionBp`.
+  | ReducesDamage of duration: int<tick> * reductionBp: int
+  /// A Rogue's combo point on the actor, kept for the next finisher.
+  | ComboPoint of count: int
+  /// Spend the actor's combo points as physical damage: `min`-`max` at one
+  /// point, plus `perPoint` for every point after the first. Eviscerate scales
+  /// exactly linearly in points (rank 4: 41-61 at one, +31 a point), which is
+  /// why one flat step is enough to describe it.
+  | Finisher of min: int * max: int * perPoint: int
+  /// Call something to the caster's side: a Hunter's pet, a Warlock's demon, a
+  /// Shaman's totem. It becomes a real Entity — it has health, it can be
+  /// attacked, and it is drawn on the grid — because a pet that cannot die and
+  /// a totem that cannot be killed are not the abilities they are in WoW.
+  | Summon of spec: SummonSpec
 
 type TargetKind =
   | Foe
@@ -383,6 +500,122 @@ type Ability =
     Range: int
     TargetKind: TargetKind
     Effects: Effect list }
+
+/// How the UI files an ability away, most active first. A player looking for a
+/// button looks for "the one that hurts", "the one that heals me", "the one
+/// that stops the damage" — not for its position in the class kit.
+[<RequireQualifiedAccess>]
+[<Struct>]
+type AbilityGroup =
+  | Damage
+  | DamageOverTime
+  | Heal
+  | HealOverTime
+  | Defence
+  | Utility
+
+module Ability =
+
+  /// The group an ability belongs to, read off its effects. A control ability is
+  /// filed under Utility even when it also deals damage — Shield Bash lands 6
+  /// damage and a 6 s lockout, and the lockout is the point of the button.
+  let group (a: Ability) : AbilityGroup =
+    let has test = a.Effects |> List.exists test
+
+    if has (function
+        | Interrupt -> true
+        | _ -> false) then
+      AbilityGroup.Utility
+    elif has (function
+        | Blocks _
+        | ReducesDamage _ -> true
+        | _ -> false) then
+      AbilityGroup.Defence
+    elif has (function
+        | HealOverTime _ -> true
+        | _ -> false) then
+      AbilityGroup.HealOverTime
+    elif has (function
+        | Heal _ -> true
+        | _ -> false) then
+      AbilityGroup.Heal
+    elif has (function
+        | DamageOverTime _ -> true
+        | _ -> false) then
+      AbilityGroup.DamageOverTime
+    elif has (function
+        | Damage _
+        | WeaponDamage _
+        | SpellDamage _
+        | AreaDamage _
+        | Finisher _ -> true
+        | _ -> false) then
+      AbilityGroup.Damage
+    else
+      AbilityGroup.Utility
+
+/// WoW's three resource economies. A Warrior builds rage by fighting, a Rogue
+/// regenerates energy on a fixed clock, a caster spends mana — they behave
+/// differently enough that one pool could no longer pretend to be all three.
+type ResourceKind =
+  | Mana
+  | Rage
+  | Energy
+
+/// A Warrior stance or a Druid form. An ability that requires one cannot be used
+/// outside it, which is what makes Overpower a Battle Stance decision rather
+/// than a button.
+type Stance =
+  | BattleStance
+  | DefensiveStance
+  | BerserkerStance
+  | BearForm
+  | CatForm
+  | TravelForm
+
+/// One rank of an ability: the numbers a character gets when they train it.
+/// Cast time, cooldown and range live here too, because they genuinely differ
+/// between ranks (Healing Touch grows from 2.5 s to 3.5 s as it ranks up).
+type Rank =
+  { Level: int
+    Cost: int
+    CastTicks: int<tick>
+    CooldownTicks: int<tick>
+    Range: int
+    Effects: Effect list }
+
+/// The catalog form of an ability: every rank it has, oldest first, plus the
+/// facts that never change between ranks. Combat only ever sees the resolved
+/// `Ability` that `at` produces, so the rank ladder never reaches the tick loop.
+type AbilityDef =
+  { Name: string
+    Resource: ResourceKind
+    /// The stance or form the ability requires, if any.
+    Stance: Stance option
+    TargetKind: TargetKind
+    Interruptible: bool
+    Ranks: Rank list }
+
+module AbilityDef =
+
+  /// The best rank this character can train, or None while the ability is still
+  /// above their level. Ranks are stored oldest-first.
+  let at (level: int) (d: AbilityDef) : Ability option =
+    d.Ranks
+    |> List.filter (fun r -> r.Level <= level)
+    |> List.tryLast
+    |> Option.map (fun r ->
+      { Name = d.Name
+        CastTicks = r.CastTicks
+        CooldownTicks = r.CooldownTicks
+        ResourceCost = r.Cost
+        Interruptible = d.Interruptible
+        Range = r.Range
+        TargetKind = d.TargetKind
+        Effects = r.Effects })
+
+  /// Every ability of a kit this character knows, in kit order.
+  let kitAt (level: int) (defs: AbilityDef list) : Ability list = defs |> List.choose (at level)
 
 /// A swing on a timer, separate from the Ability list because every combatant
 /// has one and none of them have to declare it.
@@ -462,8 +695,22 @@ module Traits =
 type Entity =
   { Id: EntityId
     Name: string
+    /// Character level. The attack table, spell hit and the armour curve are all
+    /// functions of it: defence and weapon skill are five per level, and the
+    /// attacker's level is the constant in the armour denominator.
+    Level: int
+    /// What it is. Decides which crowd control can land (see `CreatureType`).
+    CreatureType: CreatureType
+    /// Dual-wield: a second weapon swings with the first for half damage. Only
+    /// the Rogue has one at 24; the Warrior swings a two-hander and the rest a
+    /// staff or a wand.
+    OffHand: bool
     Faction: Faction
     Role: Role option
+    /// A scripted creature that stands inert until something wakes it — Mutanus
+    /// before Naralex is disturbed. A dormant entity never picks a target, and
+    /// nothing targets it: it is scenery until the script says otherwise.
+    Dormant: bool
     MaxHealth: int
     Health: int
     /// The tile being occupied, or the tile being left while stepping.
@@ -498,6 +745,12 @@ type Entity =
     Resource: int
     MaxResource: int
     ResourceRegenPerTick: int
+    /// Mana, rage or energy. Rage is built by fighting and energy regenerates on
+    /// its own clock, so the tick loop has to know which economy it is feeding.
+    ResourceKind: ResourceKind
+    /// Rogue combo points, 0 to 5. Lost when the Rogue switches target, which is
+    /// what makes a finisher a decision rather than a formality.
+    ComboPoints: int
     Abilities: Ability list
     AutoAttack: AutoAttack option
     SwingTicksLeft: int<tick>
@@ -536,7 +789,13 @@ type Entity =
     /// Raptors call for help rather than dying quietly. A percentage of max
     /// health, not an absolute value.
     CallForHelpBelowHealthPct: int option
-    HasCalledForHelp: bool }
+    HasCalledForHelp: bool
+    /// The entity that called this one into being, for a summoned pet or totem.
+    /// A pet dies with its owner.
+    Owner: EntityId option
+    /// Ticks until a summoned thing expires on its own. A totem is on a clock;
+    /// a pet is not.
+    ExpiresInTicks: int<tick> option }
 
 // ===========================================================================
 // Commands
@@ -588,6 +847,51 @@ type PartyBuffKind =
   | MarkOfTheWild
   /// Warrior: Battle Shout rank 3, +55 melee attack power to the party.
   | BattleShout
+  /// Paladin: Blessing of Might rank 3, +55 melee attack power to the party.
+  | BlessingOfMight
+  /// Paladin: Devotion Aura rank 3, +275 armour to the party.
+  | DevotionAura
+
+/// A quest, as the sim can actually track it: kill `Required` creatures drawn from
+/// `Targets`. Quests double as the scripted encounters — the awakening of Naralex
+/// is a quest that, when it completes, speaks and brings a dormant boss to life,
+/// which is the only reason the dungeon has an ending rather than just corpses.
+type Quest =
+  { Name: string
+    /// Creature names that count toward this quest.
+    Targets: string list
+    /// How many kills finish it.
+    Required: int
+    /// Creature names this quest wakes when it completes.
+    Wakes: string list
+    /// Lines logged when it completes, in order.
+    Lines: string list
+    Progress: int
+    Done: bool }
+
+module Quest =
+  let create (name: string) (targets: string list) (required: int) : Quest =
+    { Name = name
+      Targets = targets
+      Required = required
+      Wakes = []
+      Lines = []
+      Progress = 0
+      Done = false }
+
+  /// Advance every unfinished quest that watches this kill.
+  let onKill (name: string) (quests: Quest list) : Quest list =
+    quests
+    |> List.map (fun q ->
+      if q.Done || not (List.contains name q.Targets) then
+        q
+      else
+        let progress = min q.Required (q.Progress + 1)
+        { q with Progress = progress; Done = progress >= q.Required })
+
+  /// The quests that finished between two snapshots of the list.
+  let justCompleted (before: Quest list) (after: Quest list) : Quest list =
+    List.zip before after |> List.filter (fun (b, a) -> not b.Done && a.Done) |> List.map snd
 
 type World =
   { Tick: int<tick>
@@ -601,7 +905,9 @@ type World =
     PartyBuffs: PartyBuffKind list
     /// Newest first. Excluded from fingerprints because it is derivable from
     /// the state; included in dumps because it is what a human reads.
-    Log: string list }
+    Log: string list
+    /// The run's objectives, and with them its scripted encounters.
+    Quests: Quest list }
 
 // ===========================================================================
 // Dungeon layout

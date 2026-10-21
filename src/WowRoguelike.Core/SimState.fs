@@ -35,8 +35,34 @@ module SimState =
   let alive (e: Entity) = e.Health > 0
   let aliveParty (w: World) = w.Entities |> List.filter (fun e -> e.Faction = Party && alive e)
 
+  /// In combat while something hostile is engaged with the party. This is the
+  /// same test the party uses to end a pull, and the one regeneration asks:
+  /// a mob that has not noticed you is not a fight.
+  let inCombat (w: World) =
+    w.Entities |> List.exists (fun e -> e.Faction = Hostile && e.Engaged && alive e)
+
   let aliveHostiles (w: World) =
-    w.Entities |> List.filter (fun e -> e.Faction = Hostile && alive e)
+    w.Entities |> List.filter (fun e -> e.Faction = Hostile && alive e && not e.Dormant)
+
+  /// A creature just died: credit it to the objectives watching for it, and if
+  /// that finishes one, say so and wake whatever it unseals. This is the whole
+  /// scripted-encounter mechanism — Naralex's awakening is a quest whose
+  /// completion wakes Mutanus, and nothing else in the sim knows about scripts.
+  let recordKill (name: string) (w: World) : World =
+    let after = Quest.onKill name w.Quests
+    let finished = Quest.justCompleted w.Quests after
+
+    if List.isEmpty finished then
+      { w with Quests = after }
+    else
+      let awake = finished |> List.collect (fun q -> q.Wakes)
+
+      { w with
+          Quests = after
+          Entities =
+            w.Entities
+            |> List.map (fun e -> if List.contains e.Name awake then { e with Dormant = false } else e)
+          Log = List.rev (finished |> List.collect (fun q -> q.Lines)) @ w.Log }
 
   let outcome (w: World) =
     if List.isEmpty (aliveHostiles w) then EncounterCleared
@@ -44,6 +70,9 @@ module SimState =
     else Running
 
   let healthPct (e: Entity) = e.Health * 100 / e.MaxHealth
+
+  /// Mana, rage or energy left, as a percentage of the pool.
+  let resourcePct (e: Entity) = e.Resource * 100 / max 1 e.MaxResource
 
   let inMelee (a: Entity) (b: Entity) = Pos.chebyshev a.Pos b.Pos <= 1
 

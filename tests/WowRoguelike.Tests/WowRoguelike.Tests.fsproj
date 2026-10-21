@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <Compile Include="Tests.fs" />
+    <!-- The balance snapshot: committed here, read from the output directory. -->
+    <None Include="snapshots/*.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
