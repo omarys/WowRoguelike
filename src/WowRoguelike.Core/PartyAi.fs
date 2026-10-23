@@ -487,9 +487,17 @@ module PartyAi =
       |> List.sortByDescending (fun h -> h.MaxHealth)
       |> List.tryHead
 
+    // shortcut: `Cheap Shot` costs 60 of a 100 point pool, so "stun and still
+    // strike" cannot both hold — the honest gate needs 105 energy and never
+    // fires once. Measured, that removes the stun entirely and `library max`
+    // wipes at 4000 with 27 mobs left; the stun taken at the top of the bar,
+    // where regen would otherwise cap out, grinds the same fight to 11 with the
+    // Party intact at full health. Re-tune if the pool or the cost moves.
+    let surplus = e.Resource >= e.MaxResource - 5
+
     let stun =
       [ "Cheap Shot"; "Kidney Shot" ]
-      |> List.filter (fun n -> has e n && canUse e n && e.Resource >= 45)
+      |> List.filter (fun n -> has e n && canUse e n && surplus)
       |> List.tryHead
 
     match caster with
@@ -608,7 +616,11 @@ module PartyAi =
 
     let role r = actors |> List.filter (fun e -> e.Role = Some r)
     let melee (e: Entity) = e.Abilities |> List.exists (fun a -> a.TargetKind = Foe && a.Range <= 1)
-    let ranged (e: Entity) = e.Abilities |> List.exists (fun a -> a.TargetKind = Foe && a.Range > 1)
+    // Exclusive, not overlapping: a Rogue with Sap holds a Foe ability at range 3
+    // and is still a melee member, and issuing it both order sets puts two commands
+    // for one actor in the same Tick.
+    let ranged (e: Entity) =
+      (not (melee e)) && e.Abilities |> List.exists (fun a -> a.TargetKind = Foe && a.Range > 1)
 
     let tank = actors |> List.tryFind (fun e -> e.Role = Some Tank)
 
