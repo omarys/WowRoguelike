@@ -316,21 +316,32 @@ both because a clear is not currently true and because the full run is too slow.
 
 ## 9. Open work, in priority order
 
-1. **Mutual Party blocking is a second, distinct freeze — diagnosed, not fixed.**
-   `smtrace graveyard min 12000 3000 v` at tick 12000: party at (15-17, 181-184),
-   three of five holding `goal=Some (8,172)` with `path=0` and `stall` 3-20, party at
-   **100% health and 99% mana**, 25 hostiles alive at full health with
-   `target=None`, and `route 17,181 -> 8,172 free=(22, false)` — a 22-step route
-   exists, the walker just cannot use it. Five abreast in a corridor claim every
-   tile of it at once; because none of them steps, none ever frees a tile, and the
-   claim-aware A* fails while the claim-free one succeeds. This is *not* the
-   `approachTile` bug above: the goal is reachable.
-   Tried and reverted: making a stationary **Party** member's claim soft for Party
-   movers (`claimedByOther` in `SimState.fs`) unfroze the party but broke `no two
-   living entities share a tile` — soft claims let a walker step *onto* an ally.
-   The likely shape is a retry in `stepToward`: when the claim-aware search fails,
-   re-plan with stationary allies passable and take a first step only if that tile
-   is free under the hard rule. Do not soften `claimedByOther` itself.
+1. **Mutual Party blocking: fixed** (`8d01db5`). Five abreast in a corridor
+   claimed every tile of it at once; because none of them stepped, none ever freed a
+   tile, and the claim-aware A* failed for all of them while the claim-free one
+   succeeded. The diagnosis above was right and its proposed shape was the one that
+   worked: `stepToward` now re-plans with a **stationary** ally's tile passable when
+   the claim-aware search comes back empty, and still requires the first step to
+   clear the hard claim, so a relaxed route can never put two bodies on one tile. It
+   buys only the free prefix of a route, which is enough — one body moves, its tile
+   frees, the queue drains. `a stationary ally no longer severs the route behind it`
+   is red on `9ab48f3` and green after.
+
+   Do not soften `claimedByOther`, which is what was tried first: a soft claim lets a
+   walker step *onto* an ally and breaks `no two living entities share a tile`.
+
+   Measured at 12000 ticks, seed 1, frozen → moving: graveyard min froze at tick 8000
+   with 27 mobs left and 5/5 alive at full health, and now reaches 37 left with 1
+   alive; graveyard max 26 → 30 left; library max 16 left with 4 alive at 74% → 15
+   left with all five at 100%.
+
+   **The freeze had been masking fights the Party was losing.** An unfrozen Party
+   pulls the packs a frozen one never reached, so on `graveyard min` it now grinds
+   down to a single survivor where it used to stand at 100% health. Do not read the
+   old 100%-health columns as the Party doing well: a stalemate is not a win. What is
+   left of this bug's family is the `approachTile` stall in §8 — `library max` now
+   walks until tick 8000 and then holds at 15 mobs left, 5 alive at 100% and mob hp
+   frozen at 42%.
 
 2. **The `approachTile` stall — the worst bug in the tree.** See §8. A widening was
 tried and reverted because it broke a clear. The next shape should be a no-route
@@ -343,17 +354,23 @@ immediately; both moved under the last attempt.
 
    | wing | levels (min/med/max) | minimum | median | maximum |
    |---|---|---|---|---|
-   | graveyard | 30/33/34 | 1 left at 16000, party 98%, 5 alive (near clear) | — | frozen from tick 12500 at 20 left, 2 alive |
-   | library | 33/36/37 | — | — | 18 left at 16000, party 74%, 4 alive (slow, not dying) |
-   | armory | 37/39/40 | — | — | — |
-   | cathedral | 38/41/42 | — | wipe | — |
+   | graveyard | 30/33/34 | 35 left, 1 alive at 20% | 26 left, 2 alive at 38% | 26 left, 4 alive at 74% |
+   | library | 33/36/37 | wipe (36 left) | wipe (27 left) | 15 left, 5 alive at 100%, stalled from tick 8000 |
+   | armory | 37/39/40 | wipe at 6 left (mob hp 14%) | wipe at 6 left | **clear at tick 9918**, 4 alive |
+   | cathedral | 38/41/42 | wipe (38 left) | wipe (25 left) | wipe (27 left) |
 
-   The `—` cells were not re-measured after the walking fix and the earlier table
-   (clear 16174 / wipe / frozen…) is from a different build; treat this as a partial
-   matrix, not a verdict. What the sampled cells say: the party is **slow, not
-   fragile** (74–98% health left at 16000 in two of them), so pace and trash density
-   are the levers — 43 hostiles in one wing at ~11 ms/tick is a long fight. The
-   earlier "12000-tick budget" verdicts were artifacts.
+   One seed (1) per cell, 16000 ticks, `smtrace <wing> <min|med|max> 16000 16000`.
+   Read it knowing that **difficulty sets the Party's level as well as the wing's**,
+   and the Party gains more at the max anchor than the mobs do: the max column is
+   the *surviving* one everywhere except cathedral. Armory clears at max and wipes at
+   min; library stands at max and wipes at min. So the lever per cell is the level
+   anchor, not trash density, and "make it harder" is currently backwards.
+
+   Nothing here is a win rate — one seed per cell cannot say one. Wipes at 6-left are
+   the closest thing to a finish line the Party has. `library max` contradicts an
+   earlier note in this section: it does **not** clear at 11480 on this build (with
+   the stun at the 45-energy gate it wipes at 26 left), so treat that number as
+   retired.
 4. **The pull protocol is specified by the user and only its first line exists.**
    The intended shape (user's words, condensed): *pre-combat CC that does not start
    combat (Rogue's Sap) first; then a ranged member opens on the priority enemy from
@@ -397,14 +414,18 @@ immediately; both moved under the last attempt.
    That stands in for the Improved Stealth talent and is why there is no facing
    check and no Distract.
 
-   **Stuns are mitigation, not only interrupts.** `Cheap Shot` / `Kidney Shot` now
-   go on the healthiest engaged enemy that can still act, gated on having 45 energy
-   left so the Rogue still strikes (`the rogue stuns an engaged enemy as
-   mitigation`). That is the change that moved a wing: **`library max` now clears at
-   tick 11480 with five alive at 99%**, from 16 hostiles left at 74% before the
-   stuns. `graveyard max` turned from a freeze into a wipe (13 left), so the two
-   cells moved in opposite directions and the win rate should be sampled, not
-   asserted from two runs.
+   **Stuns are mitigation, not only interrupts.** `Cheap Shot` / `Kidney Shot` go on
+   the healthiest engaged enemy that can still act (`the rogue stuns an engaged enemy
+   as mitigation`), gated at the **top of the energy bar** rather than on the
+   recovered code's 45. "Stun and still strike" cannot both hold on a 100 point pool
+   when Cheap Shot costs 60: the honest gate needs 105 energy and never fires at all,
+   which is why the first cut of this gated on 45 and left the Rogue with nothing to
+   swing. Taking the stun where regen would otherwise cap out is the version that
+   measured best. A/B at 16000 ticks, seed 1, 45-gate → top-of-bar gate: **library max
+   wipes at 26 left → 15 left with five alive at 100%**, **armory max wipes at 9 left
+   → clears at tick 9918**, graveyard max 31 → 26 left (4 alive both), graveyard min
+   25 left with 2 alive → 35 left with 1. Two wipes became a clear and a standstill.
+   The graveyard-min row is what it costs.
 
    Measured: a ranged opener was tried
    *without* the tank pickup and made `library max` wipe — the casters pull while
