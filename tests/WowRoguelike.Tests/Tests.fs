@@ -1525,6 +1525,95 @@ let ``the paladin is built on the researched level-24 set`` () =
   // Verigan's Fist, 65-99 at 3.20 s.
   Assert.Equal((65, 99), (paladin.AutoAttack.Value.Min, paladin.AutoAttack.Value.Max))
 
+/// Gear scales with level from the level-24 set to the class's level-60 pre-raid
+/// best-in-slot outfit, which `.pi/research/levelscale/bis-60.md` tabulates piece
+/// by piece. The level-24 numbers are frozen (they are the calibration point this
+/// file's content is tuned at); level 60 has to land on the researched totals, and
+/// nothing in between may go backwards.
+[<Fact>]
+let ``gear grows from the level-24 set to the level-60 best in slot`` () =
+  // A warrior alone, so Battle Shout's attack power is the only passive and the
+  // stat totals are the dressed ones: base row at 60 is (120, 80, 110, 30, 47) and
+  // the researched outfit adds (119, 34, 280, 10, 16) — the file's own TOTALS.
+  let warrior =
+    Content.partyOf [ "Warrior" ] 60 |> List.find (fun e -> e.Name = "Warrior")
+
+  Assert.Equal(239, warrior.Stats.Strength)
+  Assert.Equal(114, warrior.Stats.Agility)
+  Assert.Equal(390, warrior.Stats.Stamina)
+  Assert.Equal(40, warrior.Stats.Intellect)
+  // 6523 from the seventeen pieces plus 228 from 114 Agility; no Devotion Aura in
+  // a warrior-only party.
+  Assert.Equal(6751, warrior.Armor)
+
+[<Fact>]
+let ``the weapon grows with level up to the researched level-60 pick`` () =
+  let roster =
+    [ "Warrior"; "Paladin"; "Priest"; "Druid"; "Mage"; "Warlock"; "Shaman"; "Hunter"; "Rogue" ]
+
+  // One member at a time: `partyOf` fills a five-member party from the roster
+  // order, so a nine-name roster would silently drop the last four classes.
+  let attack name level =
+    Content.partyOf [ name ] level |> List.head |> (fun e -> Option.get e.AutoAttack)
+
+  // Damage per second in thousandths, so the comparison stays in integers.
+  let dps (a: AutoAttack) = (a.Min + a.Max) * 1000 / a.Ticks
+
+  for name in roster do
+    // The hunter's level-1 rung is the calibrated level-24 bow (66-84 at 1.80 s),
+    // stronger than the researched 28-40 bows, so his band rungs dip. That is
+    // pre-existing 24-band data; the level-60 rung is floored against it instead.
+    let from = if name = "Hunter" then 29 else 25
+
+    for level in from..60 do
+      Assert.True(
+        dps (attack name level) >= dps (attack name (level - 1)),
+        sprintf "%s swings weaker at level %d than at %d" name level (level - 1)
+      )
+
+    Assert.True(
+      dps (attack name 60) >= dps (attack name 24),
+      sprintf "%s swings weaker at 60 than at 24" name
+    )
+
+  // The warrior's level-60 pick as researched: 53-100 at 1.60 s.
+  let warrior = attack "Warrior" 60
+  Assert.Equal((53, 100), (warrior.Min, warrior.Max))
+  Assert.Equal(32, int warrior.Ticks)
+
+[<Fact>]
+let ``no class loses a stat on the way from 24 to 60`` () =
+  let roster = [ "Warrior"; "Paladin"; "Priest"; "Druid"; "Mage"; "Warlock"; "Shaman"; "Hunter"; "Rogue" ]
+
+  // One class at a time: a nine-class roster is not a party, and a solo class
+  // brings its own passives at both levels, so the comparison stays like for like.
+  let at level name =
+    Content.partyOf [ name ] level |> List.find (fun e -> e.Name = name)
+
+  for name in roster do
+    for level in 25..60 do
+      let before = at (level - 1) name
+      let after = at level name
+
+      Assert.True(
+        after.Armor >= before.Armor,
+        sprintf "%s armour fell at level %d: %d -> %d" name level before.Armor after.Armor
+      )
+
+      Assert.True(
+        after.Stats.Strength >= before.Stats.Strength
+        && after.Stats.Agility >= before.Stats.Agility
+        && after.Stats.Stamina >= before.Stats.Stamina
+        && after.Stats.Intellect >= before.Stats.Intellect
+        && after.Stats.Spirit >= before.Stats.Spirit,
+        sprintf "%s stats fell at level %d" name level
+      )
+
+      Assert.True(
+        after.MaxHealth >= before.MaxHealth,
+        sprintf "%s health fell at level %d: %d -> %d" name level before.MaxHealth after.MaxHealth
+      )
+
 /// A roster decides the party's passives, which is the whole reason the buffs
 /// stopped being a fixed list.
 [<Fact>]

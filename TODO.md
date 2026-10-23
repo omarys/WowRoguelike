@@ -1,7 +1,7 @@
 # TODO — WowRoguelike
 
-Remaining work, newest first. Numbers `#12/#20/#22/#24` are carried over from
-`docs/HANDOFF.md` §7; do not reuse them for new items.
+Remaining work, newest first. Numbers `#12/#20/#22/#24` are carried over from the
+old handoff; do not reuse them for new items.
 
 ## Story (ink) — just landed, not yet wired to the sim
 
@@ -26,7 +26,7 @@ Remaining work, newest first. Numbers `#12/#20/#22/#24` are carried over from
 - [ ] **Exercise `sim story -i`.** The interactive choice path is untested; only
       auto-play is covered.
 
-## Backlog — carried over from HANDOFF §7
+## Backlog — carried over from the old handoff
 
 - [ ] **#20 Extract a named-field Entity builder.** `Content.hero`/`Content.mob`
       take 8–9 positional args and repeat ~28 identical record fields. Pure
@@ -45,7 +45,7 @@ Remaining work, newest first. Numbers `#12/#20/#22/#24` are carried over from
 - [ ] **Implement `Phase`.** In the glossary with no implementation; the next
       piece before the loop has an ending. Needs decisions before code — what
       drives a transition, how many phases, how it is modelled, which mechanics are
-      new and sourced vs invented. Grill the user (see HANDOFF §8).
+      new and sourced vs invented. Grill the user (see `docs/agents/domain.md` §11).
 
 ## Classes — the roster
 

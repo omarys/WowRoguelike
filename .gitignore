@@ -7,3 +7,6 @@ obj/
 images/Gemini_Generated_Image_tyj66ztyj66ztyj6.jpg
 dist/
 images/
+
+# Python bytecode from the research scripts under scripts/
+__pycache__/

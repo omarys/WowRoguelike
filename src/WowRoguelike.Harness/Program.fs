@@ -198,6 +198,8 @@ let main argv =
       w <- SimTick.step (Bench.autoPilot w) w
       tick <- tick + 1
 
+
+
     let alive = SimState.aliveParty w |> List.map (fun e -> sprintf "%s %d/%d" e.Name e.Health e.MaxHealth)
     let now = SimState.aliveParty w |> List.map (fun e -> e.Pos)
 
@@ -223,6 +225,84 @@ let main argv =
       (party |> List.map (fun p -> sprintf "%d,%d" p.X p.Y) |> String.concat " ")
       (now |> List.map (fun p -> sprintf "%d,%d" p.X p.Y) |> String.concat " ")
 
+    0
+  | "smtrace" :: rest ->
+    // Where the ticks go: mob progress, party health and party resource every
+    // `every` ticks. A wing that wipes and a wing that stalls look nothing alike
+    // here, and the mob-health line says whether the Party's damage is landing.
+    let wing = rest |> List.tryItem 0 |> Option.defaultValue "graveyard"
+
+    let difficulty =
+      match rest |> List.tryItem 1 with
+      | Some "min" -> Content.Minimum
+      | Some "max" -> Content.Maximum
+      | _ -> Content.Median
+
+    let limit = rest |> List.tryItem 2 |> Option.map int |> Option.defaultValue 12000
+    let every = rest |> List.tryItem 3 |> Option.map int |> Option.defaultValue 1000
+    let mutable w = Content.scarletMonasteryAt wing difficulty 1UL
+    let hostiles = w.Entities |> List.filter (fun e -> e.Faction = Hostile) |> List.length
+    let mobHealth = w.Entities |> List.filter (fun e -> e.Faction = Hostile) |> List.sumBy (fun e -> e.MaxHealth)
+    let partyHealth = SimState.aliveParty w |> List.sumBy (fun e -> e.MaxHealth)
+    let partyResource = SimState.aliveParty w |> List.sumBy (fun e -> e.MaxResource)
+    let mutable tick = 0
+
+    let detail = List.contains "v" rest
+
+    let line () =
+      let party = SimState.aliveParty w
+      let mobs = SimState.aliveHostiles w
+
+      printfn
+        "%5d left=%2d mobhp=%3d%% partyhp=%3d%% res=%3d%% alive=%d"
+        tick
+        mobs.Length
+        (if mobHealth = 0 then 0 else (mobs |> List.sumBy (fun e -> e.Health)) * 100 / mobHealth)
+        (if partyHealth = 0 then 0 else (party |> List.sumBy (fun e -> e.Health)) * 100 / partyHealth)
+        (if partyResource = 0 then 0 else (party |> List.sumBy (fun e -> e.Resource)) * 100 / partyResource)
+        party.Length
+
+      if detail then
+        for e in party do
+          printfn
+            "        %-8s at %d,%d hp=%d/%d casts=%b stall=%d goal=%A path=%d"
+            e.Name
+            e.Pos.X
+            e.Pos.Y
+            e.Health
+            e.MaxHealth
+            e.Casting.IsSome
+            (int e.StallTicks)
+            e.Goal
+            e.Path.Length
+
+          match e.Goal with
+          | Some g ->
+            let free = Path.astar w.Grid (fun _ -> false) e.Pos g
+            let taken = Path.astar w.Grid (SimState.claimedByOther w e.Id) e.Pos g
+
+            printfn
+              "        route %d,%d -> %d,%d  free=%A  blocked=%A"
+              e.Pos.X
+              e.Pos.Y
+              g.X
+              g.Y
+              (free.Path.Length, free.Truncated)
+              (taken.Path.Length, taken.Truncated)
+          | None -> printfn "        route none"
+
+        for h in mobs |> List.truncate 6 do
+          printfn "        mob   %-22s at %d,%d hp=%d/%d target=%A" h.Name h.Pos.X h.Pos.Y h.Health h.MaxHealth h.Target
+
+    printfn "%s %A level=%d mobs=%d" wing difficulty (Content.levelOf difficulty (Content.wingOf wing)) hostiles
+    line ()
+
+    while tick < limit && not (SimState.aliveHostiles w |> List.isEmpty) do
+      w <- SimTick.step (Bench.autoPilot w) w
+      tick <- tick + 1
+      if tick % every = 0 then line ()
+
+    line ()
     0
   | "sm" :: rest ->
     let wing = rest |> List.tryItem 0 |> Option.defaultValue "graveyard"

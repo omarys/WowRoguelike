@@ -1,14 +1,36 @@
 # Handoff — WowRoguelike
 
-Repo: `/home/omary/Dev/WowRoguelike`. Written at HEAD `654fc35`.
-**160/160 tests pass, 4m21s** (`dotnet test tests/WowRoguelike.Tests/WowRoguelike.Tests.fsproj`).
+Repo: `/home/omary/Dev/WowRoguelike`. Written at `654fc35`; the reviewed change set
+was committed at `72e15f9` and merged as HEAD `1e49951`, and the level-scale work
+described below is staged on top of it, uncommitted. **169/169 tests pass, ~1m20s**
+(`dotnet test tests/WowRoguelike.Tests/WowRoguelike.Tests.fsproj`), Release build 0
+warnings.
+**The change set is committed but was never reviewed.** `git diff 654fc35..72e15f9`
+is 295 files (+14,894/−705); ~7,000 of those added lines are F# and tests, the rest
+are extracted `Assets/` PNGs and generated maps. It landed as one commit with an
+empty body, so the design log has no record of it — the review is still owed, and
+this file is the brief for it. `images/` is now gitignored; `docs/HANDOFF.md` is
+gone, replaced by this file, and was moved rather than rewritten.
 
-**The working tree is not committed.** 18 tracked files are modified (+5788/−698),
-`docs/HANDOFF.md` is deleted (this file replaces it), and these are untracked:
-`src/WowRoguelike.Core/MapsScarlet.fs`, `tests/WowRoguelike.Tests/snapshots/`,
-`tools/`, `.pi/research/**`, `images/Maps/**`, `images/Tilesets/**`,
-`src/WowRoguelike.Game/Assets/{sprites,tiles}/**`. Nothing here has been reviewed as
-a change set yet — `git diff` is large and is the first thing to read.
+**A second change set is staged and uncommitted on top of that** (HEAD is still the
+`1e49951` merge): the level-scale work — ability ranks for all nine classes, the
+level-24→60 gear curve, weapon rungs up to 60, the `smtrace`
+harness command, two research checking scripts, eight research files, and the doc
+updates. **163/163 tests pass, ~1m40s**; `mise run runs` reads `seeds=120
+cleared=120 wiped=0 unresolved=0 median-ticks=950 min=794 max=1080`, which is this
+file's baseline exactly. `mise run hooks-run` is clean. It is committed on top of `1e49951`, so citing a
+hash here would go stale on the next amend; the amend to `72e15f9`'s empty commit
+message is still owed.
+
+**The Rogue control kit and the party-lead walk described in §8 are not in the
+worktree.** They were written and then discarded before ever being staged:
+reverting a delegate's edits with `git checkout -- .` also throws away every
+unstaged change, and that work was unstaged. §8's Sap / Cheap Shot / Kidney Shot /
+hound / stun-as-mitigation paragraphs are therefore a specification to reimplement,
+not a description of the tree — the mechanics, the numbers and the test names are
+recorded there. The `11480` / `10453` clears quoted in §9 came from that work and
+will not reproduce until it is redone, and the `950 → 960 → 988` median drift no
+longer exists.
 
 Read this file, then the artifacts it points at. Do not re-derive settled
 decisions — each one has a reason that is easy to undo by accident.
@@ -52,7 +74,9 @@ src/WowRoguelike.Core/     ← MUST NOT reference MonoGame. Compile order = depe
   Path.fs          277     A*, Dijkstra, greedy baseline, line of sight
   Dungeon.fs       296     rooms-and-corridors generation, BFS flood fill
   Maps.fs          402     Wailing Caverns rooms extracted from images/Maps
-  MapsScarlet.fs   761     Scarlet Monastery's four wings, same treatment
+  MapsScarlet.fs   761     Scarlet Monastery's four wings. **Generated** by
+                           `tools/extract_sm_maps.py` from the battlemaps in
+                           `images/Maps/ScarletMonastery/*.jpg` — do not hand-edit.
   Content.fs      3328     abilities, rank tables, nine class kits, mobs, World builders
   SimCombat.fs     797     the attack table, armour, resources
   SimState.fs      257     queries, record rebuilds, ability/command resolution
@@ -79,10 +103,11 @@ unexpressible. Every `Aura` case is matched in exactly one place (`module Aura`)
 ```bash
 mise run build     # solution in Release; compiles the ink narrative first
 mise run publish   # dist/ — the game plus Assets/ and MonoGame's native libs
-mise run test      # 160 tests, ~4.5min
+mise run test      # 169 tests, ~1m20s
 mise run runs      # outcome distribution over 120 seeds — THE regression signal
 mise run sim -- smrun cathedral med 16000    # run a wing headless, report survivors
 mise run sim -- sm graveyard min             # place a wing at a band
+mise run sim -- smtrace cathedral med 20000 2000 [v]  # progress samples: mob hp, party hp, resource; v adds routes and mob targets
 mise run bench     # tick cost, search cost, heap vs BCL
 ```
 
@@ -113,12 +138,16 @@ never recompiled commits a narrative the game does not play.
   Unset, any invocation resolves against `/usr/lib64/dotnet` (.NET 8 only) and
   fails with "You must install or update .NET".
 
-**`mise run runs` is a fingerprint.** The last recorded known-good line
-(`cleared=120 wiped=0 unresolved=0 median-ticks=1331 min=1116 max=2248`) predates
-the level-24 rebalance and the nine-class roster, so it is certainly stale.
-**Re-measure it and record the new line** — until that happens the pre-push hook's
-behavioural check is comparing against a fiction. Note it sweeps the hand-authored
-`Content.gully` fixture (`Bench.fs:22`), not a generated dungeon.
+**`mise run runs` is a fingerprint.** Currently:
+`seeds=120 cleared=120 wiped=0 unresolved=0 median-ticks=988 min=794 max=1140`
+(`README.md` §How correctness is checked records 950/794/1080 from `72e15f9`; the
++38 median is the walking fix in §8 and the pre-pull crowd control in §9 item 3 both
+re-applying to the level-24 party). It moved
+from the older `median-ticks=1331 min=1116 max=2248` when the level-24 rebalance and
+the nine-class roster landed — this file predicted that shift, but no commit body
+records which change produced it. Re-measure whenever behaviour
+changes. Note the sweep drives the hand-authored `Content.gully` fixture
+(`Bench.fs:22`), not a generated dungeon, and not a Scarlet wing.
 
 ## 5. Hooks — the only automated check
 
@@ -158,12 +187,17 @@ the `VERIFY` block names which is which.
 | `level24/missing_abilities.md` | Ability parameters that had no home in a class file. |
 | `level24/mobs.md`, `mobs_armour_and_spells.md` | Creature armour and spell data. |
 | `ranks/{warrior,rogue,mage,priest,druid}.md` | Full rank tables, levels 1–60. |
+| `ranks/ranks-{paladin,shaman,hunter,warlock}.md` | Rank tables for the four classes the earlier pass missed, plus armour and `VERIFY` lists. |
 | `wc/mobs.md`, `wc/quests-and-scripts.md` | The 1.12 creature rows and the quest/script chain. |
 | `vanilla-attack-table.md` | Miss/dodge/parry/glance/block/crit by level delta, spell miss, armour. |
 | `level60-kits-at-24.md` | Level-60 kits scaled down to 24 by pool ratio. |
 | `levelscale/README.md` + `dungeon-bands.md` | Per-dungeon minimum/median/maximum bands and the per-level curves. |
-| `levelscale/{warrior-rogue,mage,priest-druid}-ladder.md` | Gear ladders above 24 (28–32, 33–37, 38–40) — researched, not yet wired. |
+| `levelscale/bis-60.md` | **The gear ceiling.** Level-60 pre-raid best-in-slot per class, piece by piece, with gear-only subtotals. What `Sheet.Gear60` encodes. |
+| `level24/base_stats_25_60.md` | Vanilla `player_levelstats` rows 25–60 per class, usable as-is; matches the sim's base table exactly at 40 and 60. |
+| `levelscale/{warrior-rogue,mage,priest-druid}-ladder.md` | Superseded band ladders (28–32, 33–37, 38–40). Kept as evidence; the curve does not read them. |
 | `levelscale/map-assets.md` | Which dungeon maps are usable as art, and the verdicts. |
+| `scripts/rank-diff.py`, `scripts/rank-verify.py` | Cross-check the rank grids in `Content.fs` against `ranks/`; `--verbose` widens to range and cast time. `rank-verify`'s `DEVIATIONS` table lists the deliberate asymmetries. |
+| `scripts/band-totals.py` | Sums a band ladder from `Content.fs` so the gear tables can be checked as numbers; it is what proved the 24→60 growth was flat. |
 
 Warcraft Wiki is the authority. **Classic Era numbers win when sources conflict.**
 
@@ -208,6 +242,65 @@ do not bake a buff into a kit's base stats or it applies twice.
 `PartyAi.decide`; the harness and scripts do (`SimTick.step (PartyAi.decide w)`).
 A "headless run" that forgets this measures a party standing still.
 
+**Gear above 24 is one curve between two anchors, not a ladder of tiers.** The
+researched band tables were replaced by `Sheet.Gear60`: the level-60 pre-raid
+best-in-slot outfit per class, every stat grown from its level-24 value along
+`at24 * (at60/at24)^((level-24)/36)`. Thirty-six is the span between the anchors, so
+60 lands exactly on the research and the log line between is smooth. The level-24
+value is a floor per stat, because the caster outfits *drop* Strength and Agility
+for Intellect. Two consequences worth keeping: the totals at 60 are what
+`bis-60.md` measures (a gear-only subtotal already includes the Agility armour and
+any set bonus), so do not add the set's Agility to armour a second time; and the
+Paladin's and Shaman's researched level-60 pick is a fast caster one-hander that
+would swing weaker than their level-40 weapon, so those two rungs carry the 40 rung's
+DPS at the researched speed.
+
+**`Content.partyOf` fills a five-member party in roster order.** A nine-name roster
+silently drops Warlock, Shaman, Hunter and Rogue — which is how a level-scaling test
+came to check five classes while naming nine. Ask for one class at a time
+(`partyOf [ name ] level`) when the test is about a class.
+
+**`HealOverTime` is per second** (`Domain.fs:329`), not per tick and not per
+three-second tick. Rejuvenation's lower ranks were transcribed as per-tick and ran at
+2/4/7/11 instead of 3/5/10/15 until `scripts/rank-verify.py` resolved the column.
+Compare against the research with the scripts, not by eye — the same script found
+Fireball r3's cast time, Molten Blast r1's cost, Execute's whole ladder and the
+druid/shaman rank counts.
+
+**The hunter's researched weapon ladder is not monotonic.** His level-1 rung is the
+calibrated level-24 bow (66–84 @ 1.80 s, 41.7 DPS) and the researched 28–40 bows are
+17.9–22.8 DPS, so he loses 57% of his weapon DPS at level 28. That is pre-existing
+24-band data, left alone; the level-60 rung is floored against the 24 rung instead
+and the weapon-growth test starts at 29.
+
+**Walking was made unstuck in two places, and one stall remains.** `SimState.stepToward`
+passed `claimedByOther` into A\*'s cost function, so every tile another entity held
+read as a wall; when that left no route at all the mover backed off, retried and
+failed forever. Two changes landed:
+
+- `stepToward` now plans against claims first (unchanged behaviour) and may ignore
+  them **only when the mover has no free neighbour at all** (`sealedIn`). Measured:
+  letting it ignore claims whenever the claim-aware search came back empty had the
+  level-30 party dead by tick 6000 with 34 mobs left — it walks straight through a
+  pack and pulls half the wing.
+- `PartyAi`'s walking block keyed off `tank`, so losing the Tank withdrew every move
+  order *and* the stand-aside rule; four survivors stood sealed around a member
+  whose first step was blocked, byte-identical from tick 15000 to 20000. Movement
+  now falls back to `lead = tank |> Option.orElse (actors |> List.tryHead)`; the
+  tactical reads still use `tank`. Two regression tests cover it (`a party with no
+  tank still gets walking orders`, and the approach ring test was dropped with the
+  `approachTile` widening).
+
+**The remaining stall is `approachTile` returning `None`.** When the whole ring
+around a target is claimed, `approachTile` gives up and the caller falls back to the
+target's own tile — a goal A\* can never reach, since the target stands on it. Widening
+it to a second ring *was* implemented and *was* reverted: with it, `the scripted
+party can clear a generated dungeon` wiped (`Expected: EncounterCleared / Actual:
+PartyWiped`). Measured in `smtrace graveyard max`, the world is now frozen at 2
+survivors and 20 mobs from tick 12500 on. **That is the next pathing task and it needs
+a different shape than a wider ring** — a re-target or a per-entity "unreachable"
+memory, not more ring.
+
 **The Wailing Caverns ending keys on Mutanus dying, not on an item.** The four
 Fanglord deaths are the only gate (they flip the Disciple's dialogue), and killing
 Mutanus wakes Naralex. Three premises from the original brief were **false** and
@@ -223,27 +316,123 @@ both because a clear is not currently true and because the full run is too slow.
 
 ## 9. Open work, in priority order
 
-1. **Wailing Caverns does not hold up as a clearable dungeon.** At the level-24
-   band the party wipes on two of three seeds, killing 28–54 of 111 hostiles in
-   9000 ticks. The roster is now built from the real 1.12 creature data
-   (`.pi/research/wc/mobs.md`) and the quest chain is in, so the remaining work is
-   balance, not content. The party stops improving at level 24 because the gear
-   sets stop there — see (2), which is the real cause.
-2. **Gear ladders above level 24.** Researched and waiting in
-   `.pi/research/levelscale/*-ladder.md` (28–32, 33–37, 38–40). Weapon damage
-   first. This is what makes the higher Scarlet Monastery bands winnable, and it is
-   the single largest balance lever in the project.
-3. **The class roster has no UI.** `Content.defaultRoster` is still a constant;
+1. **Mutual Party blocking is a second, distinct freeze — diagnosed, not fixed.**
+   `smtrace graveyard min 12000 3000 v` at tick 12000: party at (15-17, 181-184),
+   three of five holding `goal=Some (8,172)` with `path=0` and `stall` 3-20, party at
+   **100% health and 99% mana**, 25 hostiles alive at full health with
+   `target=None`, and `route 17,181 -> 8,172 free=(22, false)` — a 22-step route
+   exists, the walker just cannot use it. Five abreast in a corridor claim every
+   tile of it at once; because none of them steps, none ever frees a tile, and the
+   claim-aware A* fails while the claim-free one succeeds. This is *not* the
+   `approachTile` bug above: the goal is reachable.
+   Tried and reverted: making a stationary **Party** member's claim soft for Party
+   movers (`claimedByOther` in `SimState.fs`) unfroze the party but broke `no two
+   living entities share a tile` — soft claims let a walker step *onto* an ally.
+   The likely shape is a retry in `stepToward`: when the claim-aware search fails,
+   re-plan with stationary allies passable and take a first step only if that tile
+   is free under the hard rule. Do not soften `claimedByOther` itself.
+
+2. **The `approachTile` stall — the worst bug in the tree.** See §8. A widening was
+tried and reverted because it broke a clear. The next shape should be a no-route
+re-target: when `stepToward` cannot plan at all, clear the goal so `PartyAi` picks a
+different hostile, and stop `approachTile`'s `None` from becoming "walk to the tile
+the target is standing on". Check `mise run runs` and the generated-dungeon test
+immediately; both moved under the last attempt.
+3. **Scarlet Monastery wings need a full matrix before any tuning.** One seed per
+   cell, 16000-tick budget, via `smtrace <wing> <min|med|max> 16000 16000`:
+
+   | wing | levels (min/med/max) | minimum | median | maximum |
+   |---|---|---|---|---|
+   | graveyard | 30/33/34 | 1 left at 16000, party 98%, 5 alive (near clear) | — | frozen from tick 12500 at 20 left, 2 alive |
+   | library | 33/36/37 | — | — | 18 left at 16000, party 74%, 4 alive (slow, not dying) |
+   | armory | 37/39/40 | — | — | — |
+   | cathedral | 38/41/42 | — | wipe | — |
+
+   The `—` cells were not re-measured after the walking fix and the earlier table
+   (clear 16174 / wipe / frozen…) is from a different build; treat this as a partial
+   matrix, not a verdict. What the sampled cells say: the party is **slow, not
+   fragile** (74–98% health left at 16000 in two of them), so pace and trash density
+   are the levers — 43 hostiles in one wing at ~11 ms/tick is a long fight. The
+   earlier "12000-tick budget" verdicts were artifacts.
+4. **The pull protocol is specified by the user and only its first line exists.**
+   The intended shape (user's words, condensed): *pre-combat CC that does not start
+   combat (Rogue's Sap) first; then a ranged member opens on the priority enemy from
+   distance — wand, bow or spell — and the group runs to a point that breaks line of
+   sight; as the group runs in, more CC (Polymorph, Entangling Roots, Charm) minimises
+   active enemies; once far enough from other packs the Warrior charges the priority
+   target and holds the non-CC'd mobs with Taunt while the group burns the priority
+   target from a safe distance. With a ranger, the ranger opens with a ranged attack
+   plus a freezing trap, then as above.*
+
+   In the engine already: `Path.lineOfSight` (spell range and mob aggro both use it),
+   `Polymorph` in the Mage kit, `EntanglingRoots` in the Druid kit, `Gouge` (melee
+   4s stun) for the Rogue, plus `Taunt`, `Charge`, `Stun` and `Sleep`;
+   `SimTick.fs:353` makes aggro proximity + line of sight. **Not in the engine: Sap,
+   any freezing trap, an out-of-combat-only cast rule, a pull point, or a
+   priority-target ranking** (the party focuses by armour depth today).
+
+   Shipped this session: `PartyAi.prePull` — while no hostile holds a target, the
+   first able caster takes one enemy out of the fight, choosing by *preference*:
+   **Sap first**, then Polymorph / Entangling Roots / Sleep, then Gouge last (they
+   all reach the same target; Sap is the only one that starts nothing and costs a
+   minute of cooldown, so it must not be spent where a short cooldown would do).
+   `the rogue opens with Sap rather than Gouge` and `the party opens an unengaged
+   pull with crowd control` cover it.
+
+   Rogue kit as of this pass: **Sap** (3 tiles, 65 energy, 30 s incapacitate,
+   **no cooldown** — being out of combat only *is* the limiter, so a second Sap can
+   never happen inside a fight), **Gouge** re-modelled as a
+   **`Sleep` incapacitate that any damage breaks** rather than a `Stun`, **Cheap
+   Shot** (level 26, 4 s stun, 60 energy) and **Kidney Shot** (level 30, 4 s stun,
+   20 s cooldown) so the Rogue can stun-lock a caster. Kidney Shot's vanilla
+   combo-point scaling is a recorded `shortcut:` — `Effect` cannot express a
+   duration that grows with combo points. Both land at 26/30, so the level-24
+   anchor is untouched (and the `runs` sweep uses the default party, which has no
+   Rogue, which is why the fingerprint stayed at `median=988`).
+
+   **Stealth is not modelled, by design.** The Rogue counts as stealthed for the
+   whole pre-pull window, and only a hound sees through it — Scarlet's `Scarlet
+   Tracking Hound` (and `Houndmaster Loksey`, matched by name) within 6 tiles
+   cancels Sap (`a hound sees through the rogue's stealth and costs the Sap`).
+   That stands in for the Improved Stealth talent and is why there is no facing
+   check and no Distract.
+
+   **Stuns are mitigation, not only interrupts.** `Cheap Shot` / `Kidney Shot` now
+   go on the healthiest engaged enemy that can still act, gated on having 45 energy
+   left so the Rogue still strikes (`the rogue stuns an engaged enemy as
+   mitigation`). That is the change that moved a wing: **`library max` now clears at
+   tick 11480 with five alive at 99%**, from 16 hostiles left at 74% before the
+   stuns. `graveyard max` turned from a freeze into a wipe (13 left), so the two
+   cells moved in opposite directions and the win rate should be sampled, not
+   asserted from two runs.
+
+   Measured: a ranged opener was tried
+   *without* the tank pickup and made `library max` wipe — the casters pull while
+   the Warrior is still walking; **do not add the ranged pull before the pull point
+   and the pickup order exist.** The user's "wait for cooldowns and regenerate
+   between pulls" tactic is likewise not implemented: the party has no notion of
+   pausing between packs, so every pull starts on whatever cooldowns happen to be
+   up. That is the next real piece of the protocol.
+
+   **An opener must never be picked as an attack.** The ranged path's `shots` list
+   originally took every `Foe` ability with `Range > 1`, so the Rogue fired Sap as
+   a zero-damage "shot" the moment it was learned. `shots` now requires
+   `damageOf a > 0`; add any future opener with that in mind.
+
+5. **Wailing Caverns at level 24 does not clear** (wipes on two of three seeds,
+   killing 28–54 of 111 hostiles in 9000 ticks). Its roster and quest chain are real;
+   the gap is balance. Unchanged by the level-scale work — level 24 is the anchor.
+6. **The class roster has no UI.** `Content.defaultRoster` is still a constant;
    nine kits exist and five get seated. `Content.partyOf`/`withRoster` are ready
    for a picker.
-4. **Slice 4: boss phases.** `Phase` is in the glossary with no implementation.
+7. **Slice 4: boss phases.** `Phase` is in the glossary with no implementation.
    Five open design questions are listed in `TODO.md` §Slice 4 — put them to the
    user rather than guessing. `Mutanus the Devourer` is deliberately not stood in
    for: his fight is a summoning event with no sourced numbers.
-5. **Mobs do not patrol.** The tank's pull-veto (`packGap`) is an approximation of
+8. **Mobs do not patrol.** The tank's pull-veto (`packGap`) is an approximation of
    avoiding patrol paths, not a patrol model. If patrols arrive, that heuristic
    should be revisited rather than layered on.
-6. Smaller, from `TODO.md`: extract a named-field `Entity` builder (its trigger — a
+9. Smaller, from `TODO.md`: extract a named-field `Entity` builder (its trigger — a
    second map — has arrived); expose replay and make pause/step edge-triggered;
    add the BSP generator.
 
@@ -276,19 +465,31 @@ Call the **Skill** tool for these, in this order:
 2. **`domain-modeling`** — slice 4 introduces `Phase` vocabulary; update
    `CONTEXT.md` inline as terms resolve, and offer an ADR only if the decision is
    hard to reverse, surprising without context, and a real trade-off.
-3. **`code-review`** — before anything is committed. **~5.8k uncommitted lines**
-   across 18 tracked files plus new ones have never been reviewed, and the last
-   review found a genuine P1 (a move order could path an entity into a wall) that
-   all 51 then-existing tests missed. Run Standards and Spec as parallel sub-agents.
-4. **`ponytail`** — already active as a mode; read it if the session drifts toward
-   over-building.
+3. **`code-review`** — before anything is committed. **~7k uncommitted lines**
+   across 30+ tracked files have never been reviewed, and the last review found a
+   genuine P1 (a move order could path an entity into a wall) that all 51
+   then-existing tests missed. Run Standards and Spec as parallel sub-agents.
+   The level-scale half of the change set has been checked by two research scripts
+   and 169 tests; the gear curve and the rank tables have not been read by a
+   reviewer.
+4. **`diagnosing-bugs`** — for the pathing deadlock in §8/§9. It is a
+   reproduce-then-fix job: `smtrace <wing> <band> 20000 2000 v` already prints the
+   route, the goal, the mob targets and the stall flag, so the reproduction exists
+   before any code changes.
+5. **`ponytail`** — already active as a mode; read it if the session drifts toward
+   over-building. Note the harness grew a `smtrace` command and two Python scripts
+   this session; resist adding more tooling where an existing command would answer
+   the question.
 
 If the task is a hard bug or a perf regression: **`diagnosing-bugs`**. If it is a
 large delegated workflow rather than interactive work: **`pi-subagents`** — and note
 that child model attestation has failed here before (`model_verification_failed`,
 expected `opencode-go/glm-5.3-flash:high`, observed `deepseek-v4.1-flash`), so check
 before trusting a delegated result. Subagent launches are refused when the source
-checkout is dirty, which it currently is.
+checkout is dirty, which it currently is. A worker given a 30-minute limit died at
+the limit here after writing its file — check the activity log (`~/.pi/agent/
+delegate-runs/<runId>/activity.jsonl`) and verify the file on disk (a clean
+`dotnet build`) instead of re-dispatching it blind.
 
 ## 12. Deliberately left alone
 

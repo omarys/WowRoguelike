@@ -29,7 +29,9 @@ namespace WowRoguelike.Core
 ///     Naralex and Mutanus the Devourer: pacing-only stat blocks. Mutanus's
 ///     real fight is a summoning event with no sourced numbers.
 ///     Wrath, Moonfire, Smite, Shadow Word: Pain, Charge, Disarm, Execute and
-///     Battle Shout: pacing-only numbers and effects, all placeholders.
+///     Battle Shout: pacing-only effects. Their rank ladders and per-rank
+///     numbers are sourced from `.pi/research/levelscale/`, but the effects
+///     themselves (rage scaling, snares, fleeing) are not modelled.
 ///
 ///   Our own invention, deliberately: the five Party classes (Warrior, Rogue,
 ///   Mage, Priest, Druid), their stat spreads, and every ability in this file.
@@ -207,368 +209,660 @@ module Content =
 
   // -- Party abilities ------------------------------------------------------
 
-  // Every party ability below is the highest rank a level-24 character can
-  // train, with its real mana/rage/energy cost, cast time and tooltip numbers.
-  // Sources: per-spell Classic DB rows collected in .pi/research/level24/.
+  // Every party ability below is a rank ladder from the researched tables in
+  // `.pi/research/levelscale/`, and a character resolves the newest rank at or
+  // below its level (`AbilityDef.at`). The rank `rank24` resolves is the one the
+  // level-24 party has always fought with, so that gate does not move; the class
+  // kits ask for the same number.
 
-  let taunt =
+  /// The rank a character of the given level trains, as the flat record a kit
+  /// passes to `heroStats`.
+  let private rankAt (level: int) (ability: AbilityDef) = (AbilityDef.at level ability).Value
+
+  /// The rank a level-24 character has trained — what the class kits carry.
+  let private rank24 = rankAt 24
+
+  /// Taunt (level 10): 10 s cooldown, one rank at every level. The table has it
+  /// free and at 1 tile; the 10 rage and the 8 tiles are the file's and stay,
+  /// because they are what a party of this level pulls with.
+  let tauntRanks: AbilityDef =
     { Name = "Taunt"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 10.0
-      ResourceCost = 10
-      Interruptible = false
-      Range = 8
+      Resource = Rage
+      Stance = None
       TargetKind = Foe
-      Effects = [ Taunt ] }
+      Interruptible = false
+      Ranks =
+        [ { Level = 10
+            Cost = 10
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 10.0
+            Range = 8
+            Effects = [ Taunt ] } ] }
 
-  /// Rank 4: the swing plus 44 damage, for 15 rage. The cooldown is the weapon's
-  /// own 2.70 s, because Heroic Strike replaces the next swing rather than
-  /// adding one.
-  let heroicStrike =
+  let taunt = rank24 tauntRanks
+
+  /// Heroic Strike ranks 1-6 (levels 1-40): the swing plus a flat step that grows
+  /// 11 → 80. The cooldown is the weapon's own 2.70 s, because Heroic Strike
+  /// replaces the next swing rather than adding one, and the table's extra threat
+  /// (+20 → +118) is left to the damage alone, as it always has been.
+  let heroicStrikeRanks: AbilityDef =
     { Name = "Heroic Strike"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 2.7
-      ResourceCost = 15
-      Interruptible = false
-      Range = 1
+      Resource = Rage
+      Stance = None
       TargetKind = Foe
-      Effects = [ WeaponDamage(10000, 44) ] }
+      Interruptible = false
+      Ranks =
+        [ for level, bonus in [ 1, 11; 8, 21; 16, 32; 24, 44; 32, 58; 40, 80 ] do
+            { Level = level
+              Cost = 15
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 2.7
+              Range = 1
+              Effects = [ WeaponDamage(10000, bonus) ] } ] }
 
-  /// Rank 3: 135-158 for 75 mana.
-  let lesserHeal =
+  let heroicStrike = rank24 heroicStrikeRanks
+
+  /// Lesser Heal ranks 1-3 (levels 1, 4, 10): rank 3 is the last rank in the game.
+  /// It keeps the file's 135-158 — the 1.12 pair, against the table's 1.15.9
+  /// 143-165 — because it is the heal a level-24 Priest still carries.
+  let lesserHealRanks: AbilityDef =
     { Name = "Lesser Heal"
-      CastTicks = secTicks 2.5
-      CooldownTicks = ticks 0
-      ResourceCost = 75
-      Interruptible = true
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Ally
-      Effects = [ Heal(135, 158) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, cost, cast, lo, hi in
+            [ 1, 30, 1.5, 47, 58; 4, 45, 2.0, 76, 91; 10, 75, 2.5, 135, 158 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks cast
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects = [ Heal(lo, hi) ] } ] }
 
-  /// Priest rank 2: 429-492 for 205 mana, plus the set's +24 healing.
-  let heal =
+  let lesserHeal = rank24 lesserHealRanks
+
+  /// Heal ranks 1-4 (levels 16-34), 3.0 s on every rank. Rank 2 keeps the file's
+  /// 453-516 — the 1.12 429-492 plus the set's +24 healing, against the table's
+  /// 445-507 — because it is the rank the ladder carries at 24.
+  let healRanks: AbilityDef =
     { Name = "Heal"
-      CastTicks = secTicks 3.0
-      CooldownTicks = ticks 0
-      ResourceCost = 205
-      Interruptible = true
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Ally
-      Effects = [ Heal(453, 516) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, cost, lo, hi in
+            [ 16, 155, 307, 353; 22, 205, 453, 516; 28, 255, 586, 662; 34, 305, 734, 827 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks 3.0
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects = [ Heal(lo, hi) ] } ] }
 
-  /// Priest rank 3: 175 over 15 s for 105 mana, plus the set's +24 healing.
-  let renew =
+  let heal = rank24 healRanks
+
+  /// Renew ranks 1-6 (levels 8-38): 15 s / 5 ticks at every rank, so the ladder is
+  /// 3 → 27 a second. Rank 3 keeps the file's 12 a second — the table's 175 over
+  /// 15 s rounds to 11.7, and the file carries the set's +24 healing — because it
+  /// is the rank a level-24 Priest casts.
+  let renewRanks: AbilityDef =
     { Name = "Renew"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 5.0
-      ResourceCost = 105
-      Interruptible = false
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Ally
-      Effects = [ HealOverTime(secTicks 15.0, 12) ] }
-
-  let fireball =
-    { Name = "Fireball"
-      CastTicks = secTicks 3.5
-      CooldownTicks = ticks 0
-      ResourceCost = 140
-      Interruptible = true
-      Range = 8
-      TargetKind = Foe
-      // Rank 5: 146-195 plus 20 over 8 s.
-      Effects = [ SpellDamage(146, 195); DamageOverTime(secTicks 8.0, 3) ] }
-
-  let arcaneShot =
-    { Name = "Arcane Shot"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 6.0
-      // Arcane Shot rank 3 (level 20): 33 Arcane for 50 mana. Magic, so it is not
-      // armour-mitigated — the old record had it as 90 mana and physical `Damage`.
-      ResourceCost = 50
       Interruptible = false
-      Range = 8
+      Ranks =
+        [ for level, cost, perTick in
+            [ 8, 30, 3; 14, 65, 7; 20, 105, 12; 26, 140, 16; 32, 170, 21; 38, 205, 27 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 5.0
+              Range = 8
+              Effects = [ HealOverTime(secTicks 15.0, perTick) ] } ] }
+
+  let renew = rank24 renewRanks
+
+  /// Fireball ranks 1-7 (levels 1-36): the cast climbs 1.5 → 3.5 s, and the burn
+  /// runs 4 → 8 s behind it. Rank 5 keeps the file's 146-195 up front and 3 a
+  /// second for the burn (24 in total against the table's 20); the 8 tiles are
+  /// the file's for the table's 7.
+  let fireballRanks: AbilityDef =
+    { Name = "Fireball"
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ SpellDamage(33, 33) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, cost, cast, lo, hi, duration, perTick in
+            [ 1, 30, 1.5, 16, 25, 4.0, 1
+              6, 45, 2.0, 34, 49, 6.0, 1
+              12, 65, 2.5, 57, 77, 6.0, 1
+              18, 95, 3.0, 89, 122, 8.0, 2
+              24, 140, 3.5, 146, 195, 8.0, 3
+              30, 185, 3.5, 207, 274, 8.0, 4
+              36, 220, 3.5, 264, 345, 8.0, 4 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks cast
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects =
+                [ SpellDamage(lo, hi); DamageOverTime(secTicks duration, perTick) ] } ] }
+
+  let fireball = rank24 fireballRanks
+
+  /// Arcane Shot ranks 1-5 (levels 6-36): 33 Arcane for 50 mana at rank 3, instant
+  /// on a 6 s cooldown. Magic, so it is not armour-mitigated — the old record had
+  /// it as 90 mana and physical `Damage` — and there is no weapon component.
+  let arcaneShotRanks: AbilityDef =
+    { Name = "Arcane Shot"
+      Resource = Mana
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ for level, cost, damage in
+            [ 6, 25, 13; 12, 35, 21; 20, 50, 33; 28, 80, 59; 36, 105, 83 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 6.0
+              Range = 8
+              Effects = [ SpellDamage(damage, damage) ] } ] }
+
+  let arcaneShot = rank24 arcaneShotRanks
 
   // -- Paladin --------------------------------------------------------------
-  // A level-24 paladin's kit. Like the Priest, Mage, Druid and Warrior these
-  // are single-rank records carrying the rank a level-24 paladin has trained;
-  // only the Rogue's abilities downrank with level. Ranges follow the codebase's
-  // 40-yd-is-8-tiles convention rather than WoW's yards.
+  // A paladin's kit, laddered like every other class's. Ranges keep the
+  // codebase's 40-yd-is-8-tiles convention instead of the tables' 5-yd tiles; a
+  // range does not vary by rank, so one number stands for a whole ladder.
 
-  /// Holy Light rank 4 (level 22): 310-357 on 1.12, 322-368 on the 1.15.9 client
-  /// this content otherwise follows. 190 mana, 2.5 s cast, 40 yd.
-  let holyLight =
+  /// Holy Light ranks 1-6 (levels 1-38): the 1.15.9 client's heals, which is the
+  /// edition this content already followed (1.12 is 39-47 … 698-780).
+  let holyLightRanks: AbilityDef =
     { Name = "Holy Light"
-      CastTicks = secTicks 2.5
-      CooldownTicks = ticks 0
-      ResourceCost = 190
-      Interruptible = true
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Ally
-      Effects = [ Heal(322, 368) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, cost, lo, hi in
+            [ 1, 35, 42, 51
+              6, 60, 81, 96
+              14, 110, 167, 196
+              22, 190, 322, 368
+              30, 275, 506, 569
+              38, 365, 717, 799 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks 2.5
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects = [ Heal(lo, hi) ] } ] }
 
-  /// Flash of Light rank 1 (level 20): 62-73 on 1.12, 67-77 on 1.15.9. The
-  /// efficient heal — 1.77-2.09 healing per mana against Holy Light's 1.63-1.88.
-  let flashOfLight =
+  let holyLight = rank24 holyLightRanks
+
+  /// Flash of Light ranks 1-3 (levels 20-34): the efficient heal — 1.9-2.2
+  /// healing per mana against Holy Light's 1.6-2.0 at the same rank.
+  let flashOfLightRanks: AbilityDef =
     { Name = "Flash of Light"
-      CastTicks = secTicks 1.5
-      CooldownTicks = ticks 0
-      ResourceCost = 35
-      Interruptible = true
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Ally
-      Effects = [ Heal(67, 77) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, cost, lo, hi in
+            [ 20, 35, 67, 77; 26, 50, 102, 117; 34, 70, 153, 171 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks 1.5
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects = [ Heal(lo, hi) ] } ] }
 
-  /// Judgement rank 1 (level 4) with Seal of Righteousness rank 3 up: 53-57 Holy
-  /// on a 10 s cooldown for 6% of base mana. Holy damage, so unmitigated.
+  let flashOfLight = rank24 flashOfLightRanks
+
+  /// Judgement: one rank for the whole game (level 4), and no damage of its own —
+  /// it unleashes the active Seal. With no seals modelled it stays the Seal of
+  /// Righteousness rank-3 judge, 53-57 Holy, for 31 mana. The table puts it at
+  /// 2 tiles for 6% of base mana; both are the file's approximations and stay.
   ///
   /// shortcut: the seal itself is not modelled, so Judgement is a plain Holy
   /// nuke rather than something that spends a seal. Add seals if the paladin's
   /// swing-by-swing damage ever matters.
-  let judgement =
+  let judgementRanks: AbilityDef =
     { Name = "Judgement"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 10.0
-      ResourceCost = 31
-      Interruptible = false
-      Range = 1
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ SpellDamage(53, 57) ] }
+      Interruptible = false
+      Ranks =
+        [ { Level = 4
+            Cost = 31
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 10.0
+            Range = 1
+            Effects = [ SpellDamage(53, 57) ] } ] }
 
-  /// Hammer of Justice rank 2 (level 24): a 4 s stun on a 1 min cooldown. The
-  /// paladin's interrupt and peel. Distinct from the mobs' `hammerOfJustice`
-  /// below, which is the NPC spell 853 — a 3 s stun for a third of the mana.
-  let paladinHammerOfJustice =
+  let judgement = rank24 judgementRanks
+
+  /// Hammer of Justice ranks 1-3 (levels 8, 24, 40): the stun grows 3 → 5 s on a
+  /// 1 min cooldown. The paladin's interrupt and peel. Distinct from the mobs'
+  /// `hammerOfJustice` below, which is the NPC spell 853 — a 3 s stun for a third
+  /// of the mana. The table's 2 tiles lose to the file's 1.
+  let paladinHammerOfJusticeRanks: AbilityDef =
     { Name = "Hammer of Justice"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 60.0
-      ResourceCost = 50
-      Interruptible = false
-      Range = 1
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ Stun(secTicks 4.0) ] }
+      Interruptible = false
+      Ranks =
+        [ for level, cost, stun in [ 8, 30, 3.0; 24, 50, 4.0; 40, 75, 5.0 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 60.0
+              Range = 1
+              Effects = [ Stun(secTicks stun) ] } ] }
 
-  /// Divine Protection rank 2 (level 18): 8 s of physical and spell immunity for
-  /// 35 mana on a 5 min cooldown. The sim has no "cannot act" state, so the
-  /// paladin keeps fighting through it, which makes it strictly stronger here
-  /// than in WoW.
+  let paladinHammerOfJustice = rank24 paladinHammerOfJusticeRanks
+
+  /// Divine Protection ranks 1-2 (levels 6, 18): 6 then 8 s of physical and spell
+  /// immunity for 15 then 35 mana on a 5 min cooldown. The sim has no "cannot
+  /// act" state, so the paladin keeps fighting through it, which makes it
+  /// strictly stronger here than in WoW.
   /// shortcut: immunity without the cannot-act penalty, add the penalty if the
   /// paladin's survivability ever decides a fight on its own.
-  let divineProtection =
+  let divineProtectionRanks: AbilityDef =
     { Name = "Divine Protection"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 300.0
-      ResourceCost = 35
-      Interruptible = false
-      Range = 0
+      Resource = Mana
+      Stance = None
       TargetKind = Self
-      Effects = [ ReducesDamage(secTicks 8.0, 10000) ] }
+      Interruptible = false
+      Ranks =
+        [ for level, cost, duration in [ 6, 15, 6.0; 18, 35, 8.0 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 300.0
+              Range = 0
+              Effects = [ ReducesDamage(secTicks duration, 10000) ] } ] }
+
+  let divineProtection = rank24 divineProtectionRanks
 
   // -- Warlock --------------------------------------------------------------
-  // A level-24 Affliction warlock's kit. Values are 1.12 (classicdb), the same
-  // lineage as the rest of the party, not the ~7 % hotter wowcalc tooltips.
+  // An Affliction warlock's kit. The ladder keeps the file's 1.12-trained-at-level
+  // values at the rank a level-24 warlock carries and takes the tables' 1.15.9
+  // cap values for the other ranks, which is the split the research records; the
+  // per-rank mana, cast times and durations are the tables' either way.
 
-  /// Shadow Bolt rank 4 (level 20): 86-99 Shadow, 110 mana, 3.0 s cast, 30 yd.
-  /// The only spell the +30 shadow damage on the set amplifies per cast.
-  let shadowBolt =
+  /// Shadow Bolt ranks 1-6 (levels 1-36). Rank 4's 86-99 is the 1.12 base the
+  /// file has always carried (the table's 1.15.9 cap is 92-104), so it stays and
+  /// the ranks around it keep the ladder monotone. The only spell the +30 shadow
+  /// damage on the set amplifies per cast.
+  let shadowBoltRanks: AbilityDef =
     { Name = "Shadow Bolt"
-      CastTicks = secTicks 3.0
-      CooldownTicks = ticks 0
-      ResourceCost = 110
-      Interruptible = true
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ SpellDamage(86, 99) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, cost, cast, lo, hi in
+            [ 1, 25, 1.7, 13, 17
+              6, 40, 2.2, 26, 32
+              12, 70, 2.8, 52, 60
+              20, 110, 3.0, 86, 99
+              28, 160, 3.0, 150, 170
+              36, 210, 3.0, 213, 239 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks cast
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects = [ SpellDamage(lo, hi) ] } ] }
 
-  /// Corruption rank 3 (level 24): 222 Shadow over 18 s, 100 mana. A 2.0 s cast
-  /// in vanilla — Improved Corruption is what makes it instant, and a level-24
-  /// warlock cannot afford 5/5 in it. Ticks land 37 every 3 s, so 12 a second.
-  let corruption =
+  let shadowBolt = rank24 shadowBoltRanks
+
+  /// Corruption ranks 1-4: 40, 90, 222 and 324 Shadow over a duration that grows
+  /// 12 → 15 → 18 s. A 2.0 s cast in vanilla on every rank — Improved Corruption
+  /// is a talent, and no warlock here has it. Rank 3's 37 every 3 s is 12 a
+  /// second, which is the file's number (the table's 222 is 12.3 a second).
+  let corruptionRanks: AbilityDef =
     { Name = "Corruption"
-      CastTicks = secTicks 2.0
-      CooldownTicks = ticks 0
-      ResourceCost = 100
-      Interruptible = true
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ DamageOverTime(secTicks 18.0, 12) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, cost, duration, perTick in
+            [ 4, 35, 12.0, 3; 14, 55, 15.0, 6; 24, 100, 18.0, 12; 34, 160, 18.0, 18 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks 2.0
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects = [ DamageOverTime(secTicks duration, perTick) ] } ] }
 
-  /// Curse of Agony rank 2 (level 18): 180 Shadow over 24 s, instant, 50 mana.
-  /// Escalating in WoW; flat here, at the 7.5-a-second average.
+  let corruption = rank24 corruptionRanks
+
+  /// Curse of Agony ranks 1-4: 24 s, instant, escalating in WoW. Flat here at the
+  /// per-second average: 4 / 7 / 14 / 21, where the table's totals are 84 / 180 /
+  /// 324 / 504. Rank 2's 7 a second (168) is the file's number; the table's 7.5
+  /// rounds to it.
   /// shortcut: every damage-over-time shares one `Corrupted` aura, so Corruption
   /// and Curse of Agony refresh each other instead of stacking. Split the aura
   /// by source if the warlock ever needs both on one target.
-  let curseOfAgony =
+  let curseOfAgonyRanks: AbilityDef =
     { Name = "Curse of Agony"
-      CastTicks = ticks 0
-      CooldownTicks = ticks 0
-      ResourceCost = 50
+      Resource = Mana
+      Stance = None
+      TargetKind = Foe
       Interruptible = false
-      Range = 8
-      TargetKind = Foe
-      Effects = [ DamageOverTime(secTicks 24.0, 7) ] }
+      Ranks =
+        [ for level, cost, perTick in
+            [ 8, 25, 4; 18, 50, 7; 28, 90, 14; 38, 130, 21 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = ticks 0
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects = [ DamageOverTime(secTicks 24.0, perTick) ] } ] }
 
-  /// Immolate rank 3 (level 20): 45 Fire up front and 90 more over 15 s, 90 mana,
-  /// 2.0 s cast. Fire, so the shadow damage on the gear does nothing for it.
-  let warlockImmolate =
+  let curseOfAgony = rank24 curseOfAgonyRanks
+
+  /// Immolate ranks 1-5: a Fire hit up front and 15 s of burn on every rank. Rank
+  /// 3's 45 up front is the 1.12 base (the table's cap is 52) and stays; the 90
+  /// over 15 s is 6 a second, which is the same on both.
+  let warlockImmolateRanks: AbilityDef =
     { Name = "Immolate"
-      CastTicks = secTicks 2.0
-      CooldownTicks = ticks 0
-      ResourceCost = 90
-      Interruptible = true
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ SpellDamage(45, 45); DamageOverTime(secTicks 15.0, 6) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, cost, direct, perTick in
+            [ 1, 25, 10, 1
+              10, 45, 23, 3
+              20, 90, 45, 6
+              30, 155, 100, 11
+              40, 220, 147, 17 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks 2.0
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects =
+                [ SpellDamage(direct, direct); DamageOverTime(secTicks 15.0, perTick) ] } ] }
 
-  /// Fear rank 1 (level 8): 1.5 s cast, 15 % of base mana, 20 yd. The target
-  /// stops acting for up to 10 s. The sim has no fleeing state, so this is a
-  /// `Sleep` — the mob stands still and takes it, which is weaker than WoW's
-  /// fear only in that it cannot be chased into another pack.
+  let warlockImmolate = rank24 warlockImmolateRanks
+
+  /// Fear ranks 1-2 (levels 8 and 32): only the duration changes, 10 then 15 s.
+  /// The target stops acting. The sim has no fleeing state, so this is a `Sleep`
+  /// — the mob stands still and takes it, which is weaker than WoW's fear only in
+  /// that it cannot be chased into another pack. The 70 mana is pacing, not data
+  /// (the table costs 15 % of base mana on both ranks) and the file's 5 tiles
+  /// stand for the table's 4.
   /// shortcut: fear modelled as sleep, add a flee state if mobs need to run.
-  let fear =
+  let fearRanks: AbilityDef =
     { Name = "Fear"
-      CastTicks = secTicks 1.5
-      CooldownTicks = ticks 0
-      ResourceCost = 70
-      Interruptible = true
-      Range = 5
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ Sleep(secTicks 10.0) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, duration in [ 8, 10.0; 32, 15.0 ] do
+            { Level = level
+              Cost = 70
+              CastTicks = secTicks 1.5
+              CooldownTicks = ticks 0
+              Range = 5
+              Effects = [ Sleep(secTicks duration) ] } ] }
+
+  let fear = rank24 fearRanks
 
   // -- Hunter ---------------------------------------------------------------
-  // A level-24 marksman hunter. Ranks are what a 24 has trained; Rapid Fire (26)
-  // and Aimed Shot (21 talent points, only 15 available) are out. Values from the
-  // 1.12/1.15.9 rank tables in `.pi/research/level24/hunter.md`.
+  // A marksman hunter's kit, laddered to the cap. Rapid Fire (26) and Aimed Shot
+  // (21 talent points, only 15 available) are still out. The shots' 8-35 yd is 7
+  // tiles in the tables; the codebase's 8 stands for the whole ladder.
 
-  /// Serpent Sting rank 3 (level 18): 80 Nature over 15 s, 100 mana, instant.
-  let serpentSting =
+  /// Serpent Sting ranks 1-5 (levels 4-34): 15 s of Nature damage and nothing
+  /// else — no weapon component, instant, no cooldown. Rank 3's 5 a second (75)
+  /// is the file's number against the table's 80 (16 per 3 s tick).
+  /// Rank 6 is trained at 42, one level past the ladder.
+  let serpentStingRanks: AbilityDef =
     { Name = "Serpent Sting"
-      CastTicks = ticks 0
-      CooldownTicks = ticks 0
-      ResourceCost = 50
-      Interruptible = false
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ DamageOverTime(secTicks 15.0, 5) ] }
+      Interruptible = false
+      Ranks =
+        [ for level, cost, perTick in
+            [ 4, 15, 1; 10, 30, 3; 18, 50, 5; 26, 80, 9; 34, 115, 14 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = ticks 0
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects = [ DamageOverTime(secTicks 15.0, perTick) ] } ] }
 
-  /// Raptor Strike rank 4 (level 24): the next melee swing lands +34 damage for 45
-  /// mana on a 6 s cooldown.
-  let raptorStrike =
+  let serpentSting = rank24 serpentStingRanks
+
+  /// Raptor Strike ranks 1-6 (levels 1-40): the next melee swing plus a flat step
+  /// for 6 s of cooldown. The one ability in the hunter's kit that really is a
+  /// weapon strike.
+  let raptorStrikeRanks: AbilityDef =
     { Name = "Raptor Strike"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 6.0
-      ResourceCost = 45
-      Interruptible = false
-      Range = 1
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ WeaponDamage(10000, 34) ] }
+      Interruptible = false
+      Ranks =
+        [ for level, cost, bonus in
+            [ 1, 15, 5; 8, 25, 11; 16, 35, 21; 24, 45, 34; 32, 55, 50; 40, 70, 80 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 6.0
+              Range = 1
+              Effects = [ WeaponDamage(10000, bonus) ] } ] }
+
+  let raptorStrike = rank24 raptorStrikeRanks
 
   // -- Shaman ---------------------------------------------------------------
-  // A level-24 elemental shaman's kit. Ranks are the highest a level-24 shaman has
-  // trained: Windfury Weapon is level 30 and Chain Lightning 32, so neither is
-  // here. Values from the 1.15.9 client rank tables, recorded in
-  // `.pi/research/level24/shaman.md`.
+  // An elemental shaman's kit, laddered to the cap. Windfury Weapon (30) and
+  // Chain Lightning (32) are still out of it, and so are the totems. Cast times
+  // climb with the ladder, so they come from the tables rank by rank; the 1.15.9
+  // values are the edition this content follows.
 
-  /// Lightning Bolt rank 4 (level 20): 88-100 Nature, 75 mana, 3.0 s, 30 yd.
-  let shamanLightningBolt =
+  /// Lightning Bolt ranks 1-7 (levels 1-38): 1.5 s at rank 1 growing to 3.0 s at
+  /// rank 4 and staying there.
+  let shamanLightningBoltRanks: AbilityDef =
     { Name = "Lightning Bolt"
-      CastTicks = secTicks 3.0
-      CooldownTicks = ticks 0
-      ResourceCost = 75
-      Interruptible = true
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ SpellDamage(88, 100) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, cost, cast, lo, hi in
+            [ 1, 15, 1.5, 15, 17
+              8, 30, 2.0, 28, 32
+              14, 45, 2.5, 48, 56
+              20, 75, 3.0, 88, 100
+              26, 105, 3.0, 131, 149
+              32, 135, 3.0, 179, 201
+              38, 165, 3.0, 235, 263 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks cast
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects = [ SpellDamage(lo, hi) ] } ] }
 
-  /// Earth Shock rank 4 (level 24): 125-133 Nature, instant, 145 mana, 6 s
-  /// cooldown, 20 yd — and it is the shaman's interrupt, which is why the
-  /// party gains a second kick that is not the Rogue's or the Warrior's.
+  let shamanLightningBolt = rank24 shamanLightningBoltRanks
+
+  /// Earth Shock ranks 1-5 (levels 4-36): 125-133 at rank 4, instant, 6 s
+  /// cooldown — and it is the shaman's interrupt, which is why the party gains a
+  /// second kick that is not the Rogue's or the Warrior's.
   /// shortcut: shocks share one 6 s cooldown in WoW; here each has its own, so a
   /// shaman can chain Earth Shock into Flame Shock.
-  let earthShock =
+  let earthShockRanks: AbilityDef =
     { Name = "Earth Shock"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 6.0
-      ResourceCost = 145
-      Interruptible = false
-      Range = 5
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ SpellDamage(125, 133); Interrupt ] }
+      Interruptible = false
+      Ranks =
+        [ for level, cost, lo, hi in
+            [ 4, 30, 19, 21
+              8, 50, 35, 37
+              14, 85, 65, 69
+              24, 145, 125, 133
+              36, 240, 235, 249 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 6.0
+              Range = 5
+              Effects = [ SpellDamage(lo, hi); Interrupt ] } ] }
 
-  /// Flame Shock rank 2 (level 18): 51 Fire up front and 48 more over 12 s, 95
-  /// mana, instant, 6 s cooldown, 20 yd.
-  let flameShock =
+  let earthShock = rank24 earthShockRanks
+
+  /// Flame Shock ranks 1-4 (levels 10-40): the Fire hit scales with rank, the
+  /// burn is 12 s / 4 ticks at every rank. Rank 2's 51 up front and 48 over the
+  /// twelve seconds is 4 a second, which is both the file's and the table's.
+  let flameShockRanks: AbilityDef =
     { Name = "Flame Shock"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 6.0
-      ResourceCost = 95
-      Interruptible = false
-      Range = 5
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ SpellDamage(51, 51); DamageOverTime(secTicks 12.0, 4) ] }
+      Interruptible = false
+      Ranks =
+        [ for level, cost, direct, perTick in
+            [ 10, 55, 25, 2; 18, 95, 51, 4; 28, 160, 94, 8; 40, 250, 163, 14 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 6.0
+              Range = 5
+              Effects =
+                [ SpellDamage(direct, direct); DamageOverTime(secTicks 12.0, perTick) ] } ] }
 
-  /// Healing Wave rank 5 (level 24): 389-453 for 200 mana on a 3.0 s cast. A
-  /// damage shaman will not cast it — the party's healer does the healing — but
-  /// it is what a shaman has, so it is in the kit.
-  let shamanHealingWave =
+  let flameShock = rank24 flameShockRanks
+
+  /// Healing Wave ranks 1-7 (levels 1-40): 389-453 for 200 mana at rank 5, on a
+  /// 3.0 s cast. A damage shaman will not cast it — the party's healer does the
+  /// healing — but it is what a shaman has, so it is in the kit.
+  let shamanHealingWaveRanks: AbilityDef =
     { Name = "Healing Wave"
-      CastTicks = secTicks 3.0
-      CooldownTicks = ticks 0
-      ResourceCost = 200
-      Interruptible = true
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Ally
-      Effects = [ Heal(389, 453) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, cost, cast, lo, hi in
+            [ 1, 25, 1.5, 36, 46
+              6, 45, 2.0, 69, 83
+              12, 80, 2.5, 136, 162
+              18, 155, 3.0, 279, 327
+              24, 200, 3.0, 389, 453
+              32, 265, 3.0, 552, 638
+              40, 340, 3.0, 759, 873 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks cast
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects = [ Heal(lo, hi) ] } ] }
+
+  let shamanHealingWave = rank24 shamanHealingWaveRanks
 
   // -- Warrior --------------------------------------------------------------
 
-  /// Sunder Armour rank 2: 180 armour per stack, five stacks, 30 s, 15 rage —
-  /// plus flat threat so the Tank holds the pull.
-  let sunderArmor =
+  /// Sunder Armour ranks 1-3 (levels 10, 22, 34): the armour per stack grows
+  /// 90 → 270 over five stacks and 30 s. Rank 2 keeps the file's flat
+  /// `Threat(200)` so the Tank holds the pull the same way at every rank — the
+  /// table's own flat threat is +45 / +99 / +153 — and the 6 s cooldown is the
+  /// file's pacing choice.
+  let sunderArmorRanks: AbilityDef =
     { Name = "Sunder Armor"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 6.0
-      ResourceCost = 15
-      Interruptible = false
-      Range = 1
+      Resource = Rage
+      Stance = None
       TargetKind = Foe
-      Effects = [ Sunder(secTicks 30.0, 180); Threat(200) ] }
+      Interruptible = false
+      Ranks =
+        [ for level, armor in [ 10, 90; 22, 180; 34, 270 ] do
+            { Level = level
+              Cost = 15
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 6.0
+              Range = 1
+              Effects = [ Sunder(secTicks 30.0, armor); Threat(200) ] } ] }
 
-  /// Rank 1: 6 damage and a 6 s school lockout, for 10 rage.
-  let shieldBash =
+  let sunderArmor = rank24 sunderArmorRanks
+
+  /// Shield Bash ranks 1-2 (levels 12, 32): 6 then 18 damage and a 6 s school
+  /// lockout, for 10 rage on a 12 s cooldown. Needs a shield.
+  let shieldBashRanks: AbilityDef =
     { Name = "Shield Bash"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 12.0
-      ResourceCost = 10
-      Interruptible = false
-      Range = 1
+      Resource = Rage
+      Stance = None
       TargetKind = Foe
-      Effects = [ Damage(6, 6); Interrupt ] }
+      Interruptible = false
+      Ranks =
+        [ for level, damage in [ 12, 6; 32, 18 ] do
+            { Level = level
+              Cost = 10
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 12.0
+              Range = 1
+              Effects = [ Damage(damage, damage); Interrupt ] } ] }
 
-  /// Shield Block: +75% block for 10 s for 10 rage, so the shield stops being a
-  /// 5% coin flip and becomes what the Tank is doing with his rage.
-  let shieldBlock =
+  let shieldBash = rank24 shieldBashRanks
+
+  /// Shield Block rank 1 (level 16): +75% block for 10 s for 10 rage, so the
+  /// shield stops being a 5% coin flip and becomes what the Tank is doing with
+  /// his rage. The table says 5 s and a single attack; the 10 s is the file's
+  /// and stays, because it is the level-24 tank's mitigation.
+  let shieldBlockRanks: AbilityDef =
     { Name = "Shield Block"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 5.0
-      ResourceCost = 10
-      Interruptible = false
-      Range = 0
+      Resource = Rage
+      Stance = None
       TargetKind = Self
-      Effects = [ Blocks(secTicks 10.0) ] }
+      Interruptible = false
+      Ranks =
+        [ { Level = 16
+            Cost = 10
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 5.0
+            Range = 0
+            Effects = [ Blocks(secTicks 10.0) ] } ] }
 
-  /// Shield Wall: 75% of all damage taken removed for 10 s, free, on the 30
-  /// minute cooldown that makes it a decision rather than a rotation.
-  let shieldWall =
+  let shieldBlock = rank24 shieldBlockRanks
+
+  /// Shield Wall rank 1: 75% of all damage taken removed for 10 s, free, on the 30
+  /// minute cooldown that makes it a decision rather than a rotation. One rank at
+  /// every level in the table, which trains it at 28; this ladder carries it at 24
+  /// because the level-24 Warrior is the party's shield tank and Shield Wall is
+  /// part of that kit — moving it to 28 changes who can be hit without the button.
+  let shieldWallRanks: AbilityDef =
     { Name = "Shield Wall"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 1800.0
-      ResourceCost = 0
-      Interruptible = false
-      Range = 0
+      Resource = Rage
+      Stance = None
       TargetKind = Self
-      Effects = [ ReducesDamage(secTicks 10.0, 7500) ] }
+      Interruptible = false
+      Ranks =
+        [ { Level = 24
+            Cost = 0
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 1800.0
+            Range = 0
+            Effects = [ ReducesDamage(secTicks 10.0, 7500) ] } ] }
+
+  let shieldWall = rank24 shieldWallRanks
 
   // -- Rogue ----------------------------------------------------------------
   // Every rank from the vanilla 1.12 tables in .pi/research/ranks/rogue.md
@@ -675,201 +969,399 @@ module Content =
 
   // -- Mage ----------------------------------------------------------------
 
-  /// Rank 4: 74-83 Frost for 65 mana.
-  let frostbolt =
+  /// Frostbolt ranks 1-7 (levels 4-38): the cast grows 1.5 → 3.0 s across the
+  /// ladder. Every rank also slows the target 40 % for 5-8 s; `Effect` has no
+  /// snare, so the slow is not modelled and only the damage is.
+  let frostboltRanks: AbilityDef =
     { Name = "Frostbolt"
-      CastTicks = secTicks 2.6
-      CooldownTicks = ticks 0
-      ResourceCost = 65
-      Interruptible = true
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ SpellDamage(74, 83) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, cost, cast, lo, hi in
+            [ 4, 25, 1.5, 18, 20
+              8, 35, 1.8, 31, 35
+              14, 50, 2.2, 51, 57
+              20, 65, 2.6, 74, 83
+              26, 100, 3.0, 126, 138
+              32, 130, 3.0, 174, 190
+              38, 160, 3.0, 227, 247 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks cast
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects = [ SpellDamage(lo, hi) ] } ] }
 
-  /// Rank 3: a five-second channel, 56 Arcane each second, for 235 mana. The sim
-  /// has no channel, so the whole channel lands as one hit.
-  let arcaneMissiles =
+  let frostbolt = rank24 frostboltRanks
+
+  /// Arcane Missiles ranks 1-5 (levels 8-40): a channel of one missile a second,
+  /// so `CastTicks` is the channel length and the whole channel lands as one hit
+  /// — the sim has no channel. Rank 3 keeps the file's 56 a second (280 over the
+  /// five seconds), against the table's 58 a second, 290 in total.
+  let arcaneMissilesRanks: AbilityDef =
     { Name = "Arcane Missiles"
-      CastTicks = secTicks 5.0
-      CooldownTicks = ticks 0
-      ResourceCost = 235
-      Interruptible = true
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ SpellDamage(280, 280) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, cost, channel, total in
+            [ 8, 85, 3.0, 78; 16, 140, 4.0, 152; 24, 235, 5.0, 280; 32, 320, 5.0, 430; 40, 410, 5.0, 590 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks channel
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects = [ SpellDamage(total, total) ] } ] }
 
-  /// Rank 2: 57-64 Arcane to everything within 10 yards, for 120 mana.
-  let arcaneExplosion =
+  let arcaneMissiles = rank24 arcaneMissilesRanks
+
+  /// Arcane Explosion ranks 1-4 (levels 14-38): 57-64 Arcane at rank 2 to
+  /// everything within 10 yd for 120 mana.
+  let arcaneExplosionRanks: AbilityDef =
     { Name = "Arcane Explosion"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 10.0
-      ResourceCost = 120
-      Interruptible = false
-      Range = 0
+      Resource = Mana
+      Stance = None
       TargetKind = Self
-      Effects = [ AreaDamage(3, 57, 64) ] }
+      Interruptible = false
+      Ranks =
+        [ for level, cost, lo, hi in
+            [ 14, 75, 34, 38; 22, 120, 57, 64; 30, 185, 101, 110; 38, 250, 143, 156 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 10.0
+              Range = 0
+              Effects = [ AreaDamage(3, lo, hi) ] } ] }
 
-  /// Rank 1: 200 Frost over an eight-second channel in an 8-yard radius, for 320
-  /// mana. Same channel caveat as Arcane Missiles.
-  let blizzard =
+  let arcaneExplosion = rank24 arcaneExplosionRanks
+
+  /// Blizzard ranks 1-3 (levels 20-36): 200 / 360 / 528 Frost over an
+  /// eight-second channel in an 8-yard radius, for 320 / 520 / 720 mana. Same
+  /// channel caveat as Arcane Missiles.
+  let blizzardRanks: AbilityDef =
     { Name = "Blizzard"
-      CastTicks = secTicks 8.0
-      CooldownTicks = secTicks 15.0
-      ResourceCost = 320
-      Interruptible = true
-      Range = 0
+      Resource = Mana
+      Stance = None
       TargetKind = Self
-      Effects = [ AreaDamage(5, 200, 200) ] }
-
-  /// Counterspell: learnable at 24, instant, 100 mana, 30 s cooldown, 30 yd —
-  /// the only stop the Mage has for a healer's cast. The 10 s school lock is not
-  /// modelled; the interrupt is, which is the part that matters.
-  let counterspell =
-    { Name = "Counterspell"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 30.0
-      ResourceCost = 100
-      Interruptible = false
-      Range = 30
-      TargetKind = Foe
-      Effects = [ Interrupt ] }
-
-  /// Rank 2: 90 mana, 1.5 s cast, up to 30 s.
-  let polymorph =
-    { Name = "Polymorph"
-      CastTicks = secTicks 1.5
-      CooldownTicks = secTicks 30.0
-      ResourceCost = 90
       Interruptible = true
-      Range = 8
+      Ranks =
+        [ for level, cost, total in [ 20, 320, 200; 28, 520, 360; 36, 720, 528 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks 8.0
+              CooldownTicks = secTicks 15.0
+              Range = 0
+              Effects = [ AreaDamage(5, total, total) ] } ] }
+
+  let blizzard = rank24 blizzardRanks
+
+  /// Counterspell (level 24): instant, 100 mana, 30 s cooldown, the only stop the
+  /// Mage has for a healer's cast, and the one single-rank spell in the kit. The
+  /// 10 s school lock is not modelled; the interrupt is, which is the part that
+  /// matters.
+  let counterspellRanks: AbilityDef =
+    { Name = "Counterspell"
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ Polymorph(secTicks 30.0) ] }
+      Interruptible = false
+      Ranks =
+        [ { Level = 24
+            Cost = 100
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 30.0
+            Range = 30
+            Effects = [ Interrupt ] } ] }
+
+  let counterspell = rank24 counterspellRanks
+
+  /// Polymorph ranks 1-3 (levels 8, 20, 40): 60 / 90 / 120 mana for 20 / 30 / 40 s
+  /// of sheep on a 30 s cooldown. A level-24 Mage has rank 2, and the Scarlet
+  /// casters use this same record for their own polymorph.
+  let polymorphRanks: AbilityDef =
+    { Name = "Polymorph"
+      Resource = Mana
+      Stance = None
+      TargetKind = Foe
+      Interruptible = true
+      Ranks =
+        [ for level, cost, duration in [ 8, 60, 20.0; 20, 90, 30.0; 40, 120, 40.0 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks 1.5
+              CooldownTicks = secTicks 30.0
+              Range = 8
+              Effects = [ Polymorph(secTicks duration) ] } ] }
+
+  let polymorph = rank24 polymorphRanks
 
   // -- Druid ----------------------------------------------------------------
 
-  /// Level-22 rank: 244 over 12 s for 135 mana, plus the staff's +24 healing.
-  let rejuvenation =
+  /// Rejuvenation ranks 1-7 (levels 4-40): 8 → 97 every 3 s for 12 s, so the
+  /// ladder is 3 → 32 a second here. The rank a level-24 Druid carries is the
+  /// table's rank 5 (level 28) at the file's numbers — 22 a second, which is the
+  /// table's 20 plus the staff's +24 healing — so it sits at level 24 and spans
+  /// levels 24-33 rather than leaving the Druid with rank 4's heal.
+  let rejuvenationRanks: AbilityDef =
     { Name = "Rejuvenation"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 3.0
-      ResourceCost = 135
+      Resource = Mana
+      Stance = None
+      TargetKind = Ally
       Interruptible = false
-      Range = 8
-      TargetKind = Ally
-      Effects = [ HealOverTime(secTicks 12.0, 22) ] }
+      Ranks =
+        [ for level, cost, perTick in
+            [ 4, 25, 3; 10, 40, 5; 16, 75, 10; 22, 105, 15; 24, 135, 22; 34, 160, 25; 40, 195, 32 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 3.0
+              Range = 8
+              Effects = [ HealOverTime(secTicks 12.0, perTick) ] } ] }
 
-  /// Rank 3: 240-275 up front plus 259 over 21 s, for 280 mana.
-  let regrowth =
+  let rejuvenation = rank24 rejuvenationRanks
+
+  /// Regrowth ranks 1-5 (levels 12-36): a heal up front and 21 s of heal-over-time
+  /// (98 / 175 / 259 / 343 / 427 total, so 4 → 20 a second). Rank 3 keeps the
+  /// file's 264-299 up front — the table's 1.15.9 rank is 255-290 and the 1.12 one
+  /// is 240-274, the file's numbers plus the staff's +24 healing — with the
+  /// table's 12 a second for the tail.
+  let regrowthRanks: AbilityDef =
     { Name = "Regrowth"
-      CastTicks = secTicks 2.0
-      CooldownTicks = ticks 0
-      ResourceCost = 280
-      Interruptible = true
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Ally
-      Effects = [ Heal(264, 299); HealOverTime(secTicks 21.0, 12) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, cost, lo, hi, perTick in
+            [ 12, 120, 93, 107, 4
+              18, 205, 176, 201, 8
+              24, 280, 264, 299, 12
+              30, 350, 336, 378, 16
+              36, 420, 425, 478, 20 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks 2.0
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects = [ Heal(lo, hi); HealOverTime(secTicks 21.0, perTick) ] } ] }
 
-  /// Rank 4: 363-446 for 185 mana over three seconds, plus the staff's +24.
-  /// The mobs' weaker Healing Touch keeps its own record above.
-  let healingTouchR4 =
+  let regrowth = rank24 regrowthRanks
+
+  /// Healing Touch ranks 1-7 (levels 1-38): the cast climbs 1.5 → 3.5 s across
+  /// the ladder and settles there. Rank 4 keeps the file's 387-470 (the 1.12
+  /// 363-446 plus the staff's +24 healing); the table's 1.15.9 rank 4 is
+  /// 376-459. The mobs' weaker Healing Touch keeps its own record above.
+  let healingTouchR4Ranks: AbilityDef =
     { Name = "Healing Touch"
-      CastTicks = secTicks 3.0
-      CooldownTicks = secTicks 10.0
-      ResourceCost = 185
-      Interruptible = true
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Ally
-      Effects = [ Heal(387, 470) ] }
-
-  /// Rank 2: roots for 15 s and 50 Nature damage, for 65 mana.
-  let entanglingRoots =
-    { Name = "Entangling Roots"
-      CastTicks = secTicks 1.5
-      CooldownTicks = secTicks 20.0
-      ResourceCost = 65
       Interruptible = true
-      Range = 8
+      Ranks =
+        [ for level, cost, cast, lo, hi in
+            [ 1, 25, 1.5, 40, 55
+              8, 55, 2.0, 94, 119
+              14, 110, 2.5, 204, 253
+              20, 185, 3.0, 387, 470
+              26, 270, 3.5, 589, 712
+              32, 335, 3.5, 762, 914
+              38, 405, 3.5, 958, 1143 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks cast
+              CooldownTicks = secTicks 10.0
+              Range = 8
+              Effects = [ Heal(lo, hi) ] } ] }
+
+  let healingTouchR4 = rank24 healingTouchR4Ranks
+
+  /// Entangling Roots ranks 1-4 (levels 8-38): the root and its Nature damage
+  /// share one duration that grows 12 → 21 s, and any damage may break it.
+  /// Rank 2 is 50 Nature over 15 s, which is the file's 3 a second.
+  let entanglingRootsRanks: AbilityDef =
+    { Name = "Entangling Roots"
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ Root(secTicks 15.0); DamageOverTime(secTicks 15.0, 3) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, cost, duration, perTick in
+            [ 8, 50, 12.0, 1; 18, 65, 15.0, 3; 28, 80, 18.0, 4; 38, 95, 21.0, 6 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks 1.5
+              CooldownTicks = secTicks 20.0
+              Range = 8
+              Effects = [ Root(secTicks duration); DamageOverTime(secTicks duration, perTick) ] } ] }
+
+  let entanglingRoots = rank24 entanglingRootsRanks
 
   // -- casters' damage, and the Warrior's cooldowns ---------------------------
 
-  /// Rank 4: 63-74 Nature for 70 mana.
-  let wrath =
+  /// Wrath ranks 1-6 (levels 1-38): 63-74 at rank 4, where the table's 1.15.9
+  /// rank is 69-79 and its 1.12 one is 63-73 — the file's pair is the 1.12 value
+  /// and stays, because it is what a level-24 Druid has always hit for. Rank 2's
+  /// 1.7 s cast is the odd one out; the ladder settles at 2.0 s.
+  let wrathRanks: AbilityDef =
     { Name = "Wrath"
-      CastTicks = secTicks 2.0
-      CooldownTicks = ticks 0
-      ResourceCost = 70
-      Interruptible = true
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ SpellDamage(63, 74) ] }
+      Interruptible = true
+      Ranks =
+        [ for level, cost, cast, lo, hi in
+            [ 1, 20, 1.5, 13, 16
+              6, 35, 1.7, 28, 33
+              14, 55, 2.0, 48, 57
+              22, 70, 2.0, 63, 74
+              30, 100, 2.0, 108, 123
+              38, 125, 2.0, 148, 167 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks cast
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects = [ SpellDamage(lo, hi) ] } ] }
 
-  /// Rank 4: 40-49 Arcane plus 80 over 12 s, for 105 mana.
-  let moonfire =
+  let wrath = rank24 wrathRanks
+
+  /// Moonfire ranks 1-7 (levels 4-40): an Arcane hit and an Arcane burn, both
+  /// parts Arcane — not Fire, and not Nature as some tables claim. Rank 1's burn
+  /// is 9 s / 3 ticks; every rank after it is 12 s / 4 ticks. Rank 4 keeps the
+  /// file's 40-49 up front (the table's 1.15.9 rank is 47-55) and the table's 80
+  /// over 12 s, which is 7 a second.
+  let moonfireRanks: AbilityDef =
     { Name = "Moonfire"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 6.0
-      ResourceCost = 105
-      Interruptible = false
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ SpellDamage(40, 49); DamageOverTime(secTicks 12.0, 7) ] }
+      Interruptible = false
+      Ranks =
+        [ for level, cost, lo, hi, duration, perTick in
+            [ 4, 25, 9, 12, 9.0, 1
+              10, 50, 17, 21, 12.0, 3
+              16, 75, 30, 37, 12.0, 5
+              22, 105, 40, 49, 12.0, 7
+              28, 150, 70, 82, 12.0, 11
+              34, 190, 91, 108, 12.0, 14
+              40, 235, 117, 137, 12.0, 18 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 6.0
+              Range = 8
+              Effects =
+                [ SpellDamage(lo, hi); DamageOverTime(secTicks duration, perTick) ] } ] }
 
-  /// Rank 4: 91-106 for 95 mana.
-  let smite =
+  let moonfire = rank24 moonfireRanks
+
+  /// Smite ranks 1-6 (levels 1-38): 91-106 for 95 mana at rank 4. Those two
+  /// numbers are the file's, hand-entered from a 1.12 source; the table's rank 4
+  /// is 97-112, about 6 % higher, and the kept row keeps the ladder monotone.
+  let smiteRanks: AbilityDef =
     { Name = "Smite"
-      CastTicks = secTicks 2.5
-      CooldownTicks = ticks 0
-      ResourceCost = 95
+      Resource = Mana
+      Stance = None
+      TargetKind = Foe
       Interruptible = true
-      Range = 8
-      TargetKind = Foe
-      Effects = [ SpellDamage(91, 106) ] }
+      Ranks =
+        [ for level, cost, cast, lo, hi in
+            [ 1, 20, 1.5, 15, 20
+              6, 30, 2.0, 28, 34
+              14, 60, 2.5, 58, 67
+              22, 95, 2.5, 91, 106
+              30, 140, 2.5, 158, 178
+              38, 185, 2.5, 222, 250 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = secTicks cast
+              CooldownTicks = ticks 0
+              Range = 8
+              Effects = [ SpellDamage(lo, hi) ] } ] }
 
-  /// Rank 3: 132 Shadow over 18 s for 95 mana.
-  let shadowWordPain =
+  let smite = rank24 smiteRanks
+
+  /// Shadow Word: Pain ranks 1-5 (levels 4-34): 18 s of Shadow damage on every
+  /// rank, 30 / 66 / 132 / 234 / 366 in total. Rank 3's 132 over 18 s is 7 a
+  /// second, which is the file's number (the table's is 7.3).
+  let shadowWordPainRanks: AbilityDef =
     { Name = "Shadow Word: Pain"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 6.0
-      ResourceCost = 95
-      Interruptible = false
-      Range = 8
+      Resource = Mana
+      Stance = None
       TargetKind = Foe
-      Effects = [ DamageOverTime(secTicks 18.0, 7) ] }
+      Interruptible = false
+      Ranks =
+        [ for level, cost, perTick in [ 4, 25, 2; 10, 50, 4; 18, 95, 7; 26, 155, 13; 34, 230, 20 ] do
+            { Level = level
+              Cost = cost
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 6.0
+              Range = 8
+              Effects = [ DamageOverTime(secTicks 18.0, perTick) ] } ] }
 
-  /// Charge generates rage rather than costing it: rank 1 refunds 9.
-  let charge =
+  let shadowWordPain = rank24 shadowWordPainRanks
+
+  /// Charge ranks 1-2: it generates rage rather than costing it, so the cost is
+  /// negative — 9 at rank 1, 12 at rank 2. Both ranks stun for 1 s and then hit,
+  /// and the 8 tiles are the codebase's 40-yd convention for the table's 1.6-5.
+  let chargeRanks: AbilityDef =
     { Name = "Charge"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 15.0
-      ResourceCost = -9
-      Interruptible = false
-      Range = 8
+      Resource = Rage
+      Stance = None
       TargetKind = Foe
-      Effects = [ Charge; Threat(300) ] }
+      Interruptible = false
+      Ranks =
+        [ for level, rage in [ 4, -9; 26, -12 ] do
+            { Level = level
+              Cost = rage
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 15.0
+              Range = 8
+              Effects = [ Charge; Stun(secTicks 1.0); Threat(300) ] } ] }
 
-  let disarm =
+  let charge = rank24 chargeRanks
+
+  /// Disarm (level 18): the target's weapon for 10 s, for 20 rage on a 20 s
+  /// cooldown. One rank, and a level-24 Warrior has it.
+  let disarmRanks: AbilityDef =
     { Name = "Disarm"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 20.0
-      ResourceCost = 20
-      Interruptible = false
-      Range = 1
+      Resource = Rage
+      Stance = None
       TargetKind = Foe
-      Effects = [ Disarm(secTicks 10.0); Threat(200) ] }
+      Interruptible = false
+      Ranks =
+        [ { Level = 18
+            Cost = 20
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 20.0
+            Range = 1
+            Effects = [ Disarm(secTicks 10.0); Threat(200) ] } ] }
 
-  /// Rank 1: 125 damage, plus 3 per point of rage; the rage scaling and the
-  /// 20%-health gate are mechanics this sim does not model yet.
-  let execute =
+  let disarm = rank24 disarmRanks
+
+  /// Execute ranks 1-3 (levels 24, 32, 40): 125 / 200 / 325 damage, plus 3 / 6 / 9
+  /// for every point of rage spent past the 15. Free of that scaling here — the
+  /// sim has no rage-to-damage conversion and no 20 %-health gate, so each rank is
+  /// its flat direct hit.
+  let executeRanks: AbilityDef =
     { Name = "Execute"
-      CastTicks = ticks 0
-      CooldownTicks = secTicks 10.0
-      ResourceCost = 15
-      Interruptible = false
-      Range = 1
+      Resource = Rage
+      Stance = None
       TargetKind = Foe
-      Effects = [ Damage(125, 125) ] }
+      Interruptible = false
+      Ranks =
+        [ for level, damage in [ 24, 125; 32, 200; 40, 325 ] do
+            { Level = level
+              Cost = 15
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 10.0
+              Range = 1
+              Effects = [ Damage(damage, damage) ] } ] }
+
+  let execute = rank24 executeRanks
 
   // =========================================================================
   // Builders
@@ -1092,7 +1584,27 @@ module Content =
        (73, 51, 68, 25, 34, 545, 0)
        (75, 52, 69, 25, 34, 581, 0)
        (77, 53, 71, 26, 35, 609, 0)
-       (79, 54, 72, 26, 35, 649, 0) |]
+       (79, 54, 72, 26, 35, 649, 0)
+       (80, 56, 74, 26, 36, 681, 0)
+       (82, 57, 76, 26, 36, 715, 0)
+       (84, 58, 77, 26, 37, 761, 0)
+       (86, 59, 79, 26, 37, 799, 0)
+       (88, 60, 81, 27, 38, 839, 0)
+       (90, 61, 83, 27, 38, 881, 0)
+       (92, 63, 84, 27, 39, 935, 0)
+       (94, 64, 86, 27, 39, 981, 0)
+       (96, 65, 88, 28, 40, 1029, 0)
+       (98, 66, 90, 28, 40, 1079, 0)
+       (100, 68, 92, 28, 42, 1131, 0)
+       (102, 69, 94, 28, 42, 1185, 0)
+       (104, 70, 96, 28, 43, 1241, 0)
+       (106, 72, 98, 29, 44, 1299, 0)
+       (109, 73, 100, 29, 44, 1359, 0)
+       (111, 74, 102, 29, 45, 1421, 0)
+       (113, 76, 104, 29, 45, 1485, 0)
+       (115, 77, 106, 30, 46, 1551, 0)
+       (118, 79, 108, 30, 46, 1619, 0)
+       (120, 80, 110, 30, 47, 1689, 0) |]
 
   let private humanPriestBase =
     [| (20, 20, 20, 22, 24, 31, 110)
@@ -1134,7 +1646,27 @@ module Content =
        (28, 30, 36, 73, 79, 538, 899)
        (28, 31, 36, 75, 81, 570, 923)
        (28, 31, 37, 76, 84, 593, 947)
-       (29, 31, 37, 78, 85, 627, 971) |]
+       (29, 31, 37, 78, 85, 627, 971)
+       (29, 32, 38, 80, 87, 652, 1010)
+       (29, 32, 38, 82, 89, 688, 1034)
+       (29, 33, 39, 84, 91, 715, 1058)
+       (30, 33, 39, 86, 93, 753, 1082)
+       (30, 33, 40, 88, 95, 782, 1106)
+       (30, 34, 41, 90, 97, 812, 1130)
+       (31, 34, 41, 92, 99, 853, 1154)
+       (31, 35, 42, 94, 102, 885, 1178)
+       (31, 35, 43, 96, 105, 918, 1202)
+       (32, 35, 43, 98, 107, 962, 1226)
+       (32, 36, 44, 100, 109, 997, 1250)
+       (32, 36, 44, 102, 111, 1043, 1274)
+       (33, 37, 45, 104, 113, 1080, 1298)
+       (33, 37, 46, 106, 116, 1118, 1322)
+       (33, 38, 46, 109, 118, 1167, 1331)
+       (34, 38, 47, 111, 120, 1207, 1355)
+       (34, 39, 48, 113, 123, 1248, 1379)
+       (34, 39, 49, 115, 126, 1290, 1403)
+       (35, 40, 49, 118, 129, 1343, 1412)
+       (35, 40, 50, 120, 131, 1387, 1436) |]
 
   let private nightElfRogueBase =
     [| (18, 28, 20, 20, 20, 25, 0)
@@ -1176,7 +1708,27 @@ module Content =
        (49, 83, 48, 28, 36, 610, 0)
        (50, 85, 49, 28, 36, 640, 0)
        (51, 87, 50, 28, 37, 671, 0)
-       (52, 89, 51, 29, 37, 703, 0) |]
+       (52, 89, 51, 29, 37, 703, 0)
+       (53, 91, 52, 29, 38, 736, 0)
+       (54, 93, 53, 29, 38, 770, 0)
+       (55, 95, 54, 29, 39, 805, 0)
+       (56, 98, 55, 30, 39, 841, 0)
+       (58, 100, 56, 30, 40, 878, 0)
+       (59, 102, 57, 30, 41, 916, 0)
+       (60, 104, 58, 31, 41, 955, 0)
+       (61, 106, 59, 31, 42, 995, 0)
+       (62, 108, 61, 31, 43, 1026, 0)
+       (64, 111, 62, 32, 43, 1068, 0)
+       (65, 113, 63, 32, 44, 1111, 0)
+       (66, 115, 64, 32, 44, 1155, 0)
+       (67, 118, 65, 33, 45, 1200, 0)
+       (69, 120, 66, 33, 46, 1246, 0)
+       (70, 122, 68, 33, 46, 1283, 0)
+       (71, 125, 69, 34, 47, 1331, 0)
+       (73, 127, 70, 34, 48, 1380, 0)
+       (74, 130, 71, 34, 49, 1430, 0)
+       (76, 132, 73, 35, 49, 1471, 0)
+       (77, 135, 74, 35, 50, 1523, 0) |]
 
   let private gnomeMageBase =
     [| (15, 23, 19, 26, 22, 31, 100)
@@ -1218,7 +1770,27 @@ module Content =
        (20, 31, 32, 83, 73, 537, 850)
        (20, 31, 32, 85, 75, 567, 871)
        (21, 31, 33, 87, 76, 588, 892)
-       (21, 32, 33, 88, 78, 620, 913) |]
+       (21, 32, 33, 88, 78, 620, 913)
+       (21, 32, 34, 90, 80, 643, 934)
+       (21, 32, 34, 92, 82, 677, 955)
+       (21, 32, 35, 95, 84, 702, 976)
+       (21, 33, 35, 97, 86, 738, 997)
+       (22, 33, 36, 99, 88, 765, 1018)
+       (22, 33, 36, 101, 90, 803, 1039)
+       (22, 34, 37, 103, 92, 832, 1060)
+       (22, 34, 37, 106, 94, 872, 1081)
+       (23, 34, 38, 108, 96, 903, 1102)
+       (23, 35, 38, 110, 98, 945, 1108)
+       (23, 35, 39, 112, 100, 978, 1129)
+       (23, 35, 39, 114, 102, 1022, 1150)
+       (23, 36, 40, 117, 104, 1057, 1171)
+       (24, 36, 41, 120, 106, 1093, 1177)
+       (24, 36, 41, 122, 109, 1140, 1198)
+       (24, 37, 42, 124, 111, 1178, 1219)
+       (24, 37, 42, 127, 113, 1227, 1225)
+       (25, 37, 43, 129, 115, 1267, 1246)
+       (25, 38, 43, 132, 118, 1318, 1252)
+       (25, 38, 44, 133, 120, 1360, 1273) |]
 
   let private nightElfDruidBase =
     [| (18, 25, 19, 22, 22, 33, 17)
@@ -1260,7 +1832,27 @@ module Content =
        (41, 46, 45, 62, 68, 596, 779)
        (42, 46, 46, 64, 69, 624, 809)
        (42, 47, 47, 65, 71, 653, 824)
-       (43, 48, 48, 67, 72, 683, 854) |]
+       (43, 48, 48, 67, 72, 683, 854)
+       (44, 49, 49, 68, 74, 714, 869)
+       (45, 49, 50, 70, 76, 746, 899)
+       (46, 50, 51, 71, 77, 779, 914)
+       (47, 51, 51, 73, 79, 823, 944)
+       (47, 52, 52, 74, 81, 858, 959)
+       (48, 53, 53, 76, 83, 894, 989)
+       (49, 53, 55, 77, 84, 921, 1004)
+       (50, 54, 56, 79, 86, 959, 1019)
+       (51, 55, 57, 81, 88, 998, 1049)
+       (52, 56, 58, 82, 90, 1038, 1064)
+       (53, 57, 59, 84, 92, 1079, 1079)
+       (54, 58, 60, 86, 94, 1121, 1109)
+       (55, 59, 61, 87, 96, 1164, 1124)
+       (56, 59, 62, 89, 98, 1208, 1139)
+       (57, 60, 63, 91, 100, 1253, 1154)
+       (58, 61, 64, 93, 102, 1299, 1169)
+       (59, 62, 65, 94, 104, 1346, 1199)
+       (60, 63, 67, 96, 106, 1384, 1214)
+       (61, 64, 68, 98, 108, 1433, 1229)
+       (62, 65, 69, 100, 110, 1483, 1244) |]
 
   // -- The other four classes, for the nine-class roster ----------------------
   // Same shape and the same source as the five above (the client's own
@@ -1293,7 +1885,43 @@ module Content =
        (43, 32, 42, 33, 36, 206, 435)
        (45, 32, 43, 34, 37, 222, 459)
        (46, 33, 44, 34, 38, 239, 499)
-       (47, 34, 46, 35, 38, 247, 525) |]
+       (47, 34, 46, 35, 38, 247, 525)
+       (48, 34, 47, 36, 39, 266, 552)
+       (50, 35, 48, 37, 40, 286, 579)
+       (51, 36, 49, 37, 42, 307, 621)
+       (52, 36, 50, 38, 43, 329, 648)
+       (54, 37, 52, 39, 44, 342, 675)
+       (55, 38, 53, 40, 44, 366, 702)
+       (56, 39, 54, 41, 45, 391, 729)
+       (58, 39, 56, 42, 46, 407, 756)
+       (59, 40, 57, 42, 47, 434, 798)
+       (61, 41, 58, 43, 48, 462, 825)
+       (62, 42, 60, 44, 49, 481, 852)
+       (64, 43, 61, 45, 50, 511, 879)
+       (65, 43, 62, 46, 51, 542, 906)
+       (67, 44, 64, 47, 52, 564, 933)
+       (68, 45, 65, 48, 53, 597, 960)
+       (70, 46, 67, 49, 54, 621, 987)
+       (71, 47, 68, 50, 55, 656, 1014)
+       (73, 47, 70, 51, 56, 682, 1041)
+       (74, 48, 71, 52, 57, 719, 1068)
+       (76, 49, 73, 52, 58, 747, 1110)
+       (78, 50, 74, 53, 59, 786, 1137)
+       (79, 51, 76, 54, 60, 816, 1164)
+       (81, 52, 77, 56, 61, 857, 1176)
+       (83, 53, 79, 57, 63, 889, 1203)
+       (84, 54, 81, 58, 65, 922, 1230)
+       (86, 55, 82, 59, 66, 966, 1257)
+       (88, 56, 84, 60, 67, 1001, 1284)
+       (90, 57, 86, 61, 68, 1037, 1311)
+       (92, 58, 87, 62, 69, 1084, 1338)
+       (93, 59, 89, 63, 70, 1122, 1365)
+       (95, 60, 91, 64, 72, 1161, 1392)
+       (97, 61, 93, 65, 73, 1201, 1419)
+       (99, 62, 94, 66, 74, 1252, 1446)
+       (101, 63, 96, 68, 75, 1294, 1458)
+       (103, 64, 98, 69, 77, 1337, 1485)
+       (105, 65, 100, 70, 78, 1381, 1512) |]
 
   /// Dwarf Paladin: the 7-tuple is (str, agi, sta, int, spi, base health, base mana).
   let private dwarfPaladinBase =
@@ -1320,7 +1948,43 @@ module Content =
        (45, 28, 45, 32, 34, 206, 435)
        (47, 28, 46, 33, 35, 222, 459)
        (48, 29, 47, 33, 36, 239, 499)
-       (49, 30, 49, 34, 36, 247, 525) |]
+       (49, 30, 49, 34, 36, 247, 525)
+       (50, 30, 50, 35, 37, 266, 552)
+       (52, 31, 51, 36, 38, 286, 579)
+       (53, 32, 52, 36, 39, 307, 621)
+       (54, 32, 53, 37, 40, 329, 648)
+       (56, 33, 55, 38, 41, 342, 675)
+       (57, 34, 56, 39, 41, 366, 702)
+       (58, 35, 57, 40, 42, 391, 729)
+       (60, 35, 59, 41, 43, 407, 756)
+       (61, 36, 60, 41, 44, 434, 798)
+       (63, 37, 61, 42, 45, 462, 825)
+       (64, 38, 63, 43, 46, 481, 852)
+       (66, 39, 64, 44, 47, 511, 879)
+       (67, 39, 65, 45, 48, 542, 906)
+       (69, 40, 67, 46, 49, 564, 933)
+       (70, 41, 68, 47, 50, 597, 960)
+       (72, 42, 70, 48, 51, 621, 987)
+       (73, 43, 71, 49, 52, 656, 1014)
+       (75, 43, 73, 50, 53, 682, 1041)
+       (76, 44, 74, 51, 54, 719, 1068)
+       (78, 45, 76, 51, 55, 747, 1110)
+       (80, 46, 77, 52, 56, 786, 1137)
+       (81, 47, 79, 53, 57, 816, 1164)
+       (83, 48, 80, 55, 58, 857, 1176)
+       (85, 49, 82, 56, 59, 889, 1203)
+       (86, 50, 84, 57, 61, 922, 1230)
+       (88, 51, 85, 58, 62, 966, 1257)
+       (90, 52, 87, 59, 63, 1001, 1284)
+       (92, 53, 89, 60, 64, 1037, 1311)
+       (94, 54, 90, 61, 65, 1084, 1338)
+       (95, 55, 92, 62, 66, 1122, 1365)
+       (97, 56, 94, 63, 68, 1161, 1392)
+       (99, 57, 96, 64, 69, 1201, 1419)
+       (101, 58, 97, 65, 70, 1252, 1446)
+       (103, 59, 99, 67, 71, 1294, 1458)
+       (105, 60, 101, 68, 73, 1337, 1485)
+       (107, 61, 103, 69, 74, 1381, 1512) |]
 
   /// Orc Shaman: the 7-tuple is (str, agi, sta, int, spi, base health, base mana).
   let private orcShamanBase =
@@ -1347,7 +2011,43 @@ module Content =
        (41, 26, 42, 36, 45, 192, 395)
        (41, 27, 43, 37, 46, 205, 456)
        (42, 27, 44, 38, 47, 219, 448)
-       (43, 28, 45, 39, 49, 234, 476) |]
+       (43, 28, 45, 39, 49, 234, 476)
+       (44, 28, 47, 40, 50, 240, 505)
+       (45, 29, 48, 41, 51, 257, 579)
+       (46, 29, 49, 42, 52, 275, 566)
+       (47, 30, 50, 43, 53, 294, 598)
+       (48, 30, 51, 44, 55, 314, 631)
+       (49, 31, 52, 45, 56, 335, 718)
+       (51, 31, 54, 47, 57, 347, 699)
+       (52, 32, 55, 48, 59, 370, 733)
+       (53, 33, 56, 49, 60, 394, 767)
+       (54, 33, 57, 50, 61, 419, 786)
+       (55, 34, 59, 51, 63, 435, 820)
+       (56, 35, 60, 53, 64, 462, 854)
+       (57, 35, 61, 54, 65, 490, 888)
+       (58, 36, 63, 55, 67, 509, 922)
+       (59, 36, 64, 56, 68, 539, 941)
+       (61, 37, 65, 58, 70, 570, 975)
+       (62, 38, 67, 59, 71, 592, 1009)
+       (63, 38, 68, 60, 73, 625, 1028)
+       (64, 39, 70, 61, 74, 649, 1062)
+       (66, 40, 71, 63, 76, 684, 1096)
+       (67, 40, 73, 64, 77, 710, 1115)
+       (68, 41, 74, 66, 79, 747, 1149)
+       (69, 42, 76, 67, 80, 775, 1183)
+       (71, 43, 77, 68, 82, 814, 1202)
+       (72, 43, 79, 70, 84, 844, 1236)
+       (73, 44, 80, 71, 85, 885, 1255)
+       (75, 45, 82, 73, 87, 917, 1289)
+       (76, 46, 83, 74, 89, 960, 1313)
+       (78, 46, 85, 76, 90, 994, 1342)
+       (79, 47, 87, 77, 92, 1029, 1376)
+       (80, 48, 88, 79, 94, 1075, 1395)
+       (82, 49, 90, 80, 96, 1112, 1414)
+       (83, 50, 92, 82, 97, 1150, 1448)
+       (85, 50, 93, 84, 99, 1199, 1467)
+       (86, 51, 95, 85, 101, 1239, 1501)
+       (88, 52, 97, 87, 103, 1280, 1520) |]
 
   /// Troll Shaman: the 7-tuple is (str, agi, sta, int, spi, base health, base mana).
   let private trollShamanBase =
@@ -1374,7 +2074,43 @@ module Content =
        (39, 31, 41, 35, 43, 192, 395)
        (39, 32, 42, 36, 44, 205, 456)
        (40, 32, 43, 37, 45, 219, 448)
-       (41, 33, 44, 38, 47, 234, 476) |]
+       (41, 33, 44, 38, 47, 234, 476)
+       (42, 33, 46, 39, 48, 240, 505)
+       (43, 34, 47, 40, 49, 257, 579)
+       (44, 34, 48, 41, 50, 275, 566)
+       (45, 35, 49, 42, 51, 294, 598)
+       (46, 35, 50, 43, 53, 314, 631)
+       (47, 36, 51, 44, 54, 335, 718)
+       (49, 36, 53, 46, 55, 347, 699)
+       (50, 37, 54, 47, 57, 370, 733)
+       (51, 38, 55, 48, 58, 394, 767)
+       (52, 38, 56, 49, 59, 419, 786)
+       (53, 39, 58, 50, 61, 435, 820)
+       (54, 40, 59, 52, 62, 462, 854)
+       (55, 40, 60, 53, 63, 490, 888)
+       (56, 41, 62, 54, 65, 509, 922)
+       (57, 41, 63, 55, 66, 539, 941)
+       (59, 42, 64, 57, 68, 570, 975)
+       (60, 43, 66, 58, 69, 592, 1009)
+       (61, 43, 67, 59, 71, 625, 1028)
+       (62, 44, 69, 60, 72, 649, 1062)
+       (64, 45, 70, 62, 74, 684, 1096)
+       (65, 45, 72, 63, 75, 710, 1115)
+       (66, 46, 73, 65, 77, 747, 1149)
+       (67, 47, 75, 66, 78, 775, 1183)
+       (69, 48, 76, 67, 80, 814, 1202)
+       (70, 48, 78, 69, 82, 844, 1236)
+       (71, 49, 79, 70, 83, 885, 1255)
+       (73, 50, 81, 72, 85, 917, 1289)
+       (74, 51, 82, 73, 87, 960, 1313)
+       (76, 51, 84, 75, 88, 994, 1342)
+       (77, 52, 86, 76, 90, 1029, 1376)
+       (78, 53, 87, 78, 92, 1075, 1395)
+       (80, 54, 89, 79, 94, 1112, 1414)
+       (81, 55, 91, 81, 95, 1150, 1448)
+       (83, 55, 92, 83, 97, 1199, 1467)
+       (84, 56, 94, 84, 99, 1239, 1501)
+       (86, 57, 96, 86, 101, 1280, 1520) |]
 
   /// Tauren Shaman: the 7-tuple is (str, agi, sta, int, spi, base health, base mana).
   let private taurenShamanBase =
@@ -1401,7 +2137,43 @@ module Content =
        (43, 24, 42, 34, 44, 192, 395)
        (43, 25, 43, 35, 45, 205, 456)
        (44, 25, 44, 36, 46, 219, 448)
-       (45, 26, 45, 37, 48, 234, 476) |]
+       (45, 26, 45, 37, 48, 234, 476)
+       (46, 26, 47, 38, 49, 240, 505)
+       (47, 27, 48, 39, 50, 257, 579)
+       (48, 27, 49, 40, 51, 275, 566)
+       (49, 28, 50, 41, 52, 294, 598)
+       (50, 28, 51, 42, 54, 314, 631)
+       (51, 29, 52, 43, 55, 335, 718)
+       (53, 29, 54, 45, 56, 347, 699)
+       (54, 30, 55, 46, 58, 370, 733)
+       (55, 31, 56, 47, 59, 394, 767)
+       (56, 31, 57, 48, 60, 419, 786)
+       (57, 32, 59, 49, 62, 435, 820)
+       (58, 33, 60, 51, 63, 462, 854)
+       (59, 33, 61, 52, 64, 490, 888)
+       (60, 34, 63, 53, 66, 509, 922)
+       (61, 34, 64, 54, 67, 539, 941)
+       (63, 35, 65, 56, 69, 570, 975)
+       (64, 36, 67, 57, 70, 592, 1009)
+       (65, 36, 68, 58, 72, 625, 1028)
+       (66, 37, 70, 59, 73, 649, 1062)
+       (68, 38, 71, 61, 75, 684, 1096)
+       (69, 38, 73, 62, 76, 710, 1115)
+       (70, 39, 74, 64, 78, 747, 1149)
+       (71, 40, 76, 65, 79, 775, 1183)
+       (73, 41, 77, 66, 81, 814, 1202)
+       (74, 41, 79, 68, 83, 844, 1236)
+       (75, 42, 80, 69, 84, 885, 1255)
+       (77, 43, 82, 71, 86, 917, 1289)
+       (78, 44, 83, 72, 88, 960, 1313)
+       (80, 44, 85, 74, 89, 994, 1342)
+       (81, 45, 87, 75, 91, 1029, 1376)
+       (82, 46, 88, 77, 93, 1075, 1395)
+       (84, 47, 90, 78, 95, 1112, 1414)
+       (85, 48, 92, 80, 96, 1150, 1448)
+       (87, 48, 93, 82, 98, 1199, 1467)
+       (88, 49, 95, 83, 100, 1239, 1501)
+       (90, 50, 97, 85, 102, 1280, 1520) |]
 
   /// Night Elf Hunter: the 7-tuple is (str, agi, sta, int, spi, base health, base mana).
   let private nightElfHunterBase =
@@ -1428,7 +2200,43 @@ module Content =
        (26, 54, 38, 32, 34, 222, 475)
        (27, 56, 39, 32, 34, 238, 515)
        (27, 57, 40, 33, 35, 255, 541)
-       (28, 59, 41, 34, 36, 273, 568) |]
+       (28, 59, 41, 34, 36, 273, 568)
+       (28, 60, 42, 34, 37, 292, 611)
+       (29, 62, 43, 35, 37, 312, 640)
+       (29, 64, 44, 36, 38, 333, 670)
+       (30, 65, 45, 36, 39, 355, 715)
+       (30, 67, 46, 37, 40, 378, 745)
+       (31, 69, 47, 38, 40, 402, 775)
+       (31, 70, 49, 39, 41, 417, 805)
+       (32, 72, 50, 39, 42, 443, 850)
+       (33, 74, 51, 40, 43, 470, 880)
+       (33, 75, 52, 41, 44, 498, 910)
+       (34, 77, 53, 42, 45, 527, 940)
+       (35, 79, 55, 43, 46, 547, 970)
+       (35, 81, 56, 43, 46, 578, 1015)
+       (36, 83, 57, 44, 47, 610, 1045)
+       (36, 85, 58, 45, 48, 643, 1075)
+       (37, 86, 60, 46, 49, 667, 1105)
+       (38, 88, 61, 47, 50, 702, 1135)
+       (38, 90, 62, 47, 51, 738, 1180)
+       (39, 92, 63, 48, 52, 775, 1210)
+       (40, 94, 65, 49, 53, 803, 1240)
+       (40, 96, 66, 50, 54, 842, 1270)
+       (41, 98, 68, 51, 55, 872, 1300)
+       (42, 100, 69, 52, 56, 913, 1330)
+       (43, 103, 70, 53, 57, 955, 1360)
+       (43, 105, 72, 54, 58, 988, 1390)
+       (44, 107, 73, 55, 59, 1032, 1420)
+       (45, 109, 75, 56, 60, 1067, 1450)
+       (46, 111, 76, 57, 61, 1113, 1480)
+       (46, 113, 78, 58, 62, 1150, 1510)
+       (47, 116, 79, 59, 63, 1198, 1540)
+       (48, 118, 81, 60, 64, 1237, 1570)
+       (49, 120, 82, 61, 65, 1287, 1600)
+       (50, 123, 84, 62, 67, 1328, 1630)
+       (50, 125, 86, 63, 68, 1370, 1660)
+       (51, 128, 87, 64, 69, 1423, 1690)
+       (52, 130, 89, 65, 70, 1467, 1720) |]
 
   /// Dwarf Hunter: the 7-tuple is (str, agi, sta, int, spi, base health, base mana).
   let private dwarfHunterBase =
@@ -1455,7 +2263,43 @@ module Content =
        (31, 45, 42, 31, 33, 222, 475)
        (32, 47, 43, 31, 33, 238, 515)
        (32, 48, 44, 32, 34, 255, 541)
-       (33, 50, 45, 33, 35, 273, 568) |]
+       (33, 50, 45, 33, 35, 273, 568)
+       (33, 51, 46, 33, 36, 292, 611)
+       (34, 53, 47, 34, 36, 312, 640)
+       (34, 55, 48, 35, 37, 333, 670)
+       (35, 56, 49, 35, 38, 355, 715)
+       (35, 58, 50, 36, 39, 378, 745)
+       (36, 60, 51, 37, 39, 402, 775)
+       (36, 61, 53, 38, 40, 417, 805)
+       (37, 63, 54, 38, 41, 443, 850)
+       (38, 65, 55, 39, 42, 470, 880)
+       (38, 66, 56, 40, 43, 498, 910)
+       (39, 68, 57, 41, 44, 527, 940)
+       (40, 70, 59, 42, 45, 547, 970)
+       (40, 72, 60, 42, 45, 578, 1015)
+       (41, 74, 61, 43, 46, 610, 1045)
+       (41, 76, 62, 44, 47, 643, 1075)
+       (42, 77, 64, 45, 48, 667, 1105)
+       (43, 79, 65, 46, 49, 702, 1135)
+       (43, 81, 66, 46, 50, 738, 1180)
+       (44, 83, 67, 47, 51, 775, 1210)
+       (45, 85, 69, 48, 52, 803, 1240)
+       (45, 87, 70, 49, 53, 842, 1270)
+       (46, 89, 72, 50, 54, 872, 1300)
+       (47, 91, 73, 51, 55, 913, 1330)
+       (48, 94, 74, 52, 56, 955, 1360)
+       (48, 96, 76, 53, 57, 988, 1390)
+       (49, 98, 77, 54, 58, 1032, 1420)
+       (50, 100, 79, 55, 59, 1067, 1450)
+       (51, 102, 80, 56, 60, 1113, 1480)
+       (51, 104, 82, 57, 61, 1150, 1510)
+       (52, 107, 83, 58, 62, 1198, 1540)
+       (53, 109, 85, 59, 63, 1237, 1570)
+       (54, 111, 86, 60, 64, 1287, 1600)
+       (55, 114, 88, 61, 66, 1328, 1630)
+       (55, 116, 90, 62, 67, 1370, 1660)
+       (56, 119, 91, 63, 68, 1423, 1690)
+       (57, 121, 93, 64, 69, 1467, 1720) |]
 
   /// Troll Hunter: the 7-tuple is (str, agi, sta, int, spi, base health, base mana).
   let private trollHunterBase =
@@ -1482,7 +2326,43 @@ module Content =
        (30, 51, 40, 28, 35, 222, 475)
        (31, 53, 41, 28, 35, 238, 515)
        (31, 54, 42, 29, 36, 255, 541)
-       (32, 56, 43, 30, 37, 273, 568) |]
+       (32, 56, 43, 30, 37, 273, 568)
+       (32, 57, 44, 30, 38, 292, 611)
+       (33, 59, 45, 31, 38, 312, 640)
+       (33, 61, 46, 32, 39, 333, 670)
+       (34, 62, 47, 32, 40, 355, 715)
+       (34, 64, 48, 33, 41, 378, 745)
+       (35, 66, 49, 34, 41, 402, 775)
+       (35, 67, 51, 35, 42, 417, 805)
+       (36, 69, 52, 35, 43, 443, 850)
+       (37, 71, 53, 36, 44, 470, 880)
+       (37, 72, 54, 37, 45, 498, 910)
+       (38, 74, 55, 38, 46, 527, 940)
+       (39, 76, 57, 39, 47, 547, 970)
+       (39, 78, 58, 39, 47, 578, 1015)
+       (40, 80, 59, 40, 48, 610, 1045)
+       (40, 82, 60, 41, 49, 643, 1075)
+       (41, 83, 62, 42, 50, 667, 1105)
+       (42, 85, 63, 43, 51, 702, 1135)
+       (42, 87, 64, 43, 52, 738, 1180)
+       (43, 89, 65, 44, 53, 775, 1210)
+       (44, 91, 67, 45, 54, 803, 1240)
+       (44, 93, 68, 46, 55, 842, 1270)
+       (45, 95, 70, 47, 56, 872, 1300)
+       (46, 97, 71, 48, 57, 913, 1330)
+       (47, 100, 72, 49, 58, 955, 1360)
+       (47, 102, 74, 50, 59, 988, 1390)
+       (48, 104, 75, 51, 60, 1032, 1420)
+       (49, 106, 77, 52, 61, 1067, 1450)
+       (50, 108, 78, 53, 62, 1113, 1480)
+       (50, 110, 80, 54, 63, 1150, 1510)
+       (51, 113, 81, 55, 64, 1198, 1540)
+       (52, 115, 83, 56, 65, 1237, 1570)
+       (53, 117, 84, 57, 66, 1287, 1600)
+       (54, 120, 86, 58, 68, 1328, 1630)
+       (54, 122, 88, 59, 69, 1370, 1660)
+       (55, 125, 89, 60, 70, 1423, 1690)
+       (56, 127, 91, 61, 71, 1467, 1720) |]
 
   /// Orc Hunter: the 7-tuple is (str, agi, sta, int, spi, base health, base mana).
   let private orcHunterBase =
@@ -1509,7 +2389,43 @@ module Content =
        (32, 46, 41, 29, 37, 222, 475)
        (33, 48, 42, 29, 37, 238, 515)
        (33, 49, 43, 30, 38, 255, 541)
-       (34, 51, 44, 31, 39, 273, 568) |]
+       (34, 51, 44, 31, 39, 273, 568)
+       (34, 52, 45, 31, 40, 292, 611)
+       (35, 54, 46, 32, 40, 312, 640)
+       (35, 56, 47, 33, 41, 333, 670)
+       (36, 57, 48, 33, 42, 355, 715)
+       (36, 59, 49, 34, 43, 378, 745)
+       (37, 61, 50, 35, 43, 402, 775)
+       (37, 62, 52, 36, 44, 417, 805)
+       (38, 64, 53, 36, 45, 443, 850)
+       (39, 66, 54, 37, 46, 470, 880)
+       (39, 67, 55, 38, 47, 498, 910)
+       (40, 69, 56, 39, 48, 527, 940)
+       (41, 71, 58, 40, 49, 547, 970)
+       (41, 73, 59, 40, 49, 578, 1015)
+       (42, 75, 60, 41, 50, 610, 1045)
+       (42, 77, 61, 42, 51, 643, 1075)
+       (43, 78, 63, 43, 52, 667, 1105)
+       (44, 80, 64, 44, 53, 702, 1135)
+       (44, 82, 65, 44, 54, 738, 1180)
+       (45, 84, 66, 45, 55, 775, 1210)
+       (46, 86, 68, 46, 56, 803, 1240)
+       (46, 88, 69, 47, 57, 842, 1270)
+       (47, 90, 71, 48, 58, 872, 1300)
+       (48, 92, 72, 49, 59, 913, 1330)
+       (49, 95, 73, 50, 60, 955, 1360)
+       (49, 97, 75, 51, 61, 988, 1390)
+       (50, 99, 76, 52, 62, 1032, 1420)
+       (51, 101, 78, 53, 63, 1067, 1450)
+       (52, 103, 79, 54, 64, 1113, 1480)
+       (52, 105, 81, 55, 65, 1150, 1510)
+       (53, 108, 82, 56, 66, 1198, 1540)
+       (54, 110, 84, 57, 67, 1237, 1570)
+       (55, 112, 85, 58, 68, 1287, 1600)
+       (56, 115, 87, 59, 70, 1328, 1630)
+       (56, 117, 89, 60, 71, 1370, 1660)
+       (57, 120, 90, 61, 72, 1423, 1690)
+       (58, 122, 92, 62, 73, 1467, 1720) |]
 
   /// Tauren Hunter: the 7-tuple is (str, agi, sta, int, spi, base health, base mana).
   let private taurenHunterBase =
@@ -1536,7 +2452,43 @@ module Content =
        (34, 44, 41, 27, 36, 222, 475)
        (35, 46, 42, 27, 36, 238, 515)
        (35, 47, 43, 28, 37, 255, 541)
-       (36, 49, 44, 29, 38, 273, 568) |]
+       (36, 49, 44, 29, 38, 273, 568)
+       (36, 50, 45, 29, 39, 292, 611)
+       (37, 52, 46, 30, 39, 312, 640)
+       (37, 54, 47, 31, 40, 333, 670)
+       (38, 55, 48, 31, 41, 355, 715)
+       (38, 57, 49, 32, 42, 378, 745)
+       (39, 59, 50, 33, 42, 402, 775)
+       (39, 60, 52, 34, 43, 417, 805)
+       (40, 62, 53, 34, 44, 443, 850)
+       (41, 64, 54, 35, 45, 470, 880)
+       (41, 65, 55, 36, 46, 498, 910)
+       (42, 67, 56, 37, 47, 527, 940)
+       (43, 69, 58, 38, 48, 547, 970)
+       (43, 71, 59, 38, 48, 578, 1015)
+       (44, 73, 60, 39, 49, 610, 1045)
+       (44, 75, 61, 40, 50, 643, 1075)
+       (45, 76, 63, 41, 51, 667, 1105)
+       (46, 78, 64, 42, 52, 702, 1135)
+       (46, 80, 65, 42, 53, 738, 1180)
+       (47, 82, 66, 43, 54, 775, 1210)
+       (48, 84, 68, 44, 55, 803, 1240)
+       (48, 86, 69, 45, 56, 842, 1270)
+       (49, 88, 71, 46, 57, 872, 1300)
+       (50, 90, 72, 47, 58, 913, 1330)
+       (51, 93, 73, 48, 59, 955, 1360)
+       (51, 95, 75, 49, 60, 988, 1390)
+       (52, 97, 76, 50, 61, 1032, 1420)
+       (53, 99, 78, 51, 62, 1067, 1450)
+       (54, 101, 79, 52, 63, 1113, 1480)
+       (54, 103, 81, 53, 64, 1150, 1510)
+       (55, 106, 82, 54, 65, 1198, 1540)
+       (56, 108, 84, 55, 66, 1237, 1570)
+       (57, 110, 85, 56, 67, 1287, 1600)
+       (58, 113, 87, 57, 69, 1328, 1630)
+       (58, 115, 89, 58, 70, 1370, 1660)
+       (59, 118, 90, 59, 71, 1423, 1690)
+       (60, 120, 92, 60, 72, 1467, 1720) |]
 
   /// Gnome Warlock: the 7-tuple is (str, agi, sta, int, spi, base health, base mana).
   let private gnomeWarlockBase =
@@ -1563,7 +2515,43 @@ module Content =
        (21, 31, 31, 50, 46, 223, 395)
        (22, 31, 32, 51, 47, 233, 423)
        (22, 32, 33, 53, 49, 244, 452)
-       (23, 32, 33, 55, 50, 266, 467) |]
+       (23, 32, 33, 55, 50, 266, 467)
+       (23, 33, 34, 56, 52, 279, 498)
+       (23, 33, 35, 57, 53, 293, 530)
+       (24, 33, 35, 59, 54, 318, 548)
+       (24, 34, 36, 60, 56, 334, 582)
+       (25, 34, 37, 62, 57, 351, 602)
+       (25, 35, 37, 63, 59, 379, 638)
+       (25, 35, 37, 64, 62, 398, 674)
+       (26, 36, 39, 66, 62, 418, 695)
+       (26, 36, 40, 67, 64, 439, 731)
+       (27, 37, 40, 69, 65, 471, 752)
+       (27, 37, 41, 70, 67, 494, 788)
+       (28, 38, 42, 72, 69, 518, 809)
+       (28, 39, 43, 75, 69, 543, 830)
+       (28, 39, 44, 76, 72, 569, 866)
+       (29, 40, 44, 78, 74, 606, 887)
+       (29, 40, 45, 79, 75, 634, 923)
+       (30, 41, 46, 81, 77, 663, 944)
+       (30, 41, 47, 83, 79, 693, 965)
+       (31, 42, 48, 84, 81, 724, 1001)
+       (31, 42, 49, 86, 82, 756, 1022)
+       (32, 43, 49, 88, 84, 799, 1043)
+       (32, 44, 50, 90, 86, 823, 1064)
+       (33, 44, 51, 91, 88, 868, 1100)
+       (33, 45, 52, 93, 90, 904, 1121)
+       (34, 46, 53, 96, 92, 941, 1142)
+       (34, 46, 54, 98, 93, 979, 1163)
+       (35, 47, 55, 100, 96, 1018, 1184)
+       (35, 47, 56, 102, 98, 1058, 1205)
+       (36, 48, 57, 104, 100, 1089, 1226)
+       (37, 49, 58, 106, 102, 1131, 1247)
+       (37, 49, 58, 108, 104, 1184, 1268)
+       (38, 50, 60, 110, 106, 1228, 1289)
+       (38, 51, 61, 112, 108, 1273, 1310)
+       (39, 52, 62, 114, 111, 1319, 1331)
+       (39, 52, 63, 117, 111, 1366, 1352)
+       (40, 53, 64, 119, 115, 1414, 1373) |]
 
   /// Human Warlock: the 7-tuple is (str, agi, sta, int, spi, base health, base mana).
   let private humanWarlockBase =
@@ -1590,7 +2578,43 @@ module Content =
        (26, 28, 32, 45, 48, 223, 395)
        (27, 28, 33, 46, 49, 233, 423)
        (27, 29, 34, 47, 51, 244, 452)
-       (28, 29, 34, 49, 52, 266, 467) |]
+       (28, 29, 34, 49, 52, 266, 467)
+       (28, 30, 35, 50, 54, 279, 498)
+       (28, 30, 36, 51, 55, 293, 530)
+       (29, 30, 36, 53, 56, 318, 548)
+       (29, 31, 37, 54, 58, 334, 582)
+       (30, 31, 38, 56, 59, 351, 602)
+       (30, 32, 38, 57, 61, 379, 638)
+       (30, 32, 39, 58, 64, 398, 674)
+       (31, 33, 40, 60, 65, 418, 695)
+       (31, 33, 41, 61, 67, 439, 731)
+       (32, 34, 41, 63, 68, 471, 752)
+       (32, 34, 42, 64, 70, 494, 788)
+       (33, 35, 43, 66, 72, 518, 809)
+       (33, 36, 44, 68, 73, 543, 830)
+       (33, 36, 45, 69, 75, 569, 866)
+       (34, 37, 45, 71, 77, 606, 887)
+       (34, 37, 46, 72, 78, 634, 923)
+       (35, 38, 47, 74, 80, 663, 944)
+       (35, 38, 48, 76, 82, 693, 965)
+       (36, 39, 48, 77, 86, 724, 1001)
+       (36, 39, 50, 79, 86, 756, 1022)
+       (37, 40, 50, 81, 88, 799, 1043)
+       (37, 41, 51, 83, 90, 823, 1064)
+       (38, 41, 52, 84, 92, 868, 1100)
+       (38, 42, 53, 86, 94, 904, 1121)
+       (39, 43, 54, 88, 96, 941, 1142)
+       (39, 43, 55, 90, 98, 979, 1163)
+       (40, 44, 56, 92, 100, 1018, 1184)
+       (40, 44, 57, 94, 102, 1058, 1205)
+       (41, 45, 58, 96, 105, 1089, 1226)
+       (42, 46, 59, 98, 107, 1131, 1247)
+       (42, 46, 60, 100, 109, 1184, 1268)
+       (43, 47, 61, 102, 111, 1228, 1289)
+       (43, 48, 62, 104, 113, 1273, 1310)
+       (44, 49, 63, 106, 116, 1319, 1331)
+       (44, 49, 64, 108, 118, 1366, 1352)
+       (45, 50, 65, 110, 120, 1414, 1373) |]
 
   /// Orc Warlock: the 7-tuple is (str, agi, sta, int, spi, base health, base mana).
   let private orcWarlockBase =
@@ -1617,7 +2641,43 @@ module Content =
        (29, 25, 34, 42, 49, 223, 395)
        (30, 25, 34, 43, 50, 233, 423)
        (30, 26, 35, 44, 52, 244, 452)
-       (31, 26, 35, 46, 53, 266, 467) |]
+       (31, 26, 35, 46, 53, 266, 467)
+       (31, 27, 36, 47, 55, 279, 498)
+       (31, 27, 37, 48, 56, 293, 530)
+       (32, 27, 37, 50, 57, 318, 548)
+       (32, 28, 38, 51, 59, 334, 582)
+       (33, 28, 39, 53, 60, 351, 602)
+       (33, 29, 39, 54, 62, 379, 638)
+       (33, 29, 40, 55, 64, 398, 674)
+       (34, 30, 41, 57, 65, 418, 695)
+       (34, 30, 41, 58, 68, 439, 731)
+       (35, 31, 42, 60, 68, 471, 752)
+       (35, 31, 43, 61, 70, 494, 788)
+       (36, 32, 44, 63, 71, 518, 809)
+       (36, 33, 45, 65, 73, 543, 830)
+       (36, 33, 46, 66, 75, 569, 866)
+       (37, 34, 46, 68, 77, 606, 887)
+       (37, 34, 47, 69, 78, 634, 923)
+       (38, 35, 47, 71, 80, 663, 944)
+       (38, 35, 47, 73, 83, 693, 965)
+       (39, 36, 50, 74, 84, 724, 1001)
+       (39, 36, 51, 76, 85, 756, 1022)
+       (40, 37, 51, 78, 87, 799, 1043)
+       (40, 38, 52, 80, 89, 823, 1064)
+       (41, 38, 53, 81, 91, 868, 1100)
+       (41, 39, 53, 83, 93, 904, 1121)
+       (42, 40, 54, 85, 96, 941, 1142)
+       (42, 40, 56, 87, 97, 979, 1163)
+       (43, 41, 56, 89, 99, 1018, 1184)
+       (43, 41, 58, 91, 101, 1058, 1205)
+       (44, 42, 59, 93, 103, 1089, 1226)
+       (45, 43, 60, 95, 105, 1131, 1247)
+       (45, 43, 61, 97, 106, 1184, 1268)
+       (46, 44, 62, 99, 109, 1228, 1289)
+       (46, 45, 62, 101, 110, 1273, 1310)
+       (47, 46, 64, 103, 114, 1319, 1331)
+       (47, 46, 65, 105, 116, 1366, 1352)
+       (48, 47, 66, 107, 118, 1414, 1373) |]
 
   /// Undead Warlock: the 7-tuple is (str, agi, sta, int, spi, base health, base mana).
   let private undeadWarlockBase =
@@ -1644,7 +2704,43 @@ module Content =
        (25, 26, 33, 43, 51, 223, 395)
        (26, 26, 34, 44, 52, 233, 423)
        (26, 27, 35, 45, 54, 244, 452)
-       (27, 27, 35, 47, 55, 266, 467) |]
+       (27, 27, 35, 47, 55, 266, 467)
+       (27, 28, 36, 48, 57, 279, 498)
+       (27, 28, 37, 49, 58, 293, 530)
+       (28, 28, 37, 51, 59, 318, 548)
+       (28, 29, 38, 52, 61, 334, 582)
+       (29, 29, 39, 54, 62, 351, 602)
+       (29, 30, 39, 55, 64, 379, 638)
+       (29, 30, 40, 56, 66, 398, 674)
+       (30, 31, 41, 58, 67, 418, 695)
+       (30, 31, 42, 59, 69, 439, 731)
+       (31, 32, 42, 61, 70, 471, 752)
+       (31, 32, 43, 62, 72, 494, 788)
+       (32, 33, 43, 64, 75, 518, 809)
+       (32, 34, 45, 66, 75, 543, 830)
+       (32, 34, 46, 67, 77, 569, 866)
+       (33, 35, 46, 69, 79, 606, 887)
+       (33, 35, 47, 70, 80, 634, 923)
+       (34, 36, 48, 72, 82, 663, 944)
+       (34, 36, 48, 74, 85, 693, 965)
+       (35, 37, 50, 75, 86, 724, 1001)
+       (35, 37, 51, 77, 87, 756, 1022)
+       (36, 38, 51, 79, 89, 799, 1043)
+       (36, 39, 52, 81, 90, 823, 1064)
+       (37, 39, 53, 82, 93, 868, 1100)
+       (37, 40, 54, 84, 95, 904, 1121)
+       (38, 41, 55, 86, 96, 941, 1142)
+       (38, 41, 56, 88, 99, 979, 1163)
+       (39, 42, 57, 90, 101, 1018, 1184)
+       (39, 42, 58, 92, 103, 1058, 1205)
+       (40, 43, 59, 94, 105, 1089, 1226)
+       (41, 44, 60, 96, 107, 1131, 1247)
+       (41, 44, 60, 98, 110, 1184, 1268)
+       (42, 45, 62, 100, 111, 1228, 1289)
+       (42, 46, 63, 102, 113, 1273, 1310)
+       (43, 47, 63, 104, 116, 1319, 1331)
+       (43, 47, 65, 106, 118, 1366, 1352)
+       (44, 48, 66, 108, 120, 1414, 1373) |]
 
   /// The sourced sheet behind one party member, independent of level: the base
   /// row per level, the best-in-slot set, and the class's own attack-power
@@ -1657,7 +2753,10 @@ module Content =
       ApPerStrength: int
       ApPerAgility: int
       /// Rage and energy are fixed pools; mana is computed from Intellect.
-      FixedPool: int option }
+      FixedPool: int option
+      /// The class's pre-raid best-in-slot outfit at 60 as (armour, stats) — what
+      /// the level-24 pieces grow into (`.pi/research/levelscale/bis-60.md`).
+      Gear60: int * (int * int * int * int * int) }
 
   /// The five classes a run starts with, in marching order. A roster is names
   /// rather than a type because it is what the class-select screen stores and
@@ -1720,10 +2819,27 @@ module Content =
   /// row for that level, plus every piece of the set it is high enough to wear.
   /// This is the whole point of the level knob — a level-18 Warrior has the
   /// level-18 row and none of the five pieces that need 24, Tower Shield first.
+  /// The last entry whose floor is at or below `level`; the first entry when the
+  /// level is below every floor. Used for the weapons, whose floors are per class.
+  ///
+  /// The last rung of each weapon ladder is the class's researched pre-raid
+  /// best-in-slot pick at level 60 (`.pi/research/levelscale/bis-60.md`), so a
+  /// level-60 party swings what the research says it wears. The Paladin's and
+  /// Shaman's level-60 pick is a fast caster one-hander that would swing weaker
+  /// than their level-40 weapon, so those two rungs keep its speed but carry the
+  /// level-40 rung's damage per second — the same never-go-backwards rule the
+  /// armour and stats follow.
+  let private rungAt (bands: (int * 'a) list) (level: int) : 'a =
+    match bands |> List.filter (fun (floor, _) -> floor <= level) |> List.tryLast with
+    | Some(_, value) -> value
+    | None -> snd (List.head bands)
+
   let private dress (sheet: Sheet) (level: int) : Dressed =
     let str, agi, sta, intel, spi, baseHealth, baseMana =
       sheet.Base.[max 0 (min (sheet.Base.Length - 1) (level - 1))]
 
+    // The level-24 set, piece by piece, and no piece whose requirement is above the
+    // level: that is what makes a level-18 Warrior miss the five items that need 24.
     let worn =
       sheet.Gear
       |> List.filter (fun g ->
@@ -1738,9 +2854,32 @@ module Content =
         Intellect = acc.Intellect + g.Stats.Intellect
         Spirit = acc.Spirit + g.Stats.Spirit }
 
+    let zero = { Strength = 0; Agility = 0; Stamina = 0; Intellect = 0; Spirit = 0 }
+    let gear = List.fold add zero worn
+
+    // Past 24 the outfit grows into the class's level-60 pre-raid best-in-slot set,
+    // each stat along its own ratio so plate armour climbs 5x while cloth climbs 2x.
+    // 36 is the distance between the two anchors, so level 60 lands on the
+    // researched totals and every level between follows a straight line in the log.
+    // A stat the level-24 set does not carry at all grows from zero instead.
+    let t = float (max 0 (level - 24)) / 36.0
+    let g60Armour, (g60Str, g60Agi, g60Sta, g60Int, g60Spi) = sheet.Gear60
+
+    // The researched caster sets drop a little Strength and Agility for Intellect,
+    // so the level-24 value is the floor: no class loses a stat on the way up.
+    let grow (at24: int) (at60: int) =
+      let at60 = max at24 at60
+      if t = 0.0 then at24
+      elif at24 <= 0 then int (System.Math.Round(float at60 * t))
+      else int (System.Math.Round(float at24 * (float at60 / float at24) ** t))
+
     { Stats =
-        List.fold add { Strength = str; Agility = agi; Stamina = sta; Intellect = intel; Spirit = spi } worn
-      Armor = worn |> List.sumBy (fun g -> g.Armor)
+        { Strength = str + grow gear.Strength g60Str
+          Agility = agi + grow gear.Agility g60Agi
+          Stamina = sta + grow gear.Stamina g60Sta
+          Intellect = intel + grow gear.Intellect g60Int
+          Spirit = spi + grow gear.Spirit g60Spi }
+      Armor = grow (worn |> List.sumBy (fun g -> g.Armor)) g60Armour
       BaseHealth = baseHealth
       BaseMana = baseMana
       Shield = worn |> List.exists (fun g -> g.Shield) }
@@ -1766,10 +2905,8 @@ module Content =
   /// A Party member at one level. The passives are applied to the stats before
   /// the derived values are computed.
   ///
-  /// shortcut: only the Rogue trains a real rank ladder (below 24 he uses the
-  /// rank he could train); the other four keep their level-24 ability ranks at
-  /// every level, so a low-level caster hits harder than the real game allows.
-  /// Upgrading means giving every ability a `Rank` ladder in this file.
+  /// Every class trains the researched rank ladder, and `AbilityDef.at` picks the
+  /// newest rank at or below the character's level.
   let heroStats
     (buffs: PartyBuffKind list)
     (level: int)
@@ -1779,7 +2916,7 @@ module Content =
     (armorClass: ArmorClass)
     (traits: Traits)
     (sheet: Sheet)
-    (attack: AutoAttack)
+    (weapons: (int * AutoAttack) list)
     (resource: ResourceKind)
     (threatBp: int)
     (abilities: Ability list)
@@ -1787,6 +2924,8 @@ module Content =
     : Entity =
     let dressed = dress sheet level
     let d = derive buffs sheet dressed traits
+    let attack = rungAt weapons level
+
 
     // Attack power adds damage per swing at AP/14 per second, scaled by the
     // weapon's own speed: 14 * 20 Ticks in the denominator.
@@ -1877,6 +3016,8 @@ module Content =
             gear "Thunderbrow Ring" (Some 24) 0 (8, 3, 0, 0, 0)
             gear "Shadowfang" (Some 19) 0 (0, 0, 0, 0, 0)
             shieldPiece "Tower Shield" (Some 24) 483 (0, 0, 0, 0, 0) ]
+
+        Gear60 = (6523, (119, 34, 280, 10, 16))
         ApPerStrength = 2
         ApPerAgility = 0
         FixedPool = Some 100 }
@@ -1885,9 +3026,11 @@ module Content =
     let traits = if shielded then warriorTraits else warriorTraits |> fun t -> { t with BlockChanceBp = 0; BlockValue = 0 }
 
     let abilities =
-      [ taunt; heroicStrike; sunderArmor ]
-      @ (if shielded then [ shieldBash; shieldBlock; shieldWall ] else [])
-      @ [ charge; disarm; execute ]
+      AbilityDef.kitAt
+        level
+        ([ tauntRanks; heroicStrikeRanks; sunderArmorRanks ]
+         @ (if shielded then [ shieldBashRanks; shieldBlockRanks; shieldWallRanks ] else [])
+         @ [ chargeRanks; disarmRanks; executeRanks ])
 
     heroStats
       buffs
@@ -1898,7 +3041,13 @@ module Content =
       (if level >= 40 then Plate else Chainmail)
       traits
       sheet
-      { Min = 29; Max = 55; Ticks = secTicks 2.7; Range = 1 }
+      [ (1, { Min = 29; Max = 55; Ticks = secTicks 2.7; Range = 1 })
+        (28, { Min = 104; Max = 156; Ticks = secTicks 4.0; Range = 1 })
+        (33, { Min = 104; Max = 157; Ticks = secTicks 3.5; Range = 1 })
+        (38, { Min = 104; Max = 157; Ticks = secTicks 3.5; Range = 1 })
+        (40, { Min = 87; Max = 131; Ticks = secTicks 2.8; Range = 1 })
+        (60, { Min = 53; Max = 100; Ticks = secTicks 1.6; Range = 1 })
+        ]
       Mana
       tankStanceBp
       abilities
@@ -1929,15 +3078,25 @@ module Content =
             gear "Plains Ring" (Some 24) 0 (0, 0, 8, 3, 0)
             gear "Seal of Wrynn" None 0 (3, 3, 4, 4, 3)
             gear "Staff of the Blessed Seer" (Some 18) 0 (0, 0, 2, 0, 3) ]
+
+        Gear60 = (542, (8, 11, 133, 208, 133))
         ApPerStrength = 1
         ApPerAgility = 0
         FixedPool = None }
-      { Min = 47; Max = 71; Ticks = secTicks 3.0; Range = 1 }
+      [ (1, { Min = 47; Max = 71; Ticks = secTicks 3.0; Range = 1 })
+        (28, { Min = 80; Max = 121; Ticks = secTicks 3.1; Range = 1 })
+        (33, { Min = 74; Max = 112; Ticks = secTicks 2.5; Range = 1 })
+        (38, { Min = 88; Max = 133; Ticks = secTicks 2.9; Range = 1 })
+        (40, { Min = 88; Max = 133; Ticks = secTicks 2.9; Range = 1 })
+        (60, { Min = 58; Max = 109; Ticks = secTicks 1.5; Range = 8 })
+        ]
       Mana
       partyThreatBp
       // Lesser Heal is the downrank: smaller, and the heal a Priest actually
       // reaches for on a small hole because nothing is wasted as overheal.
-      [ lesserHeal; heal; renew; smite; shadowWordPain ]
+      (AbilityDef.kitAt
+        level
+        [ lesserHealRanks; healRanks; renewRanks; smiteRanks; shadowWordPainRanks ])
       { X = 1; Y = 6 }
 
   /// Night Elf Rogue: 221 armour from the set plus 200 from Agility, Assassin's
@@ -1963,10 +3122,18 @@ module Content =
             gear "Protector's Band" (Some 18) 0 (4, 4, 2, 0, 0)
             gear "Assassin's Blade" (Some 19) 0 (3, 4, 0, 0, 0)
             gear "Assassin's Blade (off hand)" (Some 19) 0 (3, 4, 0, 0, 0) ]
+
+        Gear60 = (1272, (55, 251, 173, 8, 5))
         ApPerStrength = 1
         ApPerAgility = 1
         FixedPool = Some 100 }
-      { Min = 20; Max = 39; Ticks = secTicks 1.9; Range = 1 }
+      [ (1, { Min = 20; Max = 39; Ticks = secTicks 1.9; Range = 1 })
+        (28, { Min = 24; Max = 45; Ticks = secTicks 1.5; Range = 1 })
+        (33, { Min = 26; Max = 49; Ticks = secTicks 1.4; Range = 1 })
+        (38, { Min = 26; Max = 49; Ticks = secTicks 1.4; Range = 1 })
+        (40, { Min = 26; Max = 49; Ticks = secTicks 1.4; Range = 1 })
+        (60, { Min = 53; Max = 100; Ticks = secTicks 1.6; Range = 1 })
+        ]
       Energy
       partyThreatBp
       (AbilityDef.kitAt level [ sinisterStrike; backstab; eviscerate; gouge; kick ])
@@ -2004,13 +3171,29 @@ module Content =
             gear "Black Pearl Ring" (Some 17) 0 (0, 0, 2, 2, 6)
             gear "Rod of the Sleepwalker" (Some 24) 0 (0, 0, 0, 11, 10)
             gear "Gravestone Scepter" None 0 (0, 0, 0, 0, 1) ]
+
+        Gear60 = (787, (12, 3, 159, 237, 42))
         ApPerStrength = 0
         ApPerAgility = 0
         FixedPool = None }
-      { Min = 30; Max = 57; Ticks = secTicks 1.5; Range = 8 }
+      [ (1, { Min = 30; Max = 57; Ticks = secTicks 1.5; Range = 8 })
+        (28, { Min = 80; Max = 121; Ticks = secTicks 3.1; Range = 8 })
+        (33, { Min = 74; Max = 112; Ticks = secTicks 2.5; Range = 8 })
+        (38, { Min = 88; Max = 133; Ticks = secTicks 2.9; Range = 8 })
+        (40, { Min = 88; Max = 133; Ticks = secTicks 2.9; Range = 8 })
+        (60, { Min = 58; Max = 109; Ticks = secTicks 1.5; Range = 8 })
+        ]
       Mana
       partyThreatBp
-      [ fireball; frostbolt; arcaneMissiles; arcaneExplosion; blizzard; polymorph; counterspell ]
+      (AbilityDef.kitAt
+        level
+        [ fireballRanks
+          frostboltRanks
+          arcaneMissilesRanks
+          arcaneExplosionRanks
+          blizzardRanks
+          polymorphRanks
+          counterspellRanks ])
       { X = 2; Y = 6 }
 
   /// Night Elf Druid: 238 armour from the set, the same staff as the Priest. Four
@@ -2036,13 +3219,23 @@ module Content =
             gear "Spidersilk Boots" (Some 20) 29 (0, 0, 4, 4, 7)
             gear "Lavishly Jeweled Ring" (Some 17) 0 (0, 2, 0, 6, 0)
             gear "Staff of the Blessed Seer" (Some 18) 0 (0, 0, 2, 0, 3) ]
+
+        Gear60 = (614, (8, 8, 127, 212, 161))
         ApPerStrength = 1
         ApPerAgility = 0
         FixedPool = None }
-      { Min = 47; Max = 71; Ticks = secTicks 3.0; Range = 1 }
+      [ (1, { Min = 47; Max = 71; Ticks = secTicks 3.0; Range = 1 })
+        (28, { Min = 80; Max = 121; Ticks = secTicks 3.1; Range = 1 })
+        (33, { Min = 74; Max = 112; Ticks = secTicks 2.5; Range = 1 })
+        (38, { Min = 88; Max = 133; Ticks = secTicks 2.9; Range = 1 })
+        (40, { Min = 88; Max = 133; Ticks = secTicks 2.9; Range = 1 })
+        (60, { Min = 140; Max = 210; Ticks = secTicks 3.3; Range = 1 })
+        ]
       Mana
       partyThreatBp
-      [ healingTouchR4; regrowth; rejuvenation; entanglingRoots; wrath; moonfire ]
+      (AbilityDef.kitAt
+        level
+        [ healingTouchR4Ranks; regrowthRanks; rejuvenationRanks; entanglingRootsRanks; wrathRanks; moonfireRanks ])
       { X = 2; Y = 7 }
 
   /// Human Paladin: mail at 24 — plate is trained at 40 — with Verigan's Fist
@@ -2072,13 +3265,27 @@ module Content =
             gear "Lorekeeper's Ring" (Some 18) 0 (0, 0, 2, 0, 0)
             gear "Plains Ring" (Some 24) 0 (0, 0, 8, 3, 0)
             gear "Verigan's Fist" None 0 (0, 0, 7, 6, 12) ]
+
+        Gear60 = (3162, (8, 13, 137, 185, 177))
         ApPerStrength = 2
         ApPerAgility = 0
         FixedPool = None }
-      { Min = 65; Max = 99; Ticks = secTicks 3.2; Range = 1 }
+      [ (1, { Min = 65; Max = 99; Ticks = secTicks 3.2; Range = 1 })
+        (28, { Min = 104; Max = 156; Ticks = secTicks 4.0; Range = 1 })
+        (33, { Min = 95; Max = 143; Ticks = secTicks 3.2; Range = 1 })
+        (38, { Min = 95; Max = 143; Ticks = secTicks 3.2; Range = 1 })
+        (40, { Min = 87; Max = 131; Ticks = secTicks 2.8; Range = 1 })
+        (60, { Min = 51; Max = 97; Ticks = secTicks 1.9; Range = 1 })
+        ]
       Mana
       partyThreatBp
-      [ flashOfLight; holyLight; judgement; paladinHammerOfJustice; divineProtection ]
+      (AbilityDef.kitAt
+        level
+        [ flashOfLightRanks
+          holyLightRanks
+          judgementRanks
+          paladinHammerOfJusticeRanks
+          divineProtectionRanks ])
       { X = 1; Y = 8 }
 
   /// Gnome Warlock: cloth, the same washed-out set as the Mage — five of the
@@ -2111,13 +3318,23 @@ module Content =
             gear "Plains Ring" (Some 24) 0 (0, 0, 8, 3, 0)
             gear "Staff of the Shade" (Some 22) 0 (0, 0, 0, 0, 0)
             gear "Gravestone Scepter" None 0 (0, 0, 0, 0, 1) ]
+
+        Gear60 = (787, (12, 3, 159, 237, 42))
         ApPerStrength = 0
         ApPerAgility = 0
         FixedPool = None }
-      { Min = 30; Max = 57; Ticks = secTicks 1.5; Range = 8 }
+      [ (1, { Min = 30; Max = 57; Ticks = secTicks 1.5; Range = 8 })
+        (28, { Min = 80; Max = 121; Ticks = secTicks 3.1; Range = 8 })
+        (33, { Min = 74; Max = 112; Ticks = secTicks 2.5; Range = 8 })
+        (38, { Min = 88; Max = 133; Ticks = secTicks 2.9; Range = 8 })
+        (40, { Min = 88; Max = 133; Ticks = secTicks 2.9; Range = 8 })
+        (60, { Min = 58; Max = 109; Ticks = secTicks 1.5; Range = 8 })
+        ]
       Mana
       partyThreatBp
-      [ shadowBolt; corruption; curseOfAgony; warlockImmolate; fear ]
+      (AbilityDef.kitAt
+        level
+        [ shadowBoltRanks; corruptionRanks; curseOfAgonyRanks; warlockImmolateRanks; fearRanks ])
       { X = 3; Y = 6 }
 
   /// Orc Shaman: the Druid's verified leather-and-cloth set, which is as far as
@@ -2149,13 +3366,23 @@ module Content =
             gear "Spidersilk Boots" (Some 20) 29 (0, 0, 4, 4, 7)
             gear "Lavishly Jeweled Ring" (Some 17) 0 (0, 2, 0, 6, 0)
             gear "Staff of the Blessed Seer" (Some 18) 0 (0, 0, 2, 0, 3) ]
+
+        Gear60 = (3162, (0, 5, 139, 188, 169))
         ApPerStrength = 1
         ApPerAgility = 0
         FixedPool = None }
-      { Min = 47; Max = 71; Ticks = secTicks 3.0; Range = 1 }
+      [ (1, { Min = 47; Max = 71; Ticks = secTicks 3.0; Range = 1 })
+        (28, { Min = 104; Max = 156; Ticks = secTicks 4.0; Range = 1 })
+        (33, { Min = 104; Max = 157; Ticks = secTicks 3.5; Range = 1 })
+        (38, { Min = 104; Max = 157; Ticks = secTicks 3.5; Range = 1 })
+        (40, { Min = 124; Max = 187; Ticks = secTicks 4.0; Range = 1 })
+        (60, { Min = 51; Max = 97; Ticks = secTicks 1.9; Range = 1 })
+        ]
       Mana
       partyThreatBp
-      [ shamanLightningBolt; earthShock; flameShock; shamanHealingWave ]
+      (AbilityDef.kitAt
+        level
+        [ shamanLightningBoltRanks; earthShockRanks; flameShockRanks; shamanHealingWaveRanks ])
       { X = 3; Y = 7 }
 
   /// Night Elf Hunter: level-24 leather only — hunters too train mail at 40 — on
@@ -2194,13 +3421,21 @@ module Content =
             gear "Feet of the Lynx" (Some 19) 63 (3, 8, 0, 0, 0)
             gear "Ring of Precision" (Some 20) 0 (0, 6, 0, 0, 3)
             gear "Protector's Band" (Some 18) 0 (4, 4, 2, 0, 0) ]
+
+        Gear60 = (1604, (43, 256, 188, 25, 5))
         ApPerStrength = 0
         ApPerAgility = 0
         FixedPool = None }
-      { Min = 66; Max = 84; Ticks = secTicks 1.8; Range = 8 }
+      [ (1, { Min = 66; Max = 84; Ticks = secTicks 1.8; Range = 8 })
+        (28, { Min = 36; Max = 68; Ticks = secTicks 2.9; Range = 8 })
+        (33, { Min = 43; Max = 82; Ticks = secTicks 2.8; Range = 8 })
+        (38, { Min = 43; Max = 82; Ticks = secTicks 2.8; Range = 8 })
+        (40, { Min = 46; Max = 86; Ticks = secTicks 2.9; Range = 8 })
+        (60, { Min = 72; Max = 137; Ticks = secTicks 2.5; Range = 8 })
+        ]
       Mana
       partyThreatBp
-      [ arcaneShot; serpentSting; raptorStrike ]
+      (AbilityDef.kitAt level [ arcaneShotRanks; serpentStingRanks; raptorStrikeRanks ])
       { X = 3; Y = 8 }
 
   /// Every class the sim can build, by the name a roster entry uses. None means

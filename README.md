@@ -51,7 +51,7 @@ Requires [mise](https://mise.jdx.dev/) (it installs the right .NET and
 mise install            # .NET 10 + pre-commit + the ink compiler, per mise.toml
 mise run hooks          # install the git hooks — do this once
 mise run build          # solution, Release
-mise run test           # 160 tests, ~4.5min
+mise run test           # 160 tests, ~2min
 mise run run            # play it
 mise run publish        # dist/ — the game, runnable without the SDK
 ```
@@ -147,8 +147,12 @@ The seed sweep is the one that matters most. The tests prove the *invariants* ho
 only the sweep proves the *game* still behaves. It currently prints:
 
 ```
-seeds=120 cleared=120 wiped=0 unresolved=0 median-ticks=1331 min=1116 max=2248
+seeds=120 cleared=120 wiped=0 unresolved=0 median-ticks=950 min=794 max=1080
 ```
+
+(Measured at `72e15f9`. Release build, 160/160 tests passing. Re-measure and
+update this line whenever a change moves it — a stale line makes every later
+comparison meaningless.)
 
 Treat that line as a fingerprint. A refactor that moves it changed behaviour — which
 is how the `Sim` → `SimState`/`SimTick` split was *proven* to be a pure refactor
@@ -169,8 +173,19 @@ Two decisions constrain everything, and both are easy to undo by accident:
 ## Data and licensing
 
 This is an unaffiliated fan project. **No Blizzard assets are used** — no extracted
-models, textures, audio, or map data, and no game files are read. The geometry is
-generated from a seed, and everything drawn is a coloured primitive.
+models, textures, audio, or map data, and no game files are read. Nor is the art
+anyone else's: the tilesets and sprites under `src/WowRoguelike.Game/Assets/` are
+slices of sheets generated with Gemini, and the dungeon battlemaps the grid
+fixtures are thresholded from are community-made art from
+[r/battlemaps](https://www.reddit.com/r/battlemaps/). Procedural floors are
+generated from a seed; the dungeon floors that are *not* procedural are extracted
+from those battlemaps rather than invented.
+
+Those sources are deliberately untracked: `.gitignore` excludes `images/`, so a
+clone carries the processed slices in `Assets/` but not the sheets they came from.
+`tools/slice_dungeon_assets.py` and `tools/extract_*.py` need a local `images/`
+tree, which means a fresh clone can rebuild the game but cannot re-derive the art
+or `MapsScarlet.fs` (a generated file, like the compiled ink JSON).
 
 Mechanics are modelled on Classic Era Warcraft, and every number claiming to be WoW
 data is **classified as sourced or placeholder** in the `VERIFY` block at the top of
@@ -186,4 +201,4 @@ placeholder to a fact.
 |---|---|
 | [`CONTEXT.md`](CONTEXT.md) | The glossary. **The `_Avoid_` lists are binding** — code and comments must use the canonical term. |
 | [`docs/adr/`](docs/adr/) | The two decisions above. |
-| [`docs/HANDOFF.md`](docs/HANDOFF.md) | Written for a fresh agent: architecture traps, hard-won knowledge, the open backlog, and what to do next. |
+| [`docs/agents/domain.md`](docs/agents/domain.md) | Written for a fresh agent: architecture traps, hard-won knowledge, the open backlog, and what to do next. |
