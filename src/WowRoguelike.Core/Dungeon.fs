@@ -15,20 +15,33 @@ namespace WowRoguelike.Core
 /// happens. Everything after it treats the Grid as read-only for the Run.
 module Dungeon =
 
-  let width = 46
-  let height = 26
+  // Sized for the wide corridors below rather than for the rooms: a 5-tile hall
+  // eats most of what a 46x26 floor had left once the rooms and their margins are
+  // in. The map is also the Party's walk, so this grew with the halls.
+  let width = 72
+  let height = 40
 
   let minRoomSize = 6
   let maxRoomSize = 11
   let targetRooms = 6
-  let private placementAttempts = 300
+  let private placementAttempts = 1500
+
+  /// The lobby — the room the Party enters in, and the only room whose size is
+  /// fixed rather than drawn. Twice an ordinary room in each direction, because
+  /// it is where five bodies stack and reform before the first pull.
+  let lobbyWidth = 16
+  let lobbyHeight = 12
+
+  /// Five tiles wide: wide enough for five abreast, so the Party walks a corridor
+  /// in formation instead of queueing in it. At one tile a five-member Party
+  /// cannot pass itself, which makes every corridor a deadlock rather than a
+  /// route.
+  let private corridorWidth = 5
 
   /// Wall-to-wall gap kept between rooms, so a corridor reads as a corridor.
-  let private roomMargin = 1
-
-  /// Two tiles wide. At one tile a five-member Party cannot pass itself, which
-  /// makes every corridor a deadlock rather than a route.
-  let private corridorWidth = 2
+  /// Derived from the corridor width: a gap narrower than a hall is a gap the
+  /// hall carves through, which merges two rooms into one blob.
+  let private roomMargin = corridorWidth
 
   /// Breadth-first flood fill over floor tiles, 4-way, returning the path
   /// distance to every tile. -1 means a wall or an unreachable tile.
@@ -69,10 +82,15 @@ module Dungeon =
     |> Seq.forall (fun p -> distances.[p.Y * g.Width + p.X] >= 0)
 
   let private carveCorridor (g: Grid) (from: Pos) (target: Pos) =
+    // Centred on the path, not offset from it: the band has to straddle the line
+    // it is drawn along, or a wide hall wanders off its own route and swallows the
+    // rooms it passes.
+    let offset = (corridorWidth - 1) / 2
+
     let carve (p: Pos) =
       for dy in 0 .. corridorWidth - 1 do
         for dx in 0 .. corridorWidth - 1 do
-          let q = { X = p.X + dx; Y = p.Y + dy }
+          let q = { X = p.X + dx - offset; Y = p.Y + dy - offset }
 
           if Grid.inBounds g q then
             g.Walls.[q.Y * g.Width + q.X] <- false
@@ -113,6 +131,18 @@ module Dungeon =
     let placed = ResizeArray<Room>()
     let mutable attempts = 0
 
+    // The lobby first, so it is the room the Party enters in — `generate` takes
+    // the head of the list as the entrance. Its size is fixed rather than drawn,
+    // so every seed gets a lobby rather than a first room that happens to be big.
+    let lobbyLeft = draw 1 (width - lobbyWidth - 2)
+    let lobbyTop = draw 1 (height - lobbyHeight - 2)
+
+    placed.Add
+      { Left = lobbyLeft
+        Top = lobbyTop
+        Right = lobbyLeft + lobbyWidth - 1
+        Bottom = lobbyTop + lobbyHeight - 1 }
+
     while placed.Count < targetRooms && attempts < placementAttempts do
       attempts <- attempts + 1
       let w = draw minRoomSize maxRoomSize
@@ -128,15 +158,6 @@ module Dungeon =
 
       if not (placed |> Seq.exists (Room.tooClose roomMargin candidate)) then
         placed.Add candidate
-
-    // Placement can only fail by running out of attempts, which would leave a
-    // Dungeon with no rooms at all. Fall back to one room rather than crash.
-    if placed.Count = 0 then
-      placed.Add
-        { Left = width / 4
-          Top = height / 4
-          Right = width * 3 / 4
-          Bottom = height * 3 / 4 }
 
     let rooms = List.ofSeq placed
 

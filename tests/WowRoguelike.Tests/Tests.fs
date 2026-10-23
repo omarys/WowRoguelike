@@ -642,6 +642,47 @@ let ``generated rooms do not touch each other`` (seed: int) =
   |> List.pairwise
   |> List.forall (fun (a, b) -> not (Room.tooClose 0 a b))
 
+/// Hallways are at least five tiles wide, so the Party walks them in formation
+/// instead of queueing in them. Asserted on the carved geometry rather than on
+/// `corridorWidth`, so the guarantee survives a refactor of the carving.
+[<Property>]
+let ``every hallway tile sits in a band at least five tiles wide`` (seed: int) =
+  let plan = layoutOf seed 5UL
+  let g = plan.Grid
+
+  // Contiguous floor through `p` along one axis, both directions. The walk has to
+  // take its direction as an argument: re-walking forwards from the far end
+  // measures the wrong run and reports walls that are not there.
+  let span (dx, dy) (p: Pos) =
+    let rec walk (sx, sy) (q: Pos) =
+      if Grid.isFloor g (Pos.move sx sy q) then
+        1 + walk (sx, sy) (Pos.move sx sy q)
+      else
+        0
+
+    walk (-dx, -dy) p + 1 + walk (dx, dy) p
+
+  let inRoom (p: Pos) = plan.Rooms |> List.exists (fun r -> Room.contains r p)
+
+  Grid.tiles g
+  |> Seq.filter (Grid.isFloor g)
+  |> Seq.forall (fun p ->
+    inRoom p
+    || max (span (1, 0) p) (span (0, 1) p) >= 5)
+
+/// The lobby is the room the Party enters in, and it is bigger than a room: five
+/// bodies need somewhere to stack before the first pull.
+[<Fact>]
+let ``the entrance room is a lobby`` () =
+  for seed in 1UL..20UL do
+    let plan = Dungeon.layout seed
+    let lobby = plan.Rooms |> List.find (fun r -> Room.contains r plan.Entrance)
+
+    Assert.True(
+      Room.width lobby >= Dungeon.lobbyWidth && Room.height lobby >= Dungeon.lobbyHeight,
+      sprintf "seed %d: lobby is %dx%d" seed (Room.width lobby) (Room.height lobby)
+    )
+
 /// The boss is the farthest room by path length, not by straight line. That
 /// distinction is the reason this uses a flood fill rather than arithmetic.
 [<Property>]
@@ -675,7 +716,7 @@ let ``a generated dungeon deploys a party and a fight on floor tiles`` () =
   Assert.Equal(List.length tiles, tiles |> List.distinct |> List.length)
 
 /// The one-entity-per-tile invariant has to hold in a generated Dungeon too,
-/// where corridors are two tiles wide and the crowding is real.
+/// where hallways are five tiles wide and the crowding is real.
 [<Property>]
 let ``no two living entities share a tile in a generated dungeon`` (seed: int) =
   let rec loop (w: World) n =
