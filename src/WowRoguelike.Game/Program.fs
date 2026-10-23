@@ -158,6 +158,8 @@ module private Menu =
     | Closed
     | PickDungeon of int
     | PickDifficulty of int * int
+    /// Inspecting the maps instead of playing them: which source, which seed.
+    | Browse of int * uint64
 
   /// One playable dungeon and the levels it can be entered at.
   type Entry =
@@ -196,7 +198,7 @@ module private Menu =
             Art = "sprites/scarlet-monastery"
             Start = scarletStart wing.Name } ]
 
-type RoguelikeGame() as this =
+type RoguelikeGame(?browse: int * uint64) as this =
   inherit Game()
 
   let graphics = new GraphicsDeviceManager(this)
@@ -781,6 +783,22 @@ type RoguelikeGame() as this =
 
   let menuItems = Menu.entries ()
 
+  /// Every map the game can draw, for inspection: the generated Dungeon, both
+  /// hand-traced Caverns levels, and each Scarlet wing. The art folder is the
+  /// one a playable entry uses, so a browsed map wears the creatures it wears
+  /// in play. The Scarlet floorplans are hand-traced and ignore the seed; the
+  /// other three re-roll with it.
+  let browseSources : (string * string * (uint64 -> World)) list =
+    [ yield ("generated dungeon (72x40)", "", (fun seed -> Content.dungeon seed))
+      yield ("Screaming Gully", "", (fun seed -> Content.gully seed))
+      yield ("Wailing Caverns (stitched)", "", (fun seed -> Content.wailingCaverns seed))
+
+      for wing in Content.scarletWings do
+        yield
+          ("Scarlet Monastery — " + wing.Name,
+           "sprites/scarlet-monastery",
+           (fun seed -> Content.scarletMonasteryAt wing.Name Content.Median seed)) ]
+
   /// A fresh run starts in the menu, so the dungeon and its level are chosen
   /// rather than assumed.
   let mutable menu = Menu.PickDungeon 0
@@ -809,6 +827,20 @@ type RoguelikeGame() as this =
     menu <- Menu.Closed
     Console.WriteLine(sprintf "[%s — level %d]" entry.Label (snd entry.Bands.[band]))
 
+  /// Show a browsed map in the normal view: the renderer, camera and tileset all
+  /// work off `world`, so browsing is a matter of putting a different World in
+  /// it, not of drawing a second time.
+  let showBrowse (source: int) (seed: uint64) =
+    let source = max 0 (min (browseSources.Length - 1) source)
+    let seed = max 1UL seed
+    let _, art, start = browseSources |> List.item source
+    world <- start seed
+    creatureArt <- bindCreatureArt art world
+    selected <- None
+    pendingAction <- None
+    pending.Clear()
+    menu <- Menu.Browse(source, seed)
+
   let updateMenu (keyboard: KeyboardState) =
     let up = pressed keyboard Keys.Up || pressed keyboard Keys.W
     let down = pressed keyboard Keys.Down || pressed keyboard Keys.S
@@ -822,6 +854,7 @@ type RoguelikeGame() as this =
       if down then menu <- Menu.PickDungeon((i + 1) % menuItems.Length)
       elif up then menu <- Menu.PickDungeon((i + menuItems.Length - 1) % menuItems.Length)
       elif confirm then menu <- Menu.PickDifficulty(i, 0)
+      elif pressed keyboard Keys.B then showBrowse 0 1UL
       elif pressed keyboard Keys.Escape then menu <- Menu.Closed
     | Menu.PickDifficulty(i, band) ->
       let bands = menuItems.[i].Bands
@@ -830,6 +863,19 @@ type RoguelikeGame() as this =
       elif up then menu <- Menu.PickDifficulty(i, (band + bands.Length - 1) % bands.Length)
       elif confirm then startEntry i band
       elif pressed keyboard Keys.Escape then menu <- Menu.PickDungeon i
+    | Menu.Browse(source, seed) ->
+      // Left/right re-rolls the seed, up/down changes map, because the thing
+      // being inspected changes most often with the seed.
+      if pressed keyboard Keys.Right then showBrowse source (seed + 1UL)
+      elif pressed keyboard Keys.Left then showBrowse source (max 1UL (seed - 1UL))
+      elif down then showBrowse (source + 1) seed
+      elif up then showBrowse (source - 1) seed
+      elif confirm then
+        // Take the browsed map into play, exactly as if it had been chosen.
+        printedLogLines <- 0
+        accumulator <- 0.0
+        menu <- Menu.Closed
+      elif pressed keyboard Keys.Escape then menu <- Menu.PickDungeon 0
 
   /// The menu is an opaque card: the dungeon list first, then the band, which is
   /// the difficulty.
@@ -845,6 +891,7 @@ type RoguelikeGame() as this =
     let rows =
       match menu with
       | Menu.Closed -> []
+      | Menu.Browse _ -> []
       | Menu.PickDungeon i ->
         [ yield "CHOOSE A DUNGEON", Color(190, 214, 160), false
           for index, entry in List.indexed menuItems do
@@ -855,7 +902,7 @@ type RoguelikeGame() as this =
 
             yield sprintf "  %s   (%s)" entry.Label detail, Color.White, index = i
           yield "", Color.White, false
-          yield "Arrows move  -  Enter selects  -  Esc back", Color(140, 146, 130), false ]
+          yield "Arrows move  -  Enter selects  -  B browses maps  -  Esc back", Color(140, 146, 130), false ]
       | Menu.PickDifficulty(i, band) ->
         let entry = menuItems.[i]
 
@@ -876,6 +923,22 @@ type RoguelikeGame() as this =
 
       drawTextShadow text (x + 14) rowY colour)
 
+  /// Browsing draws the map, not a card over it: one strip at the top so the
+  /// floorplan stays visible while the keys stay on screen.
+  let drawBrowseHud (source: int) (seed: uint64) =
+    let label, _, _ = browseSources |> List.item source
+
+    let text =
+      sprintf
+        "%s    seed %d    map %d/%d        Left/Right seed    Up/Down map    Enter play    Esc back"
+        label
+        seed
+        (source + 1)
+        browseSources.Length
+
+    spriteBatch.Draw(pixel, Rectangle(0, 0, columns * tile, 22), Color(10, 12, 16) * 0.92f)
+    drawTextShadow (shorten (max 1 ((columns * tile - 16) / cellW)) text) 8 6 (Color(190, 214, 160))
+
   override _.Initialize() =
     // Set here rather than in the constructor: the window exists by now.
     this.Window.AllowUserResizing <- true
@@ -888,6 +951,12 @@ type RoguelikeGame() as this =
     disc <- makeDisc 32
     fontTex <- buildFontTexture ()
     textures <- loadTextures ()
+
+    // Opened straight into the browser from the command line. Textures have to
+    // be loaded first: the creature art is bound from them.
+    match browse with
+    | Some (source, seed) -> showBrowse source seed
+    | None -> ()
 
   member this.StepWorld (keyboard: KeyboardState) (gameTime: GameTime) =
     if keyboard.IsKeyDown(Keys.Escape) then
@@ -1270,16 +1339,45 @@ type RoguelikeGame() as this =
     if List.isEmpty world.Log then
       drawText "nothing has happened yet" 8 bodyTop (Color(120, 120, 138))
 
-    if menu <> Menu.Closed then drawMenu ()
+    if menu <> Menu.Closed then
+      match menu with
+      | Menu.Browse(source, seed) -> drawBrowseHud source seed
+      | _ -> drawMenu ()
 
     spriteBatch.End()
     base.Draw(gameTime)
 
 module Program =
 
+  /// `--browse [map] [seed]` opens the map browser at that map and seed.
+  let private browseArgs (args: string list) : (int * uint64) option =
+    match args |> List.tryFindIndex ((=) "--browse") with
+    | None -> None
+    | Some i ->
+      let intAt j fallback =
+        args
+        |> List.tryItem (i + j)
+        |> Option.bind (fun s ->
+          match System.Int32.TryParse s with
+          | true, v -> Some v
+          | _ -> None)
+        |> Option.defaultValue fallback
+
+      let seed =
+        args
+        |> List.tryItem (i + 2)
+        |> Option.bind (fun s ->
+          match System.UInt64.TryParse s with
+          | true, v -> Some v
+          | _ -> None)
+        |> Option.defaultValue 1UL
+
+      Some(intAt 1 0, seed)
+
   [<EntryPoint>]
-  let main _ =
-    use game = new RoguelikeGame()
+  let main (argv: string[]) =
+    let args = argv |> Array.toList
+    use game = new RoguelikeGame(?browse = browseArgs args)
 
     Console.WriteLine "WowRoguelike — Screaming Gully (Wailing Caverns, first encounter)"
     Console.WriteLine ""
@@ -1289,6 +1387,8 @@ module Program =
     Console.WriteLine "  <actor> move <x> <y>          walk"
     Console.WriteLine "  <actor> <target> <abilitykey> use an ability, e.g. `3 8 kick`"
     Console.WriteLine "  pause | resume | step | speed <n> | party | state | targets <actor> <abilitykey>"
+    Console.WriteLine ""
+    Console.WriteLine "  --browse [map] [seed]         open the map browser: Left/Right seeds, Up/Down maps"
 
     game.Run()
     0

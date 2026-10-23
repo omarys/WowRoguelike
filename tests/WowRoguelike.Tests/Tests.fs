@@ -3062,6 +3062,28 @@ let ``every world fields the same party, tank first`` () =
     let names = SimState.aliveParty w |> List.map (fun e -> e.Name)
     Assert.True((names = expected), $"{name}: {names}")
 
+/// The MonoGame map browser opens any of these, so each one has to be a place a
+/// World can stand in: floor under every entity, and a Party that can walk its
+/// whole map. The generated maps are the ones that vary, so they get the seeds.
+[<Fact>]
+let ``every browsable map is connected and stands its entities on floor`` () =
+  let worlds =
+    [ for seed in 1UL..5UL do
+        yield sprintf "generated dungeon seed %d" seed, Content.dungeon seed
+        yield sprintf "gully seed %d" seed, Content.gully seed
+        yield sprintf "wailing caverns seed %d" seed, Content.wailingCaverns seed
+
+      for wing in Content.scarletWings do
+        yield "scarlet " + wing.Name, Content.scarletMonasteryAt wing.Name Content.Median 1UL ]
+
+  for name, w in worlds do
+    let party = SimState.aliveParty w
+    Assert.False(List.isEmpty party, sprintf "%s has no party" name)
+    Assert.True(Dungeon.isConnected w.Grid party.Head.Pos, sprintf "%s is not connected" name)
+
+    for e in w.Entities do
+      Assert.True(Grid.isFloor w.Grid e.Pos, sprintf "%s: %s stands on a wall" name e.Name)
+
 // ===========================================================================
 // The Scarlet Monastery wings (MapsScarlet)
 // ===========================================================================
