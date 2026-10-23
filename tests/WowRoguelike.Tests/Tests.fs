@@ -2898,6 +2898,47 @@ let ``thundercrack hits every party member in melee, not only its target`` () =
   // Only the stun half is single-target; see the note on `thundercrack`.
   Assert.True(isStunnedBy w 3)
 
+/// A body holding a tile with no step of its own used to sever the route for
+/// everybody behind it: the claim-aware search found nothing, so nothing moved,
+/// so no tile was ever freed and the Party froze outright — at tick 8000, five
+/// abreast in a Scarlet corridor, three of them holding a goal on each other's
+/// tile. The route now passes *through* an ally that is standing still, and only
+/// the step itself has to be free, so a follower walks up to the blocker instead
+/// of stopping where it stood.
+[<Fact>]
+let ``a stationary ally no longer severs the route behind it`` () =
+  // One tile wide, so the blocker cannot be walked around: every route to the
+  // goal ends at its tile, and the claim-aware search refuses all of them. It
+  // stands two tiles in, so the follower's *first* step is a free one.
+  let grid =
+    Grid.ofRows [ "########"; "########"; "#......#"; "########"; "########" ]
+
+  let tap = { Min = 1; Max = 1; Ticks = ticks 1; Range = 1 }
+
+  let mover =
+    { Content.hero 2 "Rogue" Dps 1000 100 tap 10000 [] { X = 1; Y = 2 } with
+        Goal = Some { X = 6; Y = 2 } }
+
+  let blocker = Content.hero 1 "Tank" Tank 1000 1000 tap 50000 [] { X = 4; Y = 2 }
+
+  let w =
+    { Tick = ticks 0
+      Grid = grid
+      Entities = [ blocker; mover ]
+      Pending = []
+      Rng = Rng.streamsOf 3UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let after = [ 1 .. 40 ] |> List.fold (fun w _ -> SimTick.step [] w) w
+  let posOf id = (after.Entities |> List.find (fun e -> e.Id = id)).Pos
+
+  // It walked up to the blocker...
+  Assert.Equal(3, (posOf (EntityId 2)).X)
+  // ...and stopped in front of it, because the blocking tile is still taken.
+  Assert.Equal(4, (posOf (EntityId 1)).X)
+
 /// Thundercrack and Terrify are both stuns, so a Mob that always picks its first
 /// control spell would never use the second one.
 [<Fact>]
