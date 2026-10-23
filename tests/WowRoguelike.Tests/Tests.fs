@@ -1063,7 +1063,7 @@ let ``armor classes only provide armor`` () =
 [<Fact>]
 let ``stun prevents action and is not broken by damage`` () =
   let w = arena 0 0 { X = 7; Y = 5 }
-  let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) (AbilityDef.at 24 Content.gouge).Value w
+  let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) (AbilityDef.at 26 Content.cheapShot).Value w
   Assert.False(SimState.canAct (mobOf w))
   let w = SimCombat.dealDamage (EntityId 100) 10 w
   Assert.False(SimState.canAct (mobOf w))
@@ -2482,6 +2482,106 @@ let ``the rogue cashes in four combo points and strikes below that`` () =
   // builder — 150% weapon damage beats 100% plus a flat step.
   Assert.Contains("Backstab", ordersAt 3)
   Assert.DoesNotContain("Eviscerate", ordersAt 3)
+
+/// Nobody has noticed the Party yet — the only state `prePull` runs in, and the
+/// state that stands in for a stealthed Rogue.
+let private calmWorld (rogue: Entity) (mobs: Entity list) : World =
+  { Tick = ticks 0
+    Grid = Grid.create 12 10
+    Entities = rogue :: mobs
+    Pending = []
+    Rng = Rng.streamsOf 3UL
+    PartyBuffs = []
+    Quests = []
+    Log = [] }
+
+let private calmMob (id: int) (name: string) (pos: Pos) : Entity =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+  Content.mob id name CreatureType.Humanoid 21 1000 1000 (Some tap) [] None pos
+
+/// Sap is the only opener that starts nothing, so it takes the pull's first slot
+/// even though Gouge is also up: Gouge's ten-second cooldown can be spent inside
+/// the fight, Sap's "not in combat" window cannot be got back.
+[<Fact>]
+let ``the rogue opens with Sap rather than Gouge`` () =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  let rogue =
+    Content.hero
+      3
+      "Rogue"
+      Dps
+      1000
+      100
+      tap
+      10000
+      [ (AbilityDef.at 24 Content.sap).Value
+        (AbilityDef.at 24 Content.gouge).Value
+        (AbilityDef.at 24 Content.sinisterStrike).Value ]
+      { X = 5; Y = 5 }
+
+  let w =
+    calmWorld rogue [ calmMob 100 "Scarlet Myrmidon" { X = 6; Y = 5 }
+                      calmMob 101 "Scarlet Myrmidon" { X = 6; Y = 6 } ]
+
+  let orders = abilitiesFor (EntityId 3) (PartyAi.decide w)
+
+  Assert.Equal(Some "Sap", List.tryHead orders)
+
+/// Stealth is not modelled: the Rogue counts as stealthed until something notices
+/// it, and a hound is the one thing that sees through it. That is what stands in
+/// for Improved Stealth, so a hound inside six tiles costs the Sap.
+[<Fact>]
+let ``a hound sees through the rogue's stealth and costs the Sap`` () =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  let rogue =
+    Content.hero
+      3
+      "Rogue"
+      Dps
+      1000
+      100
+      tap
+      10000
+      [ (AbilityDef.at 24 Content.sap).Value
+        (AbilityDef.at 24 Content.gouge).Value ]
+      { X = 5; Y = 5 }
+
+  let withHound = calmWorld rogue [ calmMob 100 "Scarlet Myrmidon" { X = 6; Y = 5 }
+                                    calmMob 101 "Scarlet Myrmidon" { X = 6; Y = 6 }
+                                    calmMob 102 "Scarlet Tracking Hound" { X = 7; Y = 6 } ]
+
+  let orders = abilitiesFor (EntityId 3) (PartyAi.decide withHound)
+
+  Assert.DoesNotContain("Sap", orders)
+  // The hound costs the Sap, not the pull: Gouge still reaches the same pack.
+  Assert.Contains("Gouge", orders)
+
+/// A stun is mitigation, not only an interrupt: the mob swinging hardest cannot
+/// swing while it is stunned, and the healer never pays for that damage.
+[<Fact>]
+let ``the rogue stuns an engaged enemy as mitigation`` () =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  let rogue =
+    Content.hero
+      3
+      "Rogue"
+      Dps
+      1000
+      100
+      tap
+      10000
+      [ (AbilityDef.at 26 Content.sinisterStrike).Value
+        (AbilityDef.at 26 Content.cheapShot).Value ]
+      { X = 7; Y = 5 }
+
+  let w =
+    partyWorld (Some(EntityId 100)) [] 1000
+    |> fun w -> { w with Entities = w.Entities @ [ rogue ] }
+
+  Assert.Contains("Cheap Shot", abilitiesFor (EntityId 3) (PartyAi.decide w))
 
 /// Bag of a Rogue's energy: he banks it for Backstab rather than spending 45 the
 /// moment he has 45, because Backstab is worth far more per point.

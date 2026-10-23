@@ -475,6 +475,23 @@ module PartyAi =
       |> List.sortBy (fun h -> ((if SimState.canReach 1 e h w then 0 else 1), Pos.chebyshev e.Pos h.Pos))
       |> List.tryHead
 
+    // A stun is mitigation too, not only an interrupt: the mob hitting the Party
+    // hardest cannot swing while it is stunned, and that is damage the healer never
+    // pays for. Cheap Shot and Kidney Shot go on the healthiest engaged enemy that
+    // is still able to act — but only when the Rogue can pay for a strike
+    // afterwards, because a Rogue that spends every point of energy on control adds
+    // no damage and the fight just gets longer.
+    let uncontrolled =
+      SimState.aliveHostiles w
+      |> List.filter (fun h -> h.Target.IsSome && SimState.canAct h && SimState.withinRange 1 e h)
+      |> List.sortByDescending (fun h -> h.MaxHealth)
+      |> List.tryHead
+
+    let stun =
+      [ "Cheap Shot"; "Kidney Shot" ]
+      |> List.filter (fun n -> has e n && canUse e n && e.Resource >= 45)
+      |> List.tryHead
+
     match caster with
     | Some c when has e "Kick" && canUse e "Kick" && SimState.withinRange 1 e c ->
       cmd at (UseAbility(e.Id, "Kick", c.Id))
@@ -482,6 +499,8 @@ module PartyAi =
       cmd at (UseAbility(e.Id, "Gouge", c.Id))
     | Some c when has e "Kick" && canUse e "Kick" && SimState.canReach 4 e c w ->
       cmd at (MoveTo(e.Id, SimState.approachTile e c.Pos w |> Option.defaultValue c.Pos))
+    | _ when stun.IsSome && uncontrolled.IsSome ->
+      cmd at (UseAbility(e.Id, stun.Value, uncontrolled.Value.Id))
     | _ ->
       match target with
       | None -> []
@@ -551,9 +570,13 @@ module PartyAi =
         |> List.sortBy (fun h -> Pos.chebyshev e.Pos h.Pos)
         |> List.tryHead
 
+      // A shot deals damage. Sap, Polymorph and the Rogue's stuns reach further
+      // than a sword, but firing one as an attack spends an opener on nothing —
+      // `prePull` is the only place an opener belongs.
       let shots =
         e.Abilities
-        |> List.filter (fun a -> a.TargetKind = Foe && a.Range > 1 && not (interrupts a))
+        |> List.filter (fun a ->
+          a.TargetKind = Foe && a.Range > 1 && not (interrupts a) && damageOf a > 0)
         |> List.filter (fun a -> canUse e a.Name)
 
       let paid = shots |> List.filter (fun a -> a.ResourceCost > 0)
@@ -601,6 +624,76 @@ module PartyAi =
 
     let target = strikeTarget w tank hostiles
     let onTank = tankTarget w tank hostiles
+
+    // Pre-pull. While nothing has noticed the Party yet, thin the pack and open
+    // from range instead of walking the whole room awake: a Polymorph, Roots or a
+    // Gouge takes one enemy out of the fight before it starts, and one ranged
+    // member opens on the Mob the Party means to kill first. A Scarlet wing holds
+    // 43 hostiles, and fighting them in fives is what wipes the Party.
+    let prePull =
+      let engaged = SimState.aliveHostiles w |> List.exists (fun h -> h.Target.IsSome)
+
+      let controlling =
+        fun (a: Ability) ->
+          a.Effects
+          |> List.exists (function
+            | Polymorph _ | Root _ | Sleep _ -> true
+            | _ -> false)
+
+      let reaches (e: Entity) (h: Entity) (a: Ability) =
+        Pos.chebyshev e.Pos h.Pos <= a.Range && Path.lineOfSight w.Grid e.Pos h.Pos
+
+      // Stealth is not modelled. The Rogue counts as stealthed for the whole
+      // pre-pull window — no hostile has noticed the party, which is the only state
+      // `prePull` runs in — and only hounds see through it, which stands in for the
+      // Improved Stealth talent. That is why Sap needs no facing check and why
+      // Distract is not implemented.
+      //
+      // shortcut: stealth is "not in combat, and no hound within 6 tiles"; add a
+      // real stealth state if facing or Distract ever matters.
+      let unnoticed (e: Entity) (a: Ability) =
+        a.Name <> "Sap"
+        || not (
+          SimState.aliveHostiles w
+          |> List.exists (fun h -> h.Name.Contains "Hound" && Pos.chebyshev h.Pos e.Pos <= 6)
+        )
+
+      // Sap earns the pull's first slot even when a Polymorph is in reach: it is the
+      // only opener that starts nothing, and its minute-long cooldown means it must
+      // not be spent on a pack a shorter cooldown already covers.
+      let preference (a: Ability) =
+        match a.Name with
+        | "Sap" -> 0
+        | "Polymorph" | "Entangling Roots" | "Hibernate" | "Sleep" -> 1
+        | _ -> 2
+
+      match target with
+      | Some focus when not engaged ->
+        // The dangerous ones first: hardest hitters carry the most health here, and
+        // `canAct` keeps a body already slept out of the pool — without it the same
+        // mob heads the list every tick and the opener is spent on a sleeper.
+        let surplus =
+          SimState.aliveHostiles w
+          |> List.filter (fun h -> h.Id <> focus.Id && h.Casting.IsNone && SimState.canAct h)
+          |> List.sortByDescending (fun h -> h.MaxHealth)
+
+        // One caster thins the pull. Two on the same target wastes both, so the
+        // opener below skips whoever cast it.
+        let cc =
+          match surplus with
+          | [] -> None
+          | h :: _ ->
+            actors
+            |> List.tryPick (fun e ->
+              e.Abilities
+              |> List.filter controlling
+              |> List.filter (fun a -> canUse e a.Name && reaches e h a && unnoticed e a)
+              |> List.sortBy preference
+              |> List.tryHead
+              |> Option.map (fun a -> { ApplyAt = at; Kind = UseAbility(e.Id, a.Name, h.Id) }))
+
+        [ yield! Option.toList cc ]
+      | _ -> []
 
     // Walking orders apply in and out of a fight. Out of one the Tank leads
     // toward the nearest hostile; in one it closes the last few tiles to the mob
@@ -732,7 +825,8 @@ module PartyAi =
                 if reaim then
                   yield! cmd at (MoveTo(e.Id, SimState.approachTile e t.Pos w |> Option.defaultValue t.Pos)) ]
 
-    movement
+    prePull
+    @ movement
     @ (if target.IsNone then
          []
        else

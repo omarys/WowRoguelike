@@ -155,7 +155,8 @@ type Aura =
   | Sleeping of remaining: int<tick>
   /// Serpent Form: extra physical damage, and no casting while shifted.
   | SerpentForm of remaining: int<tick> * bonusDamage: int
-  /// Gouge / Cheap Shot. Cannot act, but unlike Sleep it is not broken by damage.
+  /// Cheap Shot / Kidney Shot. Cannot act, but unlike Sleep it is not broken by
+  /// damage.
   | Stunned of remaining: int<tick>
   /// Entangling Roots. Cannot move, but can still act and cast.
   | Rooted of remaining: int<tick>

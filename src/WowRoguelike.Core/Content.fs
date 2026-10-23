@@ -933,7 +933,9 @@ module Content =
               Range = 1
               Effects = [ Finisher(lo, hi, step) ] } ] }
 
-  /// Gouge: 45 energy, a 4 s incap, and it builds a combo point.
+  /// Gouge: 45 energy, a 4 s incap, and it builds a combo point. The incap is a
+  /// `Sleep` rather than a `Stun`: any damage breaks it, so Gouge buys a re-pull
+  /// or a breather, not four free seconds of damage.
   let gouge: AbilityDef =
     { Name = "Gouge"
       Resource = Energy
@@ -947,7 +949,7 @@ module Content =
               CastTicks = ticks 0
               CooldownTicks = secTicks 10.0
               Range = 1
-              Effects = [ Damage(damage, damage); Stun(secTicks 4.0); ComboPoint 1 ] } ] }
+              Effects = [ Damage(damage, damage); Sleep(secTicks 4.0); ComboPoint 1 ] } ] }
 
   /// Kick: 25 energy, 10 s cooldown, five-second school lockout.
   let kick: AbilityDef =
@@ -965,7 +967,62 @@ module Content =
               Range = 1
               Effects = [ Damage(damage, damage); Interrupt ] } ] }
 
-  // Cheap Shot is trained at level 26, so a level-24 Rogue does not have it.
+  /// Sap: 65 energy, 3 tiles, and a 30 s incap that starts nothing. No cooldown,
+  /// deliberately: being out of combat only *is* the limiter, so a second Sap can
+  /// never happen inside a fight. `Sleep`, so the first damage breaks it.
+  let sap: AbilityDef =
+    { Name = "Sap"
+      Resource = Energy
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ for level in [ 6; 22; 38; 54 ] do
+            { Level = level
+              Cost = 65
+              CastTicks = ticks 0
+              CooldownTicks = ticks 0
+              Range = 3
+              Effects = [ Sleep(secTicks 30.0) ] } ] }
+
+  /// Cheap Shot: 60 energy for a 4 s stun on a target that cannot see it coming.
+  /// Trained at 26, so a level-24 Rogue does not have it and the anchor is safe.
+  let cheapShot: AbilityDef =
+    { Name = "Cheap Shot"
+      Resource = Energy
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ for level in [ 26; 42; 58 ] do
+            { Level = level
+              Cost = 60
+              CastTicks = ticks 0
+              CooldownTicks = ticks 0
+              Range = 1
+              Effects = [ Stun(secTicks 4.0) ] } ] }
+
+  /// Kidney Shot: 25 energy, a 4 s stun, 20 s cooldown — the second link in a
+  /// stun-lock, for when Cheap Shot's four seconds are not enough.
+  ///
+  /// shortcut: vanilla Kidney Shot scales 1-6 s with combo points and spends
+  /// them; `Effect` cannot express a duration that grows with combo points, so
+  /// this is a flat 4 s that spends nothing. Upgrade if the Rogue comes to depend
+  /// on the lock.
+  let kidneyShot: AbilityDef =
+    { Name = "Kidney Shot"
+      Resource = Energy
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ for level in [ 30; 46; 60 ] do
+            { Level = level
+              Cost = 25
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 20.0
+              Range = 1
+              Effects = [ Stun(secTicks 4.0) ] } ] }
 
   // -- Mage ----------------------------------------------------------------
 
@@ -3136,7 +3193,9 @@ module Content =
         ]
       Energy
       partyThreatBp
-      (AbilityDef.kitAt level [ sinisterStrike; backstab; eviscerate; gouge; kick ])
+      (AbilityDef.kitAt
+        level
+        [ sinisterStrike; backstab; eviscerate; gouge; kick; sap; cheapShot; kidneyShot ])
       { X = 1; Y = 7 }
     |> fun r ->
       // A second Assassin's Blade in the off hand: dual wield is learned at 10.
