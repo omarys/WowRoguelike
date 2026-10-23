@@ -86,12 +86,14 @@ module SimState =
     withinRange range actor target
     && (range <= 1 || Path.lineOfSight w.Grid actor.Pos target.Pos)
 
-  /// A tile is taken if someone stands on it *or* is already stepping into it,
-  /// otherwise two entities claim the same tile in the same tick.
+  /// A tile is taken if someone has settled on it. A body that is only stepping
+  /// through does not claim it: two members may pass through one tile as long as
+  /// neither means to stop there, and `SimTick.advanceMovement` separates them if
+  /// a cross-over still lands them together. Keeping transit tiles open is what
+  /// stops a two-wide corridor from refusing to carry traffic both ways.
   let claimedByOther (w: World) (self: EntityId) (p: Pos) =
     w.Entities
-    |> List.exists (fun e ->
-      alive e && e.Id <> self && (e.Pos = p || e.Destination = Some p))
+    |> List.exists (fun e -> alive e && e.Id <> self && e.Pos = p && e.Destination.IsNone)
 
   /// A free tile to stand on next to `spot`, preferring the one nearest the mover.
   ///

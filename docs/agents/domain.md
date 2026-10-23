@@ -327,8 +327,17 @@ both because a clear is not currently true and because the full run is too slow.
    frees, the queue drains. `a stationary ally no longer severs the route behind it`
    is red on `9ab48f3` and green after.
 
-   Do not soften `claimedByOther`, which is what was tried first: a soft claim lets a
-   walker step *onto* an ally and breaks `no two living entities share a tile`.
+   `claimedByOther` was then relaxed to allow **transit**, at the request of the
+   owner: a tile is claimed only by a body that has settled on it (`Destination =
+   None`), so two members may pass through one tile as long as neither means to stop
+   there. The earlier soft-claim attempt failed because a walker could step onto an
+   ally and *stay*; this version keeps `no two living entities share a tile` by
+   ending the tick with `SimTick.separateStacked`, which steps a duplicated body to a
+   free neighbour. Neither entity is ever banned mid-tile and no route is lost, so a
+   corridor carries traffic both ways instead of refusing it.
+
+   Measured on the eight-seed freeze probe (24000 ticks): 8/8 frozen before, 0/8
+   after, including the two seeds where the Tank lived and blocked the door.
 
    Measured at 12000 ticks, seed 1, frozen → moving: graveyard min froze at tick 8000
    with 27 mobs left and 5/5 alive at full health, and now reaches 37 left with 1

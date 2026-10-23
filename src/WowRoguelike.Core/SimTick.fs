@@ -115,7 +115,42 @@ module SimTick =
 
   /// One tile of progress. A moving entity loses its cast — and a sleeping one
   /// neither moves nor keeps a goal.
+  /// Passing through a tile is allowed; ending a Tick on one is not, because two
+  /// bodies drawn on the same tile stay stacked for the rest of the run and both
+  /// stop being able to path past anything. Whoever shares with an earlier entry in
+  /// the list steps to the nearest free neighbour. Only a cross-over leaves a
+  /// neighbour unavailable, so this moves nobody on an ordinary Tick.
+  let private separateStacked (w: World) =
+    let _, entities =
+      (([], []), w.Entities)
+      ||> List.fold (fun (taken, acc) e ->
+        if not (alive e) then
+          taken, e :: acc
+        else
+          let spot =
+            if List.contains e.Pos taken then
+              Path.neighbours (fun p -> Grid.isFloor w.Grid p && not (List.contains p taken)) e.Pos
+              |> List.sortBy (fun p -> p.X, p.Y)
+              |> List.tryHead
+              |> Option.defaultValue e.Pos
+            else
+              e.Pos
+
+          spot :: taken, { e with Pos = spot } :: acc)
+
+    { w with Entities = List.rev entities }
+
   let advanceMovement (w: World) =
+    // A body that is going nowhere holds its tile; a body that is itself stepping
+    // through does not. Two members may share a tile in passing, which is what lets
+    // a corridor carry traffic in both directions, but nobody settles onto someone
+    // who has stopped — that one keeps its route and waits the tick.
+    let settled =
+      w.Entities
+      |> List.filter (fun e -> alive e && e.Destination.IsNone)
+      |> List.map (fun e -> e.Pos)
+      |> Set.ofList
+
     mapAll
       (fun e ->
         if not (alive e) then
@@ -140,6 +175,8 @@ module SimTick =
 
             if e.MoveTicksLeft > ticks 1 then
               { e with MoveTicksLeft = e.MoveTicksLeft - ticks 1 }
+            elif Set.contains dest settled then
+              e
             else
               { e with
                   Pos = dest
@@ -147,6 +184,8 @@ module SimTick =
                   MoveTicksLeft = ticks 0
                   MoveTicksTotal = ticks 0 })
       w
+    |> separateStacked
+
 
   /// Begin stepping toward a goal. A* plans the route once and the entity walks
   /// it, re-planning only when the route runs out or its next step is taken.
