@@ -841,6 +841,14 @@ type RoguelikeGame(?browse: int * uint64) as this =
     pending.Clear()
     menu <- Menu.Browse(source, seed)
 
+  /// Browsing pans by hand: the camera follows the Warrior in play, but the
+  /// point of inspecting a floorplan is to look at the parts the Party is not
+  /// standing in. Clamped the same way `followCamera` clamps.
+  let panBrowse (m: MouseState) =
+    if m.LeftButton = ButtonState.Pressed && prevMouse.LeftButton = ButtonState.Pressed then
+      camX <- max 0 (min (world.Grid.Width - columns) (camX - (m.X - prevMouse.X) / tile))
+      camY <- max 0 (min (world.Grid.Height - rows) (camY - (m.Y - prevMouse.Y) / tile))
+
   let updateMenu (keyboard: KeyboardState) =
     let up = pressed keyboard Keys.Up || pressed keyboard Keys.W
     let down = pressed keyboard Keys.Down || pressed keyboard Keys.S
@@ -865,7 +873,9 @@ type RoguelikeGame(?browse: int * uint64) as this =
       elif pressed keyboard Keys.Escape then menu <- Menu.PickDungeon i
     | Menu.Browse(source, seed) ->
       // Left/right re-rolls the seed, up/down changes map, because the thing
-      // being inspected changes most often with the seed.
+      // being inspected changes most often with the seed. The mouse pans.
+      panBrowse (Mouse.GetState())
+
       if pressed keyboard Keys.Right then showBrowse source (seed + 1UL)
       elif pressed keyboard Keys.Left then showBrowse source (max 1UL (seed - 1UL))
       elif down then showBrowse (source + 1) seed
@@ -930,7 +940,7 @@ type RoguelikeGame(?browse: int * uint64) as this =
 
     let text =
       sprintf
-        "%s    seed %d    map %d/%d        Left/Right seed    Up/Down map    Enter play    Esc back"
+        "%s    seed %d    map %d/%d        Left/Right seed    Up/Down map    drag to pan    Enter play    Esc back"
         label
         seed
         (source + 1)
@@ -1086,14 +1096,23 @@ type RoguelikeGame(?browse: int * uint64) as this =
   override _.Update(gameTime: GameTime) =
     let keyboard = Keyboard.GetState()
 
-    if menu <> Menu.Closed then updateMenu keyboard else this.StepWorld keyboard gameTime
+    if menu <> Menu.Closed then
+      updateMenu keyboard
+      // The browser pans with the mouse, and `StepWorld` — which normally keeps
+      // this current — is not running while a menu is open.
+      prevMouse <- Mouse.GetState()
+    else
+      this.StepWorld keyboard gameTime
 
     rememberKeys keyboard
     base.Update(gameTime)
 
   override _.Draw(gameTime: GameTime) =
     this.GraphicsDevice.Clear(Color(10, 10, 14))
-    followCamera ()
+
+    match menu with
+    | Menu.Browse _ -> () // the browser pans by hand
+    | _ -> followCamera ()
 
     let validIds =
       match pendingAction with
