@@ -358,6 +358,18 @@ re-target: when `stepToward` cannot plan at all, clear the goal so `PartyAi` pic
 different hostile, and stop `approachTile`'s `None` from becoming "walk to the tile
 the target is standing on". Check `mise run runs` and the generated-dungeon test
 immediately; both moved under the last attempt.
+
+A second shape of the same family, found while measuring compositions: the party
+is at 100% health, no hostile is engaged (`target=-` everywhere) and nothing
+bleeds for 20000 ticks, because the leading body **oscillates between two
+adjacent tiles**. `Warrior/Druid/Mage/Rogue/Warlock` on `graveyard` median seed 20
+shuffles `10,177` <-> `9,178` from tick 2000 to 24000 with `goal=18,179` and a
+route of length 19-20 that is replanned every tick and reverses each time. A
+no-route re-target will not catch it - there *is* a route, it just alternates - so
+this one needs the mover to keep its current route instead of replanning when
+replanning returns a first step that undoes the last one. Reproduced identically
+on `591e9bf` and `a164db3`, so it is not the pass-through change.
+
 3. **Scarlet Monastery wings need a full matrix before any tuning.** One seed per
    cell, 16000-tick budget, via `smtrace <wing> <min|med|max> 16000 16000`:
 
