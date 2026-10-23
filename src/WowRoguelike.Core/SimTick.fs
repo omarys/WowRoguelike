@@ -175,10 +175,28 @@ module SimTick =
         | kept -> kept
 
       let route =
-        if List.isEmpty planned then
-          (Path.astar w.Grid taken e.Pos dest).Path
+        let found =
+          if List.isEmpty planned then
+            (Path.astar w.Grid taken e.Pos dest).Path
+          else
+            planned
+
+        // Five abreast claim every tile of a corridor at once, so the claim-aware
+        // route fails while the claim-free one succeeds — and because none of them
+        // steps, none ever frees a tile. Retrying with a *stationary* ally's tile
+        // passable hands the mover the free prefix of a route, which is enough:
+        // one body moves, its tile frees, and the queue drains. The step below
+        // still has to clear `taken`, so the relaxed search can never put two
+        // bodies on one tile. A body already stepping into a tile still reserves
+        // it — that claim is about to become real.
+        let stationary p =
+          w.Entities
+          |> List.exists (fun o -> alive o && o.Id <> e.Id && o.Pos = p && o.Destination.IsNone)
+
+        if List.isEmpty found then
+          (Path.astar w.Grid (fun p -> taken p && not (stationary p)) e.Pos dest).Path
         else
-          planned
+          found
 
       match route with
       | [] ->
