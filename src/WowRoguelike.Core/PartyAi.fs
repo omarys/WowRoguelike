@@ -837,8 +837,37 @@ module PartyAi =
                 if reaim then
                   yield! cmd at (MoveTo(e.Id, SimState.approachTile e t.Pos w |> Option.defaultValue t.Pos)) ]
 
+    // Every recovery rule below hangs off the Tank: it owns the follow leash, the
+    // step-aside shuffle and the walk to the next mob. With the Tank dead all of
+    // them go quiet at once, so survivors stand on a cleared floor for the rest of
+    // the run — the mobs they have not met never notice them, `target` stays None,
+    // and no member is issued anything. Two survivors sat in a door alcove for
+    // 24 000 ticks that way. Whoever is left leads itself to the nearest hostile.
+    let leaderless =
+      if tank.IsSome || party.IsEmpty then
+        []
+      else
+        match
+          SimState.aliveHostiles w
+          |> List.sortBy (fun h -> party |> List.map (fun e -> Pos.chebyshev e.Pos h.Pos) |> List.min)
+        with
+        | [] -> []
+        | nearest :: _ ->
+          actors
+          |> List.collect (fun e ->
+            // Only someone with no plan at all: re-issuing a walk every tick pays
+            // a whole-map search per member, and a member already walking keeps
+            // its route until it runs out.
+            if not e.Destination.IsNone || not e.Path.IsEmpty then
+              []
+            else
+              match SimState.approachTile e nearest.Pos w with
+              | Some p when p <> e.Pos -> cmd at (MoveTo(e.Id, p))
+              | _ -> [])
+
     prePull
     @ movement
+    @ leaderless
     @ (if target.IsNone then
          []
        else

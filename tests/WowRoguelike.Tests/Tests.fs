@@ -2147,6 +2147,45 @@ let ``a manually controlled member gets no AI orders`` () =
   Assert.True(tankOrders Set.empty > 0, "the script should be driving the Tank")
   Assert.Equal(0, tankOrders (Set.singleton (EntityId 1)))
 
+/// Every rule that walks the Party hangs off the Tank: the follow leash, the
+/// step-aside shuffle, the lead to the next mob. With the Tank dead they all went
+/// quiet at once and survivors stood on cleared floor for the rest of the run —
+/// two of them sat in a door alcove of the Scarlet graveyard for 24 000 ticks
+/// while the mobs they had never met waited, untouched.
+[<Fact>]
+let ``survivors lead themselves once the Tank is dead`` () =
+  let w = partyWorld None [] 0
+  Assert.Empty(SimState.aliveParty w |> List.filter (fun e -> e.Role = Some Tank))
+
+  // Out of reach: standing beside the mob needs no walk, and a pure healer beside
+  // one has nothing to cast, so the Lead rule only shows on a mob further off.
+  let away =
+    { w with
+        Entities =
+          w.Entities
+          |> List.map (fun e ->
+            match e.Name with
+            | "Near" -> { e with Pos = { X = 10; Y = 8 } }
+            | "Far" -> { e with Pos = { X = 10; Y = 7 } }
+            | _ -> e) }
+
+  let moves =
+    PartyAi.decide away
+    |> List.choose (fun c ->
+      match c.Kind with
+      | MoveTo(EntityId 2, p) -> Some p
+      | _ -> None)
+
+  Assert.NotEmpty(moves)
+
+/// The last member can die mid-decision: a wipe must not throw while the script
+/// is still choosing what the dead would have done.
+[<Fact>]
+let ``a wiped party gets no orders`` () =
+  let w = partyWorld None [] 0
+  let dead = { w with Entities = [] }
+  Assert.Empty(PartyAi.decide dead)
+
 /// The panel files abilities under what they do, not under what order the class
 /// happened to learn them in.
 [<Fact>]
