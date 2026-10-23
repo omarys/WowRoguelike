@@ -14,6 +14,7 @@ let private usage () =
   printfn "sim wc                     render the stitched Wailing Caverns dungeon"
   printfn "sim sm [wing] [min|median|max]  render a Scarlet Monastery wing at one difficulty"
   printfn "sim runs [n] [maxTicks]     run n seeds and summarise outcomes"
+  printfn "sim comps [n]               party compositions through three rounds of healer/DPS swaps"
   printfn "sim snapshots [n]           one stable line per seed, the snapshot test's input"
   printfn "sim story [-i]             play the Wailing Caverns story (auto-picks choices)"
 
@@ -67,6 +68,98 @@ let private runs (n: int) (maxTicks: int) =
     (List.item (n / 2) ticks)
     (List.head ticks)
     (List.last ticks)
+
+/// Composition is the one variable the player picks and never measures. Every
+/// number in Bench and `sim runs` is the default Warrior/Priest/Rogue/Mage/Druid
+/// party, so none of them says whether any other five are playable.
+///
+/// Three rounds, each five members with a Warrior in front:
+///   1. one healer plus Mage/Rogue/Warlock, once per healer, to rank the healers;
+///   2. the winning healer plus each other healer, to see if a healing pair beats it;
+///   3. the winning healer with the Rogue swapped for a Hunter, whose long range
+///      opens the pulls the Rogue has to walk into.
+let private comps (seedCount: int) =
+  let seeds = [ 1UL .. uint64 seedCount ]
+
+  let maps =
+    [ "gully", (fun (s: uint64) -> Content.gully s), 8000
+      "graveyard",
+      (fun (s: uint64) -> Content.scarletMonasteryAt "graveyard" Content.Median s),
+      24000 ]
+
+  // The scripted party, not the player: these numbers are the floor a composition
+  // sets under a player, not a verdict on what a player could do with it.
+  let play (w: World) maxTicks =
+    let mutable x = w
+
+    for _ in 1 .. maxTicks do
+      if SimState.outcome x = Running then
+        x <- SimTick.step (Bench.autoPilot x) x
+
+    x
+
+  let measure (roster: string list) (make: uint64 -> World) maxTicks =
+    let results =
+      seeds |> List.map (fun s -> play (Content.withRoster roster (make s)) maxTicks)
+
+    let count o =
+      results |> List.filter (fun w -> SimState.outcome w = o) |> List.length
+
+    let ticks = results |> List.map (fun w -> int w.Tick) |> List.sort
+
+    let alive =
+      results |> List.map (fun w -> float (SimState.aliveParty w |> List.length)) |> List.average
+
+    count EncounterCleared, count PartyWiped, List.item (List.length seeds / 2) ticks, alive
+
+  let report (label: string) (roster: string list) =
+    let totals =
+      maps
+      |> List.map (fun (mapName, make, maxTicks) ->
+        let cleared, wiped, median, alive = measure roster make maxTicks
+
+        printfn
+          "  %-34s %-10s cleared=%-3d wiped=%-3d unresolved=%-3d median-ticks=%-6d alive=%.1f"
+          label
+          mapName
+          cleared
+          wiped
+          (seedCount - cleared - wiped)
+          median
+          alive
+
+        cleared, median)
+
+    List.sumBy fst totals, (totals |> List.map snd |> List.min)
+
+  let healers = [ "Priest"; "Druid"; "Paladin" ]
+  let dps = [ "Mage"; "Rogue"; "Warlock" ]
+
+  printfn "seeds=%d per map, maps: %s" seedCount (maps |> List.map (fun (m, _, _) -> m) |> String.concat ", ")
+
+  printfn "\nround 1 - one healer, three DPS"
+
+  let ranked =
+    healers
+    |> List.map (fun healer -> healer, report (sprintf "Warrior/%s/%s" healer (dps |> String.concat "/")) ("Warrior" :: healer :: dps))
+
+  let best, _ =
+    ranked
+    |> List.sortByDescending (fun (_, (cleared, minMedian)) -> cleared, -minMedian)
+    |> List.head
+
+  printfn "\nround 2 - %s plus each other healer, two DPS (Mage/Warlock)" best
+
+  for other in healers |> List.filter (fun h -> h <> best) do
+    report (sprintf "Warrior/%s/%s/Mage/Warlock" best other) ([ "Warrior"; best; other ] @ [ "Mage"; "Warlock" ])
+    |> ignore
+
+  printfn "\nround 3 - Rogue swapped for a Hunter beside %s" best
+
+  report (sprintf "Warrior/%s/Mage/Warlock/Hunter" best) ([ "Warrior"; best ] @ [ "Mage"; "Warlock"; "Hunter" ])
+  |> ignore
+
+  printfn "\nbest single healer: %s" best
 
 let private bench () =
   printfn "%-28s %s" "fixture" "result"
@@ -369,6 +462,9 @@ let main argv =
         (Bench.samplePairs dense 200)
         200)
 
+    0
+  | "comps" :: rest ->
+    comps (intOf rest 0 25)
     0
   | "runs" :: rest ->
     runs (intOf rest 0 20) (intOf rest 1 2000)
