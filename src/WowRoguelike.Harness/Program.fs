@@ -132,7 +132,7 @@ let private comps (seedCount: int) =
 
     List.sumBy fst totals, (totals |> List.map snd |> List.min)
 
-  let healers = [ "Priest"; "Druid"; "Paladin" ]
+  let healers = [ "Priest"; "Druid"; "Paladin"; "Shaman" ]
   let dps = [ "Mage"; "Rogue"; "Warlock" ]
 
   printfn "seeds=%d per map, maps: %s" seedCount (maps |> List.map (fun (m, _, _) -> m) |> String.concat ", ")

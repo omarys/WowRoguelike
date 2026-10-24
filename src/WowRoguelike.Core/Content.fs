@@ -3401,6 +3401,12 @@ module Content =
   /// available in the bracket. Strength 43 makes him the best melee of the
   /// casters and Rockbiter rather than Windfury is what a 24 has.
   ///
+  /// Counted as a `Healer`, though the kit is the elemental one: he carries
+  /// Healing Wave and the Party only heals through `role Healer`
+  /// (`PartyAi.decide`), so the Dps role left his heal unusable and made him
+  /// untestable as a healer. He is the weakest of the four on paper — Healing
+  /// Wave costs 200 for 389-453 where a Priest's heal is cheaper per point.
+  ///
   /// shortcut: no totems. `Summon`/`SummonSpec` have no caller in the sim yet, and
   /// a totem would be that path's first test. Lightning Shield and Rockbiter are
   /// also left out: nothing in the vocabulary retaliates or imbues a weapon.
@@ -3410,7 +3416,7 @@ module Content =
       level
       id
       "Shaman"
-      Dps
+      Healer
       Leather
       Traits.none
       { Base = orcShamanBase
