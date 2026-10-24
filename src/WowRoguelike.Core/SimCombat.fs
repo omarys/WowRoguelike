@@ -189,7 +189,16 @@ module SimCombat =
       let roll, w = rollRange 0 9999 w
 
       let mitigate raw =
-        let armor = max 0 (t.Armor + (t.Auras |> List.sumBy Aura.armorBonus) - (t.Auras |> List.sumBy Aura.armorReduction))
+        let armor =
+          max 0
+            (t.Armor
+             + (t.Auras |> List.sumBy Aura.armorBonus)
+             - (t.Auras |> List.sumBy Aura.armorReduction))
+
+        // Inspiration / Ancestral Healing: a share on top of the armour the
+        // target wears, so it is a multiplier and not a flat add. A target with
+        // nothing procced multiplies by 10000.
+        let armor = armor * (10000 + Aura.armorPctBp t.Auras) / 10000
         raw * (10000 - armorMitigationBp attacker.Level armor) / 10000
 
       match attackTable chances roll with
@@ -268,6 +277,15 @@ module SimCombat =
   // Ability resolution
   // =========================================================================
 
+  /// Effects that put health back on a friendly target: what a "next spell"
+  /// cooldown can change, and what a healer's decision is about.
+  let internal isHealEffect =
+    function
+    | Heal _
+    | HealOverTime _
+    | ConsumeHealOverTime -> true
+    | _ -> false
+
   /// Resolve one ability's effects against one target. The resource is spent
   /// here, on resolution, so an interrupted cast costs nothing.
   let resolveAbility (actorId: EntityId) (targetId: EntityId) (ability: Ability) (w0: World) : World =
@@ -276,10 +294,20 @@ module SimCombat =
     | Some actor ->
       let targetName = nameOf targetId w0
 
+      // Nature's Swiftness, Divine Favor and Inner Focus are spent by the first
+      // *heal* their holder lands, and by nothing else — a Smite must not eat
+      // the Paladin's guaranteed crit. Inner Focus also pays the spell's cost.
+      let empowered = ability.Effects |> List.exists isHealEffect
+      let empower = if empowered then Aura.empower actor.Auras else Empower.none
+      let cost = if empower.FreeMana then 0 else ability.ResourceCost
+
       let w0 =
         mapEntity
           actorId
-          (fun e -> { e with Resource = max 0 (e.Resource - ability.ResourceCost) })
+          (fun e ->
+            { e with
+                Resource = max 0 (e.Resource - cost)
+                Auras = if empowered then Aura.spendEmpower e.Auras else e.Auras })
           w0
 
       (w0, ability.Effects)
@@ -332,11 +360,27 @@ module SimCombat =
         | Heal(lo, hi) ->
           let rolled, w = rollRange lo hi w
 
+          // Healing Way: the stacks the target is already carrying make this
+          // Healing Wave worth more, and this cast leaves the next one a stack
+          // deeper. The stack lives on the *target*, not the caster, and a
+          // character without the talent multiplies by 10000.
+          let wayBp =
+            if actor.Talents.HealingWayBp <= 0 || ability.Name <> "Healing Wave" then 10000
+            else
+              let stacks =
+                tryEntity targetId w
+                |> Option.map (fun t -> Aura.healingWayStacks t.Auras)
+                |> Option.defaultValue 0
+
+              10000 + stacks * actor.Talents.HealingWayBp
+
           // The tree's share of the heal lands on the rolled number, beside the
           // flat bonus healing Spiritual Guidance turns Spirit into. One roll,
           // one multiply, and a character with no talents multiplies by 10000.
           let amount =
-            (rolled + actor.BonusHealing) * Talents.healBp ability.Name actor.Talents / 10000
+            (rolled + actor.BonusHealing)
+            * (Talents.healBp ability.Name actor.Talents * wayBp / 10000)
+            / 10000
 
           let before =
             tryEntity targetId w |> Option.map (fun t -> t.Health) |> Option.defaultValue 0
@@ -351,28 +395,97 @@ module SimCombat =
           let w =
             if actor.Faction = Party then addHealThreat actor effective w else w
 
-          // Illumination: a heal that crits hands its mana cost back. The crit
-          // roll happens only when a talent pays for it, because a plain heal
-          // crit changes no number this model computes.
-          // shortcut: the crit pays the refund and does not also enlarge the
-          // heal; double the amount when heal crits are meant to show as 1.5x.
           let w =
-            if actor.Talents.ManaRefundOnCritBp <= 0 then
+            if actor.Talents.HealingWayBp <= 0 || ability.Name <> "Healing Wave" then
               w
             else
+              w
+              |> mapEntity targetId (fun e ->
+                { e with
+                    Auras =
+                      Aura.refresh (HealingWay(secTicks 15.0, min 3 (Aura.healingWayStacks e.Auras + 1))) e.Auras })
+
+          // Inspiration / Ancestral Healing and Illumination are both paid for by
+          // the same crit, so it is rolled once, here. The roll happens only when
+          // a talent pays for it or a cooldown guarantees it: a plain heal crit
+          // changes no number this model computes.
+          // shortcut: the crit pays the armour and the mana refund and does not
+          // also enlarge the heal; multiply the amount when heal crits are meant
+          // to land as 1.5x.
+          let crit, w =
+            if empower.SureCrit then
+              true, w
+            elif actor.Talents.ManaRefundOnCritBp <= 0 && actor.Talents.CritArmorBp <= 0 then
+              false, w
+            else
               let roll, w = rollRange 0 9999 w
+              roll < actor.CritChanceBp, w
 
-              if roll < actor.CritChanceBp then
-                let refund = ability.ResourceCost * actor.Talents.ManaRefundOnCritBp / 10000
+          let w =
+            if crit && actor.Talents.CritArmorBp > 0 then
+              w
+              |> mapEntity targetId (fun e ->
+                { e with
+                    Auras =
+                      Aura.refresh (Inspired(secTicks 15.0, actor.Talents.CritArmorBp)) e.Auras })
+              |> logLine (
+                sprintf
+                  "%s's heal crit braces %s for +%d%% armour"
+                  actor.Name
+                  targetName
+                  (actor.Talents.CritArmorBp / 100)
+              )
+            else
+              w
 
-                w
-                |> mapEntity actorId (fun e ->
-                  { e with Resource = min e.MaxResource (e.Resource + refund) })
-                |> logLine (sprintf "%s's heal crits and returns %d mana" actor.Name refund)
-              else
-                w
+          // Illumination: a heal that crits hands its mana cost back.
+          let w =
+            if crit && actor.Talents.ManaRefundOnCritBp > 0 then
+              let refund = cost * actor.Talents.ManaRefundOnCritBp / 10000
+
+              w
+              |> mapEntity actorId (fun e ->
+                { e with Resource = min e.MaxResource (e.Resource + refund) })
+              |> logLine (sprintf "%s's heal crits and returns %d mana" actor.Name refund)
+            else
+              w
 
           w |> logLine (sprintf "%s heals %s for %d" actor.Name targetName effective)
+
+        | ConsumeHealOverTime ->
+          match tryEntity targetId w with
+          | Some t ->
+            // Swiftmend hands over what the Druid's own Rejuvenation had left and
+            // eats it: the price of the instant heal is the heal still to come.
+            let pending = Aura.healOverTimePendingFor "Rejuvenation" t.Auras
+
+            let w =
+              w
+              |> mapEntity targetId (fun e ->
+                { e with
+                    Auras =
+                      e.Auras
+                      |> List.filter (function
+                        | Rejuvenation(_, _, "Rejuvenation") -> false
+                        | _ -> true) })
+
+            let w = healEntity targetId pending w
+
+            let effective =
+              (tryEntity targetId w |> Option.map (fun e -> e.Health) |> Option.defaultValue 0)
+              - t.Health
+
+            let w =
+              if actor.Faction = Party then addHealThreat actor effective w else w
+
+            w |> logLine (sprintf "%s consumes the rejuvenation on %s for %d" actor.Name t.Name effective)
+          | None -> w
+
+        | Empowers(duration, e) ->
+          w
+          |> mapEntity actorId (fun a ->
+            { a with Auras = Aura.refresh (Empowered(duration, e)) a.Auras })
+          |> logLine (sprintf "%s readies %s" actor.Name ability.Name)
 
         | Interrupt ->
           match tryEntity targetId w with
@@ -732,7 +845,7 @@ module SimCombat =
               StallTicks = ticks 0 })
         w
 
-    if ability.CastTicks <= ticks 0 then
+    if ability.CastTicks <= ticks 0 || (ability.Effects |> List.exists isHealEffect && (Aura.empower actor.Auras).Instant) then
       resolveAbility actor.Id targetId ability w
     else
       mapEntity

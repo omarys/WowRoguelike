@@ -268,7 +268,8 @@ module PartyAi =
   /// and it keeps working while the next cast happens. It is refreshed only as it
   /// lapses, and the direct heal starts as soon as the deficit outruns what the
   /// HoTs in flight will give back — a three-second cast that begins when the bar
-  /// is empty is a three-second cast that began too late.
+  /// is empty is a three-second cast that began too late. The talent cooldowns go
+  /// in front of that direct heal when the target is under 40%, and nowhere else.
   let private healerOrders (w: World) (h: Entity) (party: Entity list) (at: int<tick>) =
     // What this healer's heals actually do, so the choice is made on the numbers
     // and not on the order the abilities happen to sit in the kit: a Priest
@@ -320,6 +321,27 @@ module PartyAi =
     let projected (t: Entity) = t.Health + Aura.healOverTimePending t.Auras
     let projectedPct (t: Entity) = projected t * 100 / t.MaxHealth
 
+    // The cooldown buttons — Nature's Swiftness, Divine Favor, Swiftmend, Inner
+    // Focus. None of them is a heal, so the selection above cannot see them: they
+    // are cast on the way *into* a heal, and only when the hole is big enough to
+    // be worth a two- or three-minute cooldown. A healer who has none of them
+    // (every class but these four) finds nothing here and is unaffected.
+    let cooldownFor (t: Entity) =
+      let panic = SimState.healthPct t < 40
+
+      h.Abilities
+      |> List.tryFind (fun a ->
+        canUse h a.Name
+        && (a.TargetKind = Self || SimState.canReach a.Range h t w)
+        && (a.Effects
+            |> List.exists (function
+              | Empowers _ -> panic
+              // Swiftmend is worth it when there is a Rejuvenation worth eating,
+              // which is a target losing health faster than it ticks back.
+              | ConsumeHealOverTime ->
+                panic && Aura.healOverTimeRemainingFor "Rejuvenation" t.Auras > ticks 0
+              | _ -> false)))
+
     let wounded =
       party
       |> List.filter (fun e -> SimState.healthPct e < 90)
@@ -353,6 +375,13 @@ module PartyAi =
         cmd at (MoveTo(h.Id, healingSpot t a |> Option.defaultValue t.Pos))
       | None -> []
 
+    /// Into a direct heal: the cooldown first when it is up and the target is in
+    /// trouble, the biggest affordable heal otherwise.
+    let heal (t: Entity) =
+      match cooldownFor t with
+      // They are self-buffs, so the caster is the target of the button itself.
+      | Some a -> cmd at (UseAbility(h.Id, a.Name, (if a.TargetKind = Self then h.Id else t.Id)))
+      | None -> order (directFor (t.MaxHealth - projected t)) t
     // A HoT worth re-casting: none of that spell running, or one with under four
     // seconds left — early enough that the next one is up before this one lapses,
     // which is the difference between "on him most of the time" and a 43% uptime.
@@ -392,9 +421,9 @@ module PartyAi =
       |> List.tryHead
 
     match directTarget, hotTarget with
-    | Some t, _ when projectedPct t < 65 -> order (directFor (t.MaxHealth - projected t)) t
+    | Some t, _ when projectedPct t < 65 -> heal t
     | _, Some t -> order (hotFor t) t
-    | Some t, None -> order (directFor (t.MaxHealth - projected t)) t
+    | Some t, None -> heal t
     | None, None ->
       // Nobody is in trouble and nothing needs refreshing, so close the small
       // holes with the cheap heal instead of leaving them for the next burst —

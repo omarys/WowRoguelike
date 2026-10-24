@@ -1536,7 +1536,13 @@ let ``the paladin's kit is the level-24 one`` () =
   // immunity.
   Assert.Equal<Effect list>([ Stun(secTicks 4.0) ], effectsOf "Hammer of Justice")
   Assert.Equal<Effect list>([ ReducesDamage(secTicks 8.0, 10000) ], effectsOf "Divine Protection")
-  Assert.Equal(5, List.length paladin.Abilities)
+  // Divine Favor is the tree's cooldown button: two minutes, 4% of base mana.
+  let divineFavor =
+    paladin.Abilities |> List.find (fun a -> a.Name = "Divine Favor")
+
+  Assert.Equal(secTicks 120.0, divineFavor.CooldownTicks)
+  Assert.Equal(21, divineFavor.ResourceCost)
+  Assert.Equal(6, List.length paladin.Abilities)
 
 /// The researched set, put through the sim's own formulas. Every number here is
 /// derived by hand from `.pi/research/level24/paladin.md` rather than read back
@@ -1809,13 +1815,18 @@ let ``the shaman's kit is the level-24 one`` () =
     effectsOf "Flame Shock"
   )
   Assert.Equal<Effect list>([ Heal(389, 453) ], effectsOf "Healing Wave")
+  Assert.Equal<Effect list>(
+    [ Empowers(secTicks 20.0, { Instant = true; FreeMana = false; SureCrit = false }) ],
+    effectsOf "Nature's Swiftness"
+  )
   Assert.Equal<string list>(
     [ "Lightning Bolt"
       "Earth Shock"
       "Flame Shock"
       "Healing Wave"
       "Stoneskin Totem"
-      "Healing Stream Totem" ],
+      "Healing Stream Totem"
+      "Nature's Swiftness" ],
     shaman.Abilities |> List.map (fun a -> a.Name)
   )
 
@@ -1907,6 +1918,137 @@ let ``a resto shaman's heal beats the same shaman with no talents`` () =
     talented > plain,
     sprintf "the talented shaman should heal for more: %d vs %d" talented plain
   )
+
+/// The talent cooldowns are buttons, not passives: Divine Favor is spent on the
+/// first heal after the Tank drops under 40% and then waits out its two minutes.
+/// The run below is 45 s of Ticks against a mob that swings for nothing, so the
+/// Tank sits at 30% and the Paladin heals it over and over while the cooldown is
+/// still running — one cast, and not a second one.
+[<Fact>]
+let ``a talent cooldown fires once and then waits for its cooldown`` () =
+  let party = Content.partyOf [ "Warrior"; "Paladin" ] 24
+  let tank = { party.[0] with Pos = { X = 5; Y = 5 } }
+
+  let paladin =
+    { party.[1] with
+        Pos = { X = 5; Y = 6 }
+        Resource = 4000
+        MaxResource = 4000 }
+
+  let wounded = { tank with Health = tank.MaxHealth * 30 / 100 }
+  let tap = { Min = 0; Max = 0; Ticks = secTicks 2.7; Range = 1 }
+
+  let enemy =
+    { Content.mob 100 "Near" CreatureType.Humanoid 21 4000 2000 (Some tap) [] None { X = 6; Y = 5 } with
+        Engaged = true
+        Target = Some wounded.Id }
+
+  let mutable w =
+    { Tick = ticks 0
+      Grid = Grid.create 12 10
+      Entities = [ wounded; paladin; enemy ]
+      Pending = []
+      Rng = Rng.streamsOf 5UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  // 900 Ticks is 45 s: comfortably more than the instant button needs to be
+  // pressed, and well under the two-minute cooldown it starts.
+  let mutable fires = 0
+  let mutable was = ticks 0
+
+  for _ in 1..900 do
+    w <- SimTick.step (Bench.autoPilot w) w
+
+    let now =
+      (SimState.tryEntity paladin.Id w).Value.Cooldowns
+      |> Map.tryFind "Divine Favor"
+      |> Option.defaultValue (ticks 0)
+
+    // A cast resets the timer upward; a tick that only counts down does not.
+    if now > was then fires <- fires + 1
+
+    was <- now
+
+  let remaining =
+    (SimState.tryEntity paladin.Id w).Value.Cooldowns
+    |> Map.tryFind "Divine Favor"
+    |> Option.defaultValue (ticks 0)
+
+  Assert.Equal(1, fires)
+  Assert.True(remaining > ticks 0, "the cooldown should still be running after 45 s")
+
+/// A heal crit leaves armour behind. Inspiration is 3/3 on the Priest, so the
+/// crit puts a quarter more armour on the healed target — and the same crit from a
+/// Priest who spent no points there leaves nothing at all.
+[<Fact>]
+let ``a heal crit from Inspiration leaves the target's armour up`` () =
+  let party = Content.partyOf [ "Warrior"; "Priest" ] 24
+  let tank = { party.[0] with Pos = { X = 5; Y = 5 }; Health = 400 }
+
+  let crit (priest: Entity) =
+    let healer =
+      { priest with
+          Pos = { X = 5; Y = 6 }
+          // A sure crit: Inspiration's proc is what is under test, not the dice.
+          CritChanceBp = 10000 }
+
+    let heal = healer.Abilities |> List.find (fun a -> a.Name = "Heal")
+
+    let w =
+      { Tick = ticks 0
+        Grid = Grid.create 12 10
+        Entities = [ tank; healer ]
+        Pending = []
+        Rng = Rng.streamsOf 3UL
+        PartyBuffs = []
+        Quests = []
+        Log = [] }
+
+    let healed = SimCombat.resolveAbility healer.Id tank.Id heal w
+    Aura.armorPctBp (SimState.tryEntity tank.Id healed).Value.Auras
+
+  Assert.Equal(0, Aura.armorPctBp tank.Auras)
+  Assert.Equal(2500, crit party.[1])
+  // The same priest with the tree emptied: the crit still happens, and pays
+  // nothing, which is what keeps every non-healer byte-identical.
+  Assert.Equal(0, crit { party.[1] with Talents = Talents.none })
+
+/// Illumination 5/5 hands a crit heal's mana straight back, so the cast is free.
+/// A Paladin without the talent pays for the same flash out of pocket.
+[<Fact>]
+let ``Illumination returns a crit heal's mana`` () =
+  let party = Content.partyOf [ "Warrior"; "Paladin" ] 24
+  let tank = { party.[0] with Pos = { X = 5; Y = 5 }; Health = 400 }
+
+  let manaAfter (paladin: Entity) =
+    let healer =
+      { paladin with
+          Pos = { X = 5; Y = 6 }
+          CritChanceBp = 10000
+          Resource = 100
+          MaxResource = 5000 }
+
+    let flash = healer.Abilities |> List.find (fun a -> a.Name = "Flash of Light")
+
+    let w =
+      { Tick = ticks 0
+        Grid = Grid.create 12 10
+        Entities = [ tank; healer ]
+        Pending = []
+        Rng = Rng.streamsOf 3UL
+        PartyBuffs = []
+        Quests = []
+        Log = [] }
+
+    (SimState.tryEntity healer.Id (SimCombat.resolveAbility healer.Id tank.Id flash w)).Value.Resource
+
+  let withIllumination = manaAfter party.[1]
+  let without = manaAfter { party.[1] with Talents = Talents.none }
+
+  Assert.Equal(100, withIllumination)
+  Assert.True(without < 100, sprintf "the plain Paladin should have paid: %d" without)
 
 /// A totem is an Entity that pulses on its own clock: the Healing Stream totem
 /// heals every party member in reach every two seconds, and stops the Tick it runs

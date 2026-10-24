@@ -3105,18 +3105,19 @@ module Content =
   /// Shaman 0/5/46: Purification 5/5 (+10% healing), Improved Healing Wave 5/5
   /// (-0.5 s cast), Tidal Focus 5/5 (-5% healing mana), Tidal Mastery 5/5 (+5%
   /// crit), Healing Focus 5/5 (-70% pushback), Ancestral Knowledge 5/5 (+5% Int),
-  /// Restorative Totems 5/5 (+25% totem effect) and Totemic Focus 5/5 (-25% totem
-  /// mana).
+  /// Restorative Totems 5/5 (+25% totem effect), Totemic Focus 5/5 (-25% totem
+  /// mana) and Healing Way 3/3 (+18% a stack to the target's next Healing Wave).
+  /// Ancestral Healing 3/3 comes in beside it as `CritArmorBp`.
   ///
-  /// shortcut: Healing Way's stack, Ancestral Healing's armour proc, Nature's
-  /// Swiftness and Improved Reincarnation are not modelled — the first two need a
-  /// per-spell stack and a proc roll, the last two need a cooldown and a death.
+  /// shortcut: Improved Reincarnation is not modelled — it needs a death.
   let private shamanTalents =
     { Talents.none with
         HealDoneBp = 1000
         HealCostBp = 500
         IntellectBp = 500
         TotemEffectBp = 2500
+        CritArmorBp = 2500
+        HealingWayBp = 1800
         Spells =
           { Spell = "Healing Wave"
             CostBp = 0
@@ -3127,10 +3128,7 @@ module Content =
   /// Paladin 31/20/0, the standard PvE holy build: Divine Intellect 5/5 (+10%
   /// Int), Spiritual Focus 5/5 (-70% pushback), Healing Light 3/3 (+12% Flash of
   /// Light), Illumination 5/5 (a heal crit refunds its whole cost) and Holy Power
-  /// 5/5 (+5% crit).
-  ///
-  /// shortcut: Divine Favor is a cooldown on the next heal and is not modelled;
-  /// import a cooldown button into the Effect vocabulary when one is needed.
+  /// 5/5 (+5% crit). Divine Favor is in the kit as a cooldown.
   let private paladinTalents =
     { Talents.none with
         IntellectBp = 1000
@@ -3144,11 +3142,10 @@ module Content =
   /// Druid 5/0/46, Moonglow into Swiftmend: Gift of Nature 5/5 (+10% healing),
   /// Tranquil Spirit 5/5 (-10% Healing Touch mana), Improved Rejuvenation 3/3
   /// (+15% Rejuvenation), Nature's Focus 5/5 (-70% pushback) and Reflection 3/3
-  /// (+15% mana regen while casting).
+  /// (+15% mana regen while casting). Swiftmend is in the kit as a cooldown.
   ///
-  /// shortcut: Swiftmend and Nature's Swiftness are cooldowns — one eats a
-  /// Rejuvenation, the other makes the next heal instant — and neither is
-  /// modelled; they need a cooldown button and an aura-consuming effect.
+  /// shortcut: Nature's Swiftness is a Balance-side talent and this build spends
+  /// nothing there, so the Druid's copy of the button is not in his kit.
   let private druidTalents =
     { Talents.none with
         HealDoneBp = 1000
@@ -3165,18 +3162,19 @@ module Content =
 
   /// Priest 21/30/0, deep holy: Spiritual Healing 5/5 (+10% healing), Improved
   /// Healing 3/3 (-15% Lesser/Greater Heal mana), Holy Specialization 5/5 (+5%
-  /// crit), Spiritual Guidance 5/5 (+25% of Spirit as bonus healing) and
-  /// Meditation 3/3 (+15% mana regen while casting).
+  /// crit), Spiritual Guidance 5/5 (+25% of Spirit as bonus healing),
+  /// Meditation 3/3 (+15% mana regen while casting) and Inspiration 3/3 (+25%
+  /// armour for fifteen seconds after a heal crit). Inner Focus is in the kit as a
+  /// cooldown.
   ///
-  /// shortcut: Inspiration's +25% armour on a heal crit is left out — a heal crit
-  /// changes no number in this model today, so the proc would have to roll dice
-  /// nothing else rolls, and Inner Focus and Power Infusion are cooldowns that
-  /// are not modelled either.
+  /// shortcut: Power Infusion is not modelled — it is a cooldown on another
+  /// character's spell damage, and nothing in the vocabulary buffs a caster.
   let private priestTalents =
     { Talents.none with
         HealDoneBp = 1000
         RegenBp = 1500
         SpiritToHealingBp = 2500
+        CritArmorBp = 2500
         Spells =
           [ for name in [ "Lesser Heal"; "Heal" ] do
               { Spell = name
@@ -3196,6 +3194,55 @@ module Content =
       { a with
           ResourceCost = a.ResourceCost * (10000 - Talents.costBp a.Name (heals a) t) / 10000
           CastTicks = max (ticks 0) (a.CastTicks - Talents.castOff a.Name t) })
+
+  /// The four healer cooldowns, as single-rank abilities. It is the talent tree
+  /// that hands each one over and not a trainer, so none of them carries a level:
+  /// these builds are the tree's whole shape at every level. Numbers, cooldowns
+  /// and mana shares are in `.pi/research/levelscale/healer-procs.md`.
+  ///
+  /// shortcut: a "next spell" buff lapses after twenty seconds. In 1.12 it lasts
+  /// until the next spell is cast, which is what spending it means here; the
+  /// timeout only stops one sitting on a caster forever after a bad pull. The two
+  /// percentage costs are also frozen at their level-24 value (4% of 525 is 21,
+  /// 20% of 449 is 90), so they undercharge a level-60 healer whose pool is
+  /// larger — the cooldown, not the mana, is what limits the button.
+  let private nextSpell (name: string) (cooldown: int<tick>) (cost: int) (empower: Empower) =
+    { Name = name
+      CastTicks = ticks 0
+      CooldownTicks = cooldown
+      ResourceCost = cost
+      Interruptible = false
+      Range = 0
+      TargetKind = Self
+      Effects = [ Empowers(secTicks 20.0, empower) ] }
+
+  /// Nature's Swiftness: the next healing spell is instant.
+  let private naturesSwiftness =
+    nextSpell "Nature's Swiftness" (secTicks 180.0) 0 { Empower.none with Instant = true }
+
+  /// Divine Favor: the next healing spell is a guaranteed crit.
+  let private divineFavor =
+    nextSpell "Divine Favor" (secTicks 120.0) 21 { Empower.none with SureCrit = true }
+
+  /// Inner Focus: the next spell is free and a guaranteed crit.
+  /// shortcut: 1.12 makes it +25% critical effect chance, not a guarantee; the
+  /// sure crit is what this model was asked for.
+  let private innerFocus =
+    nextSpell "Inner Focus" (secTicks 180.0) 0 { Empower.none with
+                                                  FreeMana = true
+                                                  SureCrit = true }
+
+  /// Swiftmend: hand over what the Druid's own Rejuvenation had left and consume
+  /// it. The cost is 20% of base mana, and the cooldown is what keeps it honest.
+  let private swiftmend =
+    { Name = "Swiftmend"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 15.0
+      ResourceCost = 90
+      Interruptible = false
+      Range = 8
+      TargetKind = Ally
+      Effects = [ ConsumeHealOverTime ] }
 
   /// The healer's traits: the two talents that are neither a stat nor a spell
   /// line land here, where the rest of the class bonuses already live.
@@ -3313,7 +3360,8 @@ module Content =
         priestTalents
         (AbilityDef.kitAt
           level
-          [ lesserHealRanks; healRanks; renewRanks; smiteRanks; shadowWordPainRanks ]))
+          [ lesserHealRanks; healRanks; renewRanks; smiteRanks; shadowWordPainRanks ]
+        @ [ innerFocus ]))
       { X = 1; Y = 6 }
 
   /// Night Elf Rogue: 221 armour from the set plus 200 from Agility, Assassin's
@@ -3464,7 +3512,8 @@ module Content =
             rejuvenationRanks
             entanglingRootsRanks
             wrathRanks
-            moonfireRanks ]))
+            moonfireRanks ]
+        @ [ swiftmend ]))
       { X = 2; Y = 7 }
 
   /// Human Paladin: mail at 24 — plate is trained at 40 — with Verigan's Fist
@@ -3517,7 +3566,8 @@ module Content =
             holyLightRanks
             judgementRanks
             paladinHammerOfJusticeRanks
-            divineProtectionRanks ]))
+            divineProtectionRanks ]
+        @ [ divineFavor ]))
       { X = 1; Y = 8 }
 
   /// Gnome Warlock: cloth, the same washed-out set as the Mage — five of the
@@ -3672,7 +3722,8 @@ module Content =
         (AbilityDef.kitAt
           level
           [ shamanLightningBoltRanks; earthShockRanks; flameShockRanks; shamanHealingWaveRanks ]
-        @ totemKit shamanTalents level))
+        @ totemKit shamanTalents level
+        @ [ naturesSwiftness ]))
       { X = 3; Y = 7 }
 
   /// Night Elf Hunter: level-24 leather only — hunters too train mail at 40 — on

@@ -149,6 +149,26 @@ module CreatureType =
 [<Struct>]
 type EntityId = EntityId of int
 
+/// What a "your next spell" talent changes about the spell it lands on. The
+/// three 1.12 cooldowns of that shape — Nature's Swiftness, Divine Favor and
+/// Inner Focus — differ only in which of these three things they set, so they
+/// are one buff with three fields rather than three buffs.
+[<Struct>]
+type Empower =
+  { /// Cast it instantly whatever its cast time says.
+    Instant: bool
+    /// Charge no mana for it.
+    FreeMana: bool
+    /// It always crits.
+    SureCrit: bool }
+
+module Empower =
+
+  let none =
+    { Instant = false
+      FreeMana = false
+      SureCrit = false }
+
 /// A timed state on an Entity.
 type Aura =
   /// Druid's Slumber. Any hostile action wakes the target.
@@ -181,6 +201,19 @@ type Aura =
   /// re-applied every Tick the carrier is within the totem's radius, so it
   /// lapses shortly after the totem dies or the member walks away.
   | TotemBoon of remaining: int<tick> * armor: int * critBp: int * dodgeBp: int
+  /// Healing Way: one buff carrying a stack count, so that a second Healing Wave
+  /// into the same target is worth more than the first and the third is where it
+  /// stops. It is one aura rather than three because the talent has one stack
+  /// cap and one expiry, and a new application refreshes instead of adding.
+  | HealingWay of remaining: int<tick> * stacks: int
+  /// Inspiration / Ancestral Healing: the armour a heal crit left on the healed
+  /// target, in basis points. Same case for both talents — the number in it is
+  /// whichever tree's rank applies.
+  | Inspired of remaining: int<tick> * armorBp: int
+  /// Nature's Swiftness, Divine Favor or Inner Focus sitting on the caster,
+  /// waiting to be spent on the next spell. It falls off when it is used and
+  /// when it times out.
+  | Empowered of remaining: int<tick> * empower: Empower
 
 /// Every case of `Aura` is matched in exactly one place — here. Everywhere else
 /// asks this module a question, so adding an aura breaks compilation in this
@@ -202,6 +235,9 @@ module Aura =
     | Blocking r when r > ticks 1 -> Some(Blocking(r - ticks 1))
     | ShieldWalled(r, bp) when r > ticks 1 -> Some(ShieldWalled(r - ticks 1, bp))
     | TotemBoon(r, a, c, d) when r > ticks 1 -> Some(TotemBoon(r - ticks 1, a, c, d))
+    | HealingWay(r, n) when r > ticks 1 -> Some(HealingWay(r - ticks 1, n))
+    | Inspired(r, bp) when r > ticks 1 -> Some(Inspired(r - ticks 1, bp))
+    | Empowered(r, e) when r > ticks 1 -> Some(Empowered(r - ticks 1, e))
     | _ -> None
 
   let describe =
@@ -218,6 +254,10 @@ module Aura =
     | Blocking r -> sprintf "block(%d)" r
     | ShieldWalled(r, bp) -> sprintf "wall(%d,-%d)" r bp
     | TotemBoon(r, a, c, d) -> sprintf "totem(%d,+%d,+%d,+%d)" r a c d
+    | HealingWay(r, n) -> sprintf "healingway(%d,x%d)" r n
+    | Inspired(r, bp) -> sprintf "inspired(%d,+%d)" r bp
+    | Empowered(r, e) ->
+      sprintf "empowered(%d,%s%s%s)" r (if e.Instant then "i" else "") (if e.FreeMana then "f" else "") (if e.SureCrit then "c" else "")
 
   /// The name a player sees, short enough to fit over a sprite.
   let label =
@@ -234,6 +274,9 @@ module Aura =
     | Blocking _ -> "BLOCK"
     | ShieldWalled _ -> "SHIELD WALL"
     | TotemBoon _ -> "TOTEM"
+    | HealingWay _ -> "HEALING WAY"
+    | Inspired _ -> "INSPIRED"
+    | Empowered _ -> "EMPOWERED"
 
   /// True when the aura helps its holder rather than hurting it.
   let isHelpful =
@@ -241,7 +284,10 @@ module Aura =
     | Rejuvenation _
     | Blocking _
     | ShieldWalled _
-    | TotemBoon _ -> true
+    | TotemBoon _
+    | HealingWay _
+    | Inspired _
+    | Empowered _ -> true
     | _ -> false
 
   /// Ticks left before it falls off.
@@ -258,7 +304,10 @@ module Aura =
     | Corrupted(r, _)
     | Blocking r -> r
     | TotemBoon(r, _, _, _)
-    | ShieldWalled(r, _) -> r
+    | ShieldWalled(r, _)
+    | HealingWay(r, _)
+    | Inspired(r, _)
+    | Empowered(r, _) -> r
 
   /// Whole seconds left, rounded up so a live aura never reads "0s".
   let remainingSeconds (a: Aura) : int =
@@ -364,6 +413,14 @@ module Aura =
         | _ -> acc)
       (ticks 0)
 
+  /// Healing still to come from the heal-over-time a named spell put up: what
+  /// Swiftmend hands over at once when it consumes one.
+  let healOverTimePendingFor (source: string) (auras: Aura list) =
+    auras
+    |> List.sumBy (function
+      | Rejuvenation(r, n, s) when s = source -> (r / secTicks 1.0) * n
+      | _ -> 0)
+
   /// A key grouping auras of the same kind, so re-applying refreshes instead of
   /// stacking. Exhaustive, like everything here.
   let kind =
@@ -380,6 +437,9 @@ module Aura =
     | Blocking _ -> 9
     | TotemBoon _ -> 10
     | ShieldWalled _ -> 10
+    | HealingWay _ -> 11
+    | Inspired _ -> 12
+    | Empowered _ -> 13
 
   /// Does casting `newer` overwrite `older`?
   let replaces (older: Aura) (newer: Aura) =
@@ -440,6 +500,38 @@ module Aura =
     function
     | TotemBoon(_, _, _, d) -> d
     | _ -> 0
+
+  /// Healing Way stacks on a target, zero when the buff is not running.
+  let healingWayStacks (auras: Aura list) =
+    auras
+    |> List.fold
+      (fun acc aura ->
+        match aura with
+        | HealingWay(_, n) -> n
+        | _ -> acc)
+      0
+
+  /// Armour a heal crit's proc adds, in basis points. Zero when nothing procced.
+  let armorPctBp (auras: Aura list) =
+    auras
+    |> List.sumBy (function
+      | Inspired(_, bp) -> bp
+      | _ -> 0)
+
+  /// The "next spell" buff a caster is holding, `Empower.none` when there is none.
+  let empower (auras: Aura list) =
+    auras
+    |> List.tryPick (function
+      | Empowered(_, e) -> Some e
+      | _ -> None)
+    |> Option.defaultValue Empower.none
+
+  /// Drop the "next spell" buff: the spell it was meant for has been cast.
+  let spendEmpower (auras: Aura list) =
+    auras
+    |> List.filter (function
+      | Empowered _ -> false
+      | _ -> true)
 
 /// What a totem hands the party while it stands. The numbers are the totem's own
 /// rank, so a talent that makes the totem better is a multiplier on these.
@@ -511,6 +603,12 @@ type Effect =
   /// Spell damage to every hostile within `radius` tiles of the caster. No
   /// friendly fire, and not mitigated by armour.
   | AreaDamage of radius: int * min: int * max: int
+  /// A buff on the caster that changes the next spell it lands: Nature's
+  /// Swiftness, Divine Favor, Inner Focus (`.pi/research/levelscale/healer-procs.md`).
+  | Empowers of duration: int<tick> * empower: Empower
+  /// Swiftmend: heal for what the target's heal-over-time had left, and consume
+  /// it. A heal, so it takes the healer's healing bonus like any other.
+  | ConsumeHealOverTime
   | Stun of duration: int<tick>
   | Root of duration: int<tick>
   | Polymorph of duration: int<tick>
@@ -595,7 +693,8 @@ module Ability =
         | _ -> false) then
       AbilityGroup.HealOverTime
     elif has (function
-        | Heal _ -> true
+        | Heal _
+        | ConsumeHealOverTime -> true
         | _ -> false) then
       AbilityGroup.Heal
     elif has (function
@@ -769,7 +868,7 @@ type SpellTalent =
 /// `Talents.none` is the default that leaves a hero exactly as it was.
 ///
 /// This is deliberately not the whole tree. A talent the vocabulary cannot
-/// express — a heal-after-heal stack, a cooldown button, a proc — is named in a
+/// express — a damage-absorbing shield, a spell-school lockout — is named in a
 /// comment beside its build and left out rather than half-modelled.
 type Talents =
   { /// Percent added to every heal this character lands (Purification, Gift of
@@ -782,9 +881,15 @@ type Talents =
     IntellectBp: int
     /// Percent added to mana regeneration (Reflection, Meditation), bp.
     RegenBp: int
-    /// Share of a heal's mana cost handed back when that heal crits
+    /// Percent of a heal's mana cost handed back when that heal crits
     /// (Illumination), bp.
     ManaRefundOnCritBp: int
+    /// Percent a heal crit adds to the healed target's armour, for fifteen
+    /// seconds (Inspiration and Ancestral Healing, both 25% at 3/3), bp.
+    CritArmorBp: int
+    /// Percent one Healing Way stack adds to the next Healing Wave the target
+    /// receives (18% at 3/3), bp. Stacks three times.
+    HealingWayBp: int
     /// Percent of Spirit added to every heal as flat bonus healing (Spiritual
     /// Guidance), bp.
     SpiritToHealingBp: int
@@ -801,6 +906,8 @@ module Talents =
       IntellectBp = 0
       RegenBp = 0
       ManaRefundOnCritBp = 0
+      CritArmorBp = 0
+      HealingWayBp = 0
       SpiritToHealingBp = 0
       TotemEffectBp = 0
       Spells = [] }
