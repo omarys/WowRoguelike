@@ -359,6 +359,19 @@ both because a clear is not currently true and because the full run is too slow.
    walks until tick 8000 and then holds at 15 mobs left, 5 alive at 100% and mob hp
    frozen at 42%.
 
+   A **second mutual-block shape**, found only at level 60 and fixed in `5f43d19`: the
+   aside search asked `claimedByOther`, which reports a *moving* ally's tile as free,
+   so in a cluster where every body is blocked by another body the escape tile was
+   another body's. The Tank held `(10,177)` with destination `(9,178)` (the Mage)
+   while the Mage's best escape was `(9,179)` (the Priest): everyone had a
+   destination, nobody arrived, and the state read identically
+   `inCombat=false aliveHostiles=34 engaged=0 pending=0` at tick 5000 and tick 40000.
+   The aside now takes only a tile that is empty of every living body *right now*.
+   Worth remembering as a rule: `alive=5.0` plus a frozen hostile count is not
+   evidence the Party is fine. Seed 1 graveyard at level 60 goes on to reach
+   `(26,186)` with hostiles down 34 → 22, and the effect across seeds is that
+   graveyard stops being unwinnable (item 2).
+
 2. **The `approachTile` stall — the worst bug in the tree.** See §8. A widening was
 tried and reverted because it broke a clear. The next shape should be a no-route
 re-target: when `stepToward` cannot plan at all, clear the goal so `PartyAi` picks a
@@ -376,6 +389,23 @@ no-route re-target will not catch it - there *is* a route, it just alternates - 
 this one needs the mover to keep its current route instead of replanning when
 replanning returns a first step that undoes the last one. Reproduced identically
 on `591e9bf` and `a164db3`, so it is not the pass-through change.
+
+`5f43d19` took out the mutual-block half of this (the party no longer steps onto a
+body mid-move), and the shape it leaves is now measured. Seed 1 graveyard level 60
+gets from `(10,177)` to `(26,186)` and then holds with `goal=(36,175)`, `path=0`,
+`dest=None`, `stall=17`, the nearest hostile 12 tiles away at `(36,174)`, `freePath=100`
+and `takenPath=0`. The route exists with no bodies in the way and does not exist with
+claims allowed, so something is standing on the *first* step: `aim` falls through to
+`Some p` (the mob's own tile), `stepToward` cannot plan, and each retry costs one
+backoff with nothing moving between them. That is the same no-route-to-a-legitimate-aim
+shape as the paragraph above, and the fix belongs there.
+
+What it is worth on the ladder: at `comps 3 --level 60`, graveyard goes from no clear
+in eight compositions to `Priest` and `Paladin` clearing 1 of 3 seeds each, every
+other composition still unresolved at 24000 with 5 alive. Gully is untouched —
+`runs 8` at the default level is 8/8, median 912. Graveyard is beatable and the bug is
+still in there, which makes the remaining stall the top of this list rather than a
+balance question.
 
 3. **Scarlet Monastery wings need a full matrix before any tuning.** One seed per
    cell, 16000-tick budget, via `smtrace <wing> <min|med|max> 16000 16000`:
