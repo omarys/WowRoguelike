@@ -3272,6 +3272,27 @@ module Content =
       TargetKind = Self
       Effects = [ Resurrect(40, 40) ] }
 
+  /// Rebirth: the only resurrection in the game that a *living* caster can put on
+  /// someone else mid-fight, which is what `Corpse` targeting is for. Rank 1's
+  /// numbers from `.pi/research/ranks/druid.md:97`: 301 mana, 2 s cast, 30 min
+  /// cooldown, 30 yd, 400 health and 700 mana restored. `Resurrect` restores
+  /// fractions of the target's own pool, so those flat amounts are carried as 45%
+  /// and 40% — their values against the sim's level-24 druid (893 hp / 1744 mana).
+  /// 8 tiles of range, like every other ranged ability here.
+  ///
+  /// shortcut: the out-of-combat rule is not modelled. `PartyAi` fires it while a
+  /// hostile is still standing and someone is down instead, which is the case the
+  /// spell exists for; the corpse's ghost walk and the reaction window are not.
+  let rebirth =
+    { Name = "Rebirth"
+      CastTicks = ticks 20
+      CooldownTicks = secTicks 1800.0
+      ResourceCost = 301
+      Interruptible = true
+      Range = 8
+      TargetKind = Corpse
+      Effects = [ Resurrect(45, 40) ] }
+
   /// The healer's traits: the two talents that are neither a stat nor a spell
   /// line land here, where the rest of the class bonuses already live.
   let private healerTraits (attackCritBp: int) (pushbackResistanceBp: int) =
@@ -3541,7 +3562,7 @@ module Content =
             entanglingRootsRanks
             wrathRanks
             moonfireRanks ]
-        @ [ swiftmend ]))
+        @ [ swiftmend; rebirth ]))
       { X = 2; Y = 7 }
 
   /// Human Paladin: mail at 24 — plate is trained at 40 — with Verigan's Fist

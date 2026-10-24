@@ -265,7 +265,10 @@ Feline Grace	1	40	Energy	0	0	0	0	Passive	CatForm	https://wowcalc.net/en/classic/
 - Energy: 100 cap and 20-per-2s tick regen come from a **retail** page's patch-3.0.2 historical note;
   no 1.12-specific page was read.
 - Modelling decisions, not data gaps: `Stun` used instead of `Root` for Bash/Pounce; `ApBuff -X` used for
-  Demoralizing Roar (enemy AP debuff); `Passive` used for Track Humanoids / Feline Grace.
+  Demoralizing Roar (enemy AP debuff); `Passive` used for Track Humanoids / Feline Grace; **Rebirth's
+  row above gives flat 400 hp / 700 mp restored, while `Resurrect` takes percentages of the target's
+  pool — `Content.rebirth` therefore uses 45 % and 40 %, which are those amounts against the sim's
+  level-24 druid pools (893 hp / 1744 mana).**
 
 ## Sources
 - Kept: wowcalc.net/en/classic/wiki/spells/druid — live Classic Era 1.15.9 per-rank table (level, cost,

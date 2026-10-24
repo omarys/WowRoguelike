@@ -2260,6 +2260,150 @@ let ``reincarnation on cooldown leaves the shaman dead`` () =
   Assert.Equal(PartyWiped, SimState.outcome after)
   Assert.False(SimState.continues after)
 
+/// A living healer, a dead ally, and a fight still in progress — the one state
+/// Rebirth is for. A wipe would have no living Druid in it to cast.
+let private rebirthWorld () : World =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  let warrior =
+    Content.hero 1 "Warrior" Tank 1000 1000 tap 50000 [ Content.sunderArmor ] { X = 5; Y = 5 }
+
+  let druid =
+    Content.hero
+      2
+      "Druid"
+      Healer
+      1000
+      1744
+      tap
+      10000
+      [ Content.healingTouchR4; Content.rebirth ]
+      { X = 5; Y = 6 }
+
+  let shaman =
+    { Content.hero 3 "Shaman" Healer 1000 1666 tap 10000 [ Content.shamanHealingWave ] { X = 6; Y = 6 } with
+        Health = 0 }
+
+  let near =
+    { Content.mob 100 "Near" CreatureType.Humanoid 21 1000 1000 (Some tap) [] None { X = 6; Y = 5 } with
+        Engaged = true
+        Target = Some(EntityId 1) }
+
+  { Tick = ticks 0
+    Grid = Grid.create 12 10
+    Entities = [ { warrior with Target = Some(EntityId 100) }; druid; shaman; near ]
+    Pending = []
+    Rng = Rng.streamsOf 3UL
+    PartyBuffs = []
+    Quests = []
+    Log = [] }
+
+[<Fact>]
+let ``rebirth raises a dead ally and the healers can target them again`` () =
+  let druid, shaman = EntityId 2, EntityId 3
+  let w = rebirthWorld ()
+
+  // The target is a corpse, which no other order in the file will pick.
+  let cast =
+    PartyAi.decide w
+    |> List.exists (fun c ->
+      match c.Kind with
+      | UseAbility(a, "Rebirth", t) -> a = druid && t = shaman
+      | _ -> false)
+
+  Assert.True(cast, "the living druid should cast Rebirth on the corpse")
+
+  // Stop at the tick the revive lands on: that is the fraction the spell put
+  // back, before any heal has had time to touch it.
+  let mutable w = w
+  let mutable raised = 0
+
+  for _ in 1 .. 25 do
+    w <- SimTick.step (PartyAi.decide w) w
+    let s = w.Entities |> List.find (fun e -> e.Id = shaman)
+    if raised = 0 && SimState.alive s then raised <- s.Health
+
+  let revived = w.Entities |> List.find (fun e -> e.Id = shaman)
+  Assert.True(SimState.alive revived, "the shaman should be alive again")
+  Assert.True(raised * 100 / revived.MaxHealth >= 45)
+
+  // And back in `party`, which is what the healer orders search: the healer's next
+  // casts land on the member who just stood up, so the health goes up again.
+  let healed =
+    (w, [ 1 .. 60 ]) ||> List.fold (fun w _ -> SimTick.step (PartyAi.decide w) w)
+    |> fun w -> w.Entities |> List.find (fun e -> e.Id = shaman)
+
+  Assert.True(healed.Health > raised, "the healers should be healing the revived member")
+
+/// With the Tank down, the survivors lead themselves to the nearest mob (cca018b) —
+/// and the corpse the Tank left behind must not be what the walk is measured from,
+/// or the Party stands on the body while the mob eats it.
+[<Fact>]
+let ``the walking lead is never a corpse`` () =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  // The Tank fell at the back of the room and the healer is still at the door.
+  let tank =
+    { Content.hero 1 "Warrior" Tank 1000 1000 tap 50000 [ Content.sunderArmor ] { X = 10; Y = 9 } with
+        Health = 0 }
+
+  let priest =
+    Content.hero 2 "Priest" Healer 1000 1000 tap 10000 [ Content.lesserHeal; Content.heal ] { X = 2; Y = 2 }
+
+  let near =
+    { Content.mob 100 "Near" CreatureType.Humanoid 21 1000 1000 (Some tap) [] None { X = 9; Y = 8 } with
+        Engaged = true }
+
+  let w =
+    { Tick = ticks 0
+      Grid = Grid.create 12 10
+      Entities = [ tank; priest; near ]
+      Pending = []
+      Rng = Rng.streamsOf 3UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let leads =
+    PartyAi.decide w
+    |> List.choose (fun c ->
+      match c.Kind with
+      | MoveTo(id, p) -> Some(id, p)
+      | _ -> None)
+
+  Assert.DoesNotContain(leads, fun (id, _) -> id = EntityId 1)
+
+  // The living healer walks toward the mob, not back to the body.
+  Assert.Contains(leads, fun (id, p) -> id = EntityId 2 && Pos.chebyshev p near.Pos <= 2)
+
+/// The Druid's cast outlives the Druid: if the last swing of the fight kills the
+/// only member still standing while a Rebirth is in flight, the rescue has already
+/// been paid for and the run is not over yet.
+[<Fact>]
+let ``a rebirth in flight keeps a wiped run alive`` () =
+  let w = rebirthWorld ()
+
+  let fallen =
+    { w with
+        Entities =
+          w.Entities
+          |> List.map (fun e ->
+            match e.Id with
+            | EntityId 1 -> { e with Health = 0 }
+            | EntityId 2 ->
+              { e with
+                  Health = 0
+                  Casting =
+                    Some
+                      { Ability = Content.rebirth
+                        Target = EntityId 3
+                        Remaining = ticks 10 } }
+            | _ -> e) }
+
+  Assert.Equal(PartyWiped, SimState.outcome fallen)
+  Assert.True(SimState.continues fallen)
+
+
 /// Flame Shock is the shaman's damage spell: Earth Shock carries an interrupt, so
 /// the script keeps it out of the rotation and spends it on a cast instead.
 [<Fact>]

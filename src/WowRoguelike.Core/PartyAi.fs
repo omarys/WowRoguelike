@@ -946,19 +946,45 @@ module PartyAi =
     // sees the living, and Reincarnation is cast *by* the Shaman's own corpse. So
     // it is decided here, where the dead are still part of the world, and it is
     // decided only while a hostile is left — a corpse is not worth standing up to
-    // an empty room, and a full wipe is not a moment to spend a thirty-minute
-    // cooldown.
+    // an empty room, and a wipe is not a moment to spend a thirty-minute cooldown.
+    let dead =
+      w.Entities |> List.filter (fun e -> e.Faction = Party && not (SimState.alive e))
+
     let resurrections =
       if SimState.aliveHostiles w |> List.isEmpty then
         []
       else
-        w.Entities
-        |> List.filter (fun e -> e.Faction = Party && not (SimState.alive e))
-        |> List.collect (fun e ->
-          e.Abilities
-          |> List.filter (fun a -> Ability.resurrects a && canUse e a.Name)
-          |> List.truncate 1
-          |> List.collect (fun a -> cmd at (UseAbility(e.Id, a.Name, e.Id))))
+        // Self-raise first: the corpse that can get itself up needs no one's help.
+        let selfRaise =
+          dead
+          |> List.collect (fun e ->
+            e.Abilities
+            |> List.filter (fun a -> a.TargetKind = Self && Ability.resurrects a && canUse e a.Name)
+            |> List.truncate 1
+            |> List.collect (fun a -> cmd at (UseAbility(e.Id, a.Name, e.Id))))
+
+        // Rebirth is the other half: a healer above the floor raising one of the
+        // dead. Only the living cast it, so it is decided off `actors`, and only
+        // once the self-raise has not already answered the wipe.
+        let raiseOne =
+          if not selfRaise.IsEmpty then
+            []
+          else
+            actors
+            |> List.collect (fun e ->
+              match e.Abilities |> List.tryFind (fun a -> a.TargetKind = Corpse && canUse e a.Name) with
+              | None -> []
+              | Some a ->
+                match
+                  dead
+                  |> List.filter (fun d -> Pos.chebyshev e.Pos d.Pos <= a.Range)
+                  |> List.sortBy (fun d -> d.Pos.X, d.Pos.Y)
+                  |> List.tryHead
+                with
+                | None -> []
+                | Some d -> cmd at (UseAbility(e.Id, a.Name, d.Id)))
+
+        selfRaise @ raiseOne
 
     prePull
     @ movement

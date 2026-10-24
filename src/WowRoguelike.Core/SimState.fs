@@ -74,16 +74,21 @@ module SimState =
   /// happened yet: the tick loop has to outlive `PartyWiped` long enough for the
   /// order to land. A pack that is already dead is the exception — `EncounterCleared`
   /// means the fight is over however many bodies are lying around.
+  ///
+  /// A Rebirth already in flight counts too: the Druid's 2 s cast lands whether or
+  /// not the last swing of the fight killed the Druid, and resolving the run on that
+  /// tick would throw away a rescue that was already paid for.
   let resurrectionPending (w: World) =
     not (List.isEmpty (aliveHostiles w))
     && w.Entities
        |> List.exists (fun e ->
          e.Faction = Party
-         && not (alive e)
-         && (e.Abilities
-             |> List.exists (fun a ->
-               Ability.resurrects a
-               && (e.Cooldowns |> Map.tryFind a.Name |> Option.defaultValue (ticks 0)) <= ticks 0)))
+         && ((not (alive e)
+              && (e.Abilities
+                  |> List.exists (fun a ->
+                    Ability.resurrects a
+                    && (e.Cooldowns |> Map.tryFind a.Name |> Option.defaultValue (ticks 0)) <= ticks 0)))
+             || (e.Casting |> Option.exists (fun c -> Ability.resurrects c.Ability))))
 
   /// Whether the run still has a Tick worth spending. `outcome` keeps its
   /// meaning — a wiped party is still `PartyWiped` — and this only says when to
