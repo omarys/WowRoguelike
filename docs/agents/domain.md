@@ -407,8 +407,8 @@ other composition still unresolved at 24000 with 5 alive. Gully is untouched —
 still in there, which makes the remaining stall the top of this list rather than a
 balance question.
 
-**`80e6c44` widens the aside when the Tank is sealed.** `stuckWithGoal` (a goal, no
-route, no destination) used to widen nothing: the aside looked one tile, so in a
+**The aside reaches six tiles while the Tank is sealed.** `stuckWithGoal` (a goal,
+no route, no destination) used to widen nothing: the aside looked one tile, so in a
 one-wide tube — where only the ally at the *back* has floor to step onto, five tiles
 away — nothing could move and the queue could never unwind. The reach is six tiles in
 that state and one otherwise, so a party that is nothing but a queue drains from the
