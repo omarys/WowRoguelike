@@ -72,9 +72,25 @@ rank. Both hosts agree on the DoT for every rank.
 | 5 | 24 | 200 | 3.0 | 0 | 8 | heal 389-453 | M |
 | 6 | 32 | 265 | 3.0 | 0 | 8 | heal 552-638 | M |
 | 7 | 40 | 340 | 3.0 | 0 | 8 | heal 759-873 | M |
+| 8 | 48 | 440 | 3.0 | 0 | 8 | heal 1040-1190 | M |
+| 9 | 56 | 560 | 3.0 | 0 | 8 | heal 1389-1582 | M |
+| 10 | 60 | 620 | 3.0 | 0 | 8 | heal 1620-1849 | M |
 
-Spell ids: 331, 332, 547, 913, 939, 959, 8005 (rank 8 = 10395 at 48, rank 9 = 10396 at 56,
-rank 10 = 25357 at 60). Range 40 yd on both hosts — the longest range in this file.
+Spell ids: 331, 332, 547, 913, 939, 959, 8005, 10395, 10396, 25357. Range 40 yd on
+both hosts — the longest range in this file.
+
+Ranks 8-10 are outside this file's <= 41 trained-at window, so they were read
+separately from the vanilla tooltip dataset
+(`https://nether.wowhead.com/tooltip/spell/<id>?dataEnv=4&locale=0`). `dataEnv=4`
+prints the scaling-cap value at Level 60, the same convention this table already
+uses; `dataEnv=8` is Wrath (Level 80, "25% of base mana") and gives different
+numbers for the same spell ids. The dataset was validated against ranks 5 and 7
+tooltips, which agree with the rows above. Tooltips print `hi` one higher than this
+table records (rank 5 reads 389-454 here as 389-453, rank 7 reads 759-874 as
+759-873, rank 1 reads 36-47 as 36-46), so the three new rows follow the same
+`hi - 1` convention. An earlier version of these rows was entered from memory as
+`48, 400, 1014-1136` and `56, 460, 1234-1382`; both were wrong (mana understated,
+heal understated) and rank 10 was missing entirely.
 
 ## Arcane Shot — Hunter (Mana)
 | Rank | Level | Cost | Cast | CD | Range | Effects | Conf |

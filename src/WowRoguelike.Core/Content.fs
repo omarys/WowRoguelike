@@ -753,11 +753,14 @@ module Content =
 
   let flameShock = rank24 flameShockRanks
 
-  /// Healing Wave ranks 1-9 (levels 1-56): 389-453 for 200 mana at rank 5, on a
+  /// Healing Wave ranks 1-10 (levels 1-60): 389-453 for 200 mana at rank 5, on a
   /// 3.0 s cast. A damage shaman will not cast it — the party's healer does the
   /// healing — but it is what a shaman has, so it is in the kit. The mana curve
-  /// is monotonic 200 → 265 → 340 → 400 → 460; ranks 8 and 9 are the level 48 and
-  /// 56 trains a level-60 Shaman actually stands on.
+  /// is monotonic 200 → 265 → 340 → 440 → 560 → 620. Ranks 8-10 (spell ids 10395,
+  /// 10396, 25357) are not in the rank tables under `.pi/research/levelscale/`,
+  /// which stop at rank 7: they were read from the vanilla tooltip dataset, and
+  /// that file records the dataset, the validation against ranks 5 and 7, and the
+  /// `hi - 1` convention these rows follow.
   let shamanHealingWaveRanks: AbilityDef =
     { Name = "Healing Wave"
       Resource = Mana
@@ -773,8 +776,9 @@ module Content =
               24, 200, 3.0, 389, 453
               32, 265, 3.0, 552, 638
               40, 340, 3.0, 759, 873
-              48, 400, 3.0, 1014, 1136
-              56, 460, 3.0, 1234, 1382 ] do
+              48, 440, 3.0, 1040, 1190
+              56, 560, 3.0, 1389, 1582
+              60, 620, 3.0, 1620, 1849 ] do
             { Level = level
               Cost = cost
               CastTicks = secTicks cast
