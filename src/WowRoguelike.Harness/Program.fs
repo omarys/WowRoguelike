@@ -14,7 +14,7 @@ let private usage () =
   printfn "sim wc                     render the stitched Wailing Caverns dungeon"
   printfn "sim sm [wing] [min|median|max]  render a Scarlet Monastery wing at one difficulty"
   printfn "sim runs [n] [maxTicks]     run n seeds and summarise outcomes"
-  printfn "sim comps [n]               party compositions through three rounds of healer/DPS swaps"
+  printfn "sim comps [n] [--level L]  party compositions through three rounds of healer/DPS swaps"
   printfn "sim snapshots [n]           one stable line per seed, the snapshot test's input"
   printfn "sim story [-i]             play the Wailing Caverns story (auto-picks choices)"
 
@@ -35,6 +35,17 @@ let private intOf (args: string list) (i: int) (fallback: int) =
     | true, v -> v
     | _ -> fallback
   | None -> fallback
+
+let private flagOf (args: string list) (name: string) =
+  match List.tryFindIndex ((=) name) args with
+  | Some i ->
+    match nth args (i + 1) with
+    | Some s ->
+      match System.Int32.TryParse s with
+      | true, v -> Some v
+      | _ -> None
+    | None -> None
+  | None -> None
 
 let private demo (seed: uint64) (maxTicks: int) =
   let w = Bench.runEncounter seed maxTicks
@@ -78,7 +89,12 @@ let private runs (n: int) (maxTicks: int) =
 ///   2. the winning healer plus each other healer, to see if a healing pair beats it;
 ///   3. the winning healer with the Rogue swapped for a Hunter, whose long range
 ///      opens the pulls the Rogue has to walk into.
-let private comps (seedCount: int) =
+/// `--level L` seats every member at level L instead of the level the map seated
+/// them at, which is how the four healers are compared at level 60: at 60 the stats
+/// are the researched Gear60 sheet and the kit is the top rank of every ladder. The
+/// mobs stay where the map put them, so the ladder ranks healers against each other
+/// on the same content rather than measuring level-60 balance.
+let private comps (seedCount: int) (level: int option) =
   let seeds = [ 1UL .. uint64 seedCount ]
 
   let maps =
@@ -98,9 +114,14 @@ let private comps (seedCount: int) =
 
     x
 
+  let seat (roster: string list) (w: World) =
+    match level with
+    | Some l -> Content.withRosterAt l roster w
+    | None -> Content.withRoster roster w
+
   let measure (roster: string list) (make: uint64 -> World) maxTicks =
     let results =
-      seeds |> List.map (fun s -> play (Content.withRoster roster (make s)) maxTicks)
+      seeds |> List.map (fun s -> play (seat roster (make s)) maxTicks)
 
     let count o =
       results |> List.filter (fun w -> SimState.outcome w = o) |> List.length
@@ -135,7 +156,11 @@ let private comps (seedCount: int) =
   let healers = [ "Priest"; "Druid"; "Paladin"; "Shaman" ]
   let dps = [ "Mage"; "Rogue"; "Warlock" ]
 
-  printfn "seeds=%d per map, maps: %s" seedCount (maps |> List.map (fun (m, _, _) -> m) |> String.concat ", ")
+  printfn
+    "seeds=%d level=%s per map, maps: %s"
+    seedCount
+    (level |> Option.map string |> Option.defaultValue "content")
+    (maps |> List.map (fun (m, _, _) -> m) |> String.concat ", ")
 
   printfn "\nround 1 - one healer, three DPS"
 
@@ -464,7 +489,7 @@ let main argv =
 
     0
   | "comps" :: rest ->
-    comps (intOf rest 0 25)
+    comps (intOf rest 0 25) (flagOf rest "--level")
     0
   | "runs" :: rest ->
     runs (intOf rest 0 20) (intOf rest 1 2000)

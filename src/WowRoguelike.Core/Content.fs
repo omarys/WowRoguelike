@@ -3765,19 +3765,26 @@ module Content =
   /// through this, because a dungeon builder always seats the default five. The
   /// party is rebuilt rather than renamed, so the new roster's passives are
   /// applied to the members that get them.
-  let withRoster (roster: string list) (w: World) : World =
+  /// `withRoster` at a chosen level, so the level-60 ladder can seat every class on
+  /// its Gear60 sheet instead of the level the map seated it at.
+  let withRosterAt (level: int) (roster: string list) (w: World) : World =
     let existing = w.Entities |> List.filter (fun e -> e.Faction = Party)
 
     match existing with
     | [] -> w
-    | first :: _ ->
+    | _ ->
       let tiles = existing |> List.map (fun e -> e.Pos)
-      let party = partyOf roster first.Level |> List.truncate (List.length tiles)
+      let party = partyOf roster level |> List.truncate (List.length tiles)
       let seated = List.map2 (fun (e: Entity) p -> { e with Pos = p }) party tiles
 
       { w with
           Entities = seated @ (w.Entities |> List.filter (fun e -> e.Faction <> Party))
           PartyBuffs = partyBuffsFor roster }
+
+  let withRoster (roster: string list) (w: World) : World =
+    match w.Entities |> List.filter (fun e -> e.Faction = Party) with
+    | [] -> w
+    | first :: _ -> withRosterAt first.Level roster w
 
   // Wailing Caverns creatures. Health, per-swing melee damage and armour are the
   // real Classic values from the classicdb.ch and Wowhead Classic NPC pages
