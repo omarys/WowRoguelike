@@ -2106,6 +2106,42 @@ let ``a healing stream totem heals the party until it expires`` () =
   Assert.False(w.Entities |> List.exists (fun e -> e.Name = "Healing Stream Totem" && SimState.alive e))
   Assert.Equal(settled, tankHealth ())
 
+/// A totem is faction Party so that mobs can hit it, but it is not a party member:
+/// with the whole party dead and a totem still ticking, the run is a wipe, not a
+/// fight that is still going.
+[<Fact>]
+let ``a live totem does not answer for a dead party`` () =
+  let dead = { (Content.partyOf [ "Warrior" ] 24).[0] with Health = 0 }
+
+  let totem =
+    { dead with
+        Name = "Searing Totem"
+        Health = 5
+        MaxHealth = 5
+        Abilities = []
+        AutoAttack = None
+        Owner = Some dead.Id
+        ExpiresInTicks = Some(secTicks 30.0)
+        Totem = Some { Pulse = Heals 44; Radius = 5; Period = secTicks 2.0 } }
+
+  let enemy =
+    { Content.mob 100 "Near" CreatureType.Humanoid 21 4000 2000 None [] None { X = 8; Y = 5 } with
+        Engaged = true }
+
+  let w =
+    { Tick = ticks 0
+      Grid = Grid.create 12 10
+      Entities = [ dead; totem; enemy ]
+      Pending = []
+      Rng = Rng.streamsOf 11UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  Assert.Empty(SimState.aliveParty w)
+  Assert.Equal(PartyWiped, SimState.outcome w)
+  Assert.False(SimState.continues w)
+
 /// Nine classes is the whole roster, and every one of them has to build at 24:
 /// a builder that returns the wrong name, or none at all, fails here.
 [<Fact>]

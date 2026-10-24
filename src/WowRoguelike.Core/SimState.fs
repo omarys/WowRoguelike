@@ -33,7 +33,11 @@ module SimState =
   let tryEntity (id: EntityId) (w: World) = w.Entities |> List.tryFind (fun e -> e.Id = id)
 
   let alive (e: Entity) = e.Health > 0
-  let aliveParty (w: World) = w.Entities |> List.filter (fun e -> e.Faction = Party && alive e)
+  /// The heroes. A totem is faction Party so that mobs can hit it, but it is not
+  /// a party member: counting one here lets a live totem answer for a dead party
+  /// in `outcome`, and puts totems in the heal pool and the formation.
+  let aliveParty (w: World) =
+    w.Entities |> List.filter (fun e -> e.Faction = Party && alive e && e.Totem.IsNone)
 
   /// In combat while something hostile is engaged with the party. This is the
   /// same test the party uses to end a pull, and the one regeneration asks:
