@@ -392,6 +392,29 @@ on `591e9bf` and `a164db3`, so it is not the pass-through change.
    earlier note in this section: it does **not** clear at 11480 on this build (with
    the stun at the 45-energy gate it wipes at 26 left), so treat that number as
    retired.
+
+   **Healer and DPS composition, measured once with `sim comps 25`** (25 seeds per
+   map, scripted party, ~18 minutes; a player will do better — this is the floor a
+   composition sets):
+
+   | round | gully cleared | gully alive | gully median | graveyard |
+   |---|---|---|---|---|
+   | Warrior/Priest/Mage/Rogue/Warlock | 20/25 | 3.5 | 924 | 23 wipes, 2 unresolved, alive 0.4 |
+   | Warrior/Druid/Mage/Rogue/Warlock | 17/25 | 3.0 | 896 | 24 wipes, 1 unresolved, alive 0.2 |
+   | Warrior/Paladin/Mage/Rogue/Warlock | **25/25** | **4.8** | **810** | 23 wipes, 2 unresolved, alive 0.2 |
+   | Warrior/Paladin/Priest/Mage/Warlock | 25/25 | 5.0 | 905 | 24 unresolved, alive 4.8 |
+   | Warrior/Paladin/Druid/Mage/Warlock | 25/25 | 5.0 | 900 | 20 unresolved, alive 4.0 |
+   | Warrior/Paladin/Mage/Warlock/Hunter | 25/25 | 4.4 | 840 | 15 wipes, 10 unresolved, alive 1.9 |
+
+   Paladin is the only healer that clears gully every time with three DPS behind it;
+   a second healer buys nothing on a map the party can win, and on graveyard it makes
+   the party unkillable *and* unable to finish — 20-24 of 25 runs hit the tick cap
+   with four to five alive, which is the alternating-route stall above, not a healing
+   stalemate (no hostile is ever engaged, party HP never moves). Swapping the Rogue
+   for a Hunter costs gully survivability (4.8 -> 4.4 alive) and buys graveyard
+   longevity (23 wipes -> 15, alive 0.2 -> 1.9), which is the pull distance working:
+   fewer mobs wake up per pull. **Graveyard median is not a clear test for any
+   five-member party** — it is a wipe-rate and stall-rate test.
 4. **The pull protocol is specified by the user and only its first line exists.**
    The intended shape (user's words, condensed): *pre-combat CC that does not start
    combat (Rogue's Sap) first; then a ranged member opens on the priority enemy from
