@@ -3394,6 +3394,60 @@ let ``no ally steps aside onto a tile a body already holds`` () =
   for (who, p) in aside do
     Assert.False(held p, sprintf "%A stepped aside onto %A, where a body already stands" who p)
 
+/// A one-wide tube with the Tank at the sealed end and four allies stacked behind
+/// it. Only the ally at the very back has floor to step onto, and it is five tiles
+/// from the Tank — further than the aside used to look. Seed 1 graveyard level 60
+/// wedged exactly like this, so the queue has to drain from the back.
+[<Fact>]
+let ``a tank sealed in a tube drains the queue from the back`` () =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  // The goal is past the wall: the Tank has one, so it is not merely idle, and no
+  // route to it, so every follower is holding position too.
+  let tank =
+    { Content.hero 1 "Warrior" Tank 1000 1000 tap 50000 [ Content.sunderArmor ] { X = 7; Y = 4 } with
+        Goal = Some { X = 9; Y = 4 } }
+
+  let allies =
+    [ (6, 4); (5, 4); (4, 4); (3, 4) ]
+    |> List.mapi (fun i (x, y) ->
+      Content.hero (2 + i) "Mage" Dps 1000 1000 tap 10000 [ Content.fireball ] { X = x; Y = y })
+
+  let w =
+    { Tick = ticks 0
+      Grid =
+        Grid.ofRows
+          [ "###########"
+            "###########"
+            "###########"
+            "###########"
+            "#.......###"
+            "#.#########"
+            "#.#########"
+            "###########" ]
+      Entities = tank :: allies
+      Pending = []
+      Rng = Rng.streamsOf 3UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let moveFor id =
+    PartyAi.decide w
+    |> List.tryPick (fun c ->
+      match c.Kind with
+      | MoveTo(a, p) when a = EntityId id -> Some p
+      | _ -> None)
+
+  // The last ally in the queue backs into the shaft, which is the only free floor
+  // within six tiles of the Tank.
+  Assert.Equal(Some { X = 2; Y = 4 }, moveFor 5)
+
+  // The three ahead of it have nowhere to go and must not thrash on the spot.
+  Assert.Equal(None, moveFor 2)
+  Assert.Equal(None, moveFor 3)
+  Assert.Equal(None, moveFor 4)
+
 /// Wedged in a dead end, every tile the Tank could stand on leaves the mob's back
 /// against a wall and the casters' line broken. The mob has to move, and it moves
 /// by following: the Tank steps away and the mob takes the tile it just left.

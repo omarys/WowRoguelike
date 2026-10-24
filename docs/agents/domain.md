@@ -407,6 +407,29 @@ other composition still unresolved at 24000 with 5 alive. Gully is untouched —
 still in there, which makes the remaining stall the top of this list rather than a
 balance question.
 
+**`80e6c44` widens the aside when the Tank is sealed.** `stuckWithGoal` (a goal, no
+route, no destination) used to widen nothing: the aside looked one tile, so in a
+one-wide tube — where only the ally at the *back* has floor to step onto, five tiles
+away — nothing could move and the queue could never unwind. The reach is six tiles in
+that state and one otherwise, so a party that is nothing but a queue drains from the
+back. It changes no ladder number (`comps 3 --level 60` is still 2 cleared runs in 24,
+gully still 8/8 at the default level), because the jam it fixes is not the one blocking
+those runs.
+
+**What is blocking them, measured.** Seed 1 graveyard level 60 replays into a state
+that is identical at tick 16000 and tick 24000: Tank on `(25,186)` with
+`goal=(36,175) path=0 dest=None`, a DPS on `(25,187)` whose own goal is the Tank's
+tile, and a second DPS on `(25,188)` with `path=0` and `destination=(25,187)` — a
+teammate who is standing still. It waits there forever, because `advanceMovement`
+holds a mover whose destination is in `settled`
+(`src/WowRoguelike.Core/SimTick.fs:220`) and `MoveTo` rewrites `Goal` and `Path` but
+never `Destination` (`src/WowRoguelike.Core/SimCombat.fs:897`), so the mover is deaf to
+every later order — including the aside. Clearing the destination on that branch is the
+obvious fix and was tried and reverted: the Tank then shuttles between `(9,178)` and
+`(11,177)` with 36 mobs alive and no kill at the cap, which is worse than standing
+still. Whoever takes this next should start from those two line numbers: the
+destination needs to be given up, but not on every blocked tick.
+
 3. **Scarlet Monastery wings need a full matrix before any tuning.** One seed per
    cell, 16000-tick budget, via `smtrace <wing> <min|med|max> 16000 16000`:
 

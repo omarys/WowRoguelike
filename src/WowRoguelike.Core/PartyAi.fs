@@ -873,9 +873,19 @@ module PartyAi =
           // one route, and the ally who happens to be standing on it has no
           // reason to move — so the Tank stalls on one Step the whole dungeon.
           // While the Tank is walking, anyone pressed against it steps aside.
+          // A Tank sealed behind its own Party cannot drain the corridor one ally
+          // at a time: in a one-wide tube only the ally at the *back* has floor to
+          // step onto, and it is nowhere near the Tank. Seed 1 graveyard level 60
+          // ended up exactly there — `goal=(36,175) path=0 dest=None stall=17`, the
+          // route existing over free floor and not over claimed floor, with three
+          // allies stacked behind the Tank. Nothing was engaged, so the whole queue
+          // may step away from it and the tube empties from the back.
+          let stuckWithGoal = t.Goal.IsSome && t.Path.IsEmpty && t.Destination.IsNone
+          let reach = if stuckWithGoal then 6 else 1
+
           if t.Goal.IsSome || wantsToMove then
             for e in role Healer @ role Dps do
-              if e.Id <> t.Id && Pos.chebyshev e.Pos t.Pos <= 1 then
+              if e.Id <> t.Id && Pos.chebyshev e.Pos t.Pos <= reach then
                 // Distance alone ties: two tiles either side of the Tank are both
                 // one away, and an unstable sort then shuttles the ally between
                 // them every tick while the Tank stays blocked. A fixed tie-break
@@ -905,8 +915,7 @@ module PartyAi =
           // route to, holding position beats following: the corridor empties, the
           // Tank finds its route, and the leash resumes on the next tick.
           let holding =
-            (t.Goal.IsSome && t.Path.IsEmpty && t.Destination.IsNone)
-            || (wantsToMove && t.Goal.IsNone)
+            stuckWithGoal || (wantsToMove && t.Goal.IsNone)
 
           if not holding then
             for e in role Tank @ role Healer @ role Dps do
