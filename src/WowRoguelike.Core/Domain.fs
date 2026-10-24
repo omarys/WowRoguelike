@@ -609,6 +609,11 @@ type Effect =
   /// Swiftmend: heal for what the target's heal-over-time had left, and consume
   /// it. A heal, so it takes the healer's healing bonus like any other.
   | ConsumeHealOverTime
+  /// Reincarnation and Rebirth: stand a body back up at a fraction of its pools.
+  /// Not a heal — the target is a corpse, so it takes neither the healer's bonus
+  /// nor the healing rules, and it is the only effect that may resolve against
+  /// something that is already dead.
+  | Resurrect of healthPct: int * manaPct: int
   | Stun of duration: int<tick>
   | Root of duration: int<tick>
   | Polymorph of duration: int<tick>
@@ -644,6 +649,9 @@ type TargetKind =
   | Foe
   | Ally
   | Self
+  /// A dead party member: Rebirth's target, and nothing else in any kit. The
+  /// living are not valid for it, exactly as the dead are not valid for `Ally`.
+  | Corpse
 
 type Ability =
   { Name: string
@@ -711,6 +719,14 @@ module Ability =
       AbilityGroup.Damage
     else
       AbilityGroup.Utility
+
+  /// Whether an ability brings a body back from the dead. That is the one thing
+  /// that resolves against a corpse, and the one thing a dead member still casts.
+  let resurrects (a: Ability) =
+    a.Effects
+    |> List.exists (function
+      | Resurrect _ -> true
+      | _ -> false)
 
 /// WoW's three resource economies. A Warrior builds rage by fighting, a Rogue
 /// regenerates energy on a fixed clock, a caster spends mana — they behave
@@ -896,7 +912,11 @@ type Talents =
     /// Percent added to what a totem gives the party (Restorative Totems), bp.
     TotemEffectBp: int
     /// The per-spell lines: cast time, cost and heal for one named spell.
-    Spells: SpellTalent list }
+    Spells: SpellTalent list
+    /// Ticks taken off one named cooldown, and the spells it applies to
+    /// (Improved Reincarnation: -10 min at 2/2). A list rather than a field per
+    /// spell, because a talent that changes a cooldown is still just data.
+    CooldownOff: (string * int<tick>) list }
 
 module Talents =
 
@@ -910,7 +930,8 @@ module Talents =
       HealingWayBp = 0
       SpiritToHealingBp = 0
       TotemEffectBp = 0
-      Spells = [] }
+      Spells = []
+      CooldownOff = [] }
 
   let spell (name: string) (t: Talents) = t.Spells |> List.tryFind (fun s -> s.Spell = name)
 
@@ -930,6 +951,13 @@ module Talents =
   /// Ticks off one spell's cast time.
   let castOff (name: string) (t: Talents) =
     spell name t |> Option.map (fun s -> s.CastTicksOff) |> Option.defaultValue (ticks 0)
+
+  /// Ticks off one spell's cooldown.
+  let cooldownOff (name: string) (t: Talents) =
+    t.CooldownOff
+    |> List.tryFind (fun (spell, _) -> spell = name)
+    |> Option.map snd
+    |> Option.defaultValue (ticks 0)
 
 type Entity =
   { Id: EntityId

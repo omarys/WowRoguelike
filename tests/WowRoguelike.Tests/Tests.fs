@@ -1826,7 +1826,8 @@ let ``the shaman's kit is the level-24 one`` () =
       "Healing Wave"
       "Stoneskin Totem"
       "Healing Stream Totem"
-      "Nature's Swiftness" ],
+      "Nature's Swiftness"
+      "Reincarnation" ],
     shaman.Abilities |> List.map (fun a -> a.Name)
   )
 
@@ -2192,6 +2193,72 @@ let private abilitiesFor (actor: EntityId) (cmds: Command list) =
     match c.Kind with
     | UseAbility(a, n, _) when a = actor -> Some n
     | _ -> None)
+
+/// A wiped party: the Warrior and the Shaman are both on the floor and one mob is
+/// still standing. This is the state Reincarnation exists for — the run is over
+/// unless the Shaman's own corpse gets a tick to cast in.
+let private reincarnationWorld (cooldowns: Map<string, int<tick>>) : World =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  let warrior =
+    { Content.hero 1 "Warrior" Tank 1000 1000 tap 50000 [ Content.sunderArmor ] { X = 5; Y = 5 } with
+        Health = 0 }
+
+  let shaman =
+    { Content.hero
+        2
+        "Shaman"
+        Healer
+        1000
+        1666
+        tap
+        10000
+        [ Content.shamanHealingWave; Content.reincarnation ]
+        { X = 5; Y = 6 } with
+        Health = 0
+        Resource = 0
+        Cooldowns = cooldowns }
+
+  let near =
+    { Content.mob 100 "Near" CreatureType.Humanoid 21 1000 1000 (Some tap) [] None { X = 6; Y = 5 } with
+        Engaged = true
+        Target = Some(EntityId 1) }
+
+  { Tick = ticks 0
+    Grid = Grid.create 12 10
+    Entities = [ warrior; shaman; near ]
+    Pending = []
+    Rng = Rng.streamsOf 3UL
+    PartyBuffs = []
+    Quests = []
+    Log = [] }
+
+[<Fact>]
+let ``reincarnation stands a dead shaman back up`` () =
+  let w = reincarnationWorld Map.empty
+  // The party reads as wiped, and the run must not be resolved until the corpse
+  // that can still raise itself has had its tick.
+  Assert.Equal(PartyWiped, SimState.outcome w)
+  Assert.True(SimState.continues w)
+
+  let after = SimTick.step (PartyAi.decide w) w
+  let shaman = after.Entities |> List.find (fun e -> e.Name = "Shaman")
+
+  Assert.Equal(40, shaman.Health * 100 / shaman.MaxHealth)
+  Assert.Equal(40, shaman.Resource * 100 / shaman.MaxResource)
+  Assert.Equal(Running, SimState.outcome after)
+
+/// The cooldown is the whole balance of the button: a Shaman who already used it
+/// this run stays a corpse, and that run is a wipe.
+[<Fact>]
+let ``reincarnation on cooldown leaves the shaman dead`` () =
+  let w = reincarnationWorld (Map.ofList [ "Reincarnation", secTicks 1500.0 ])
+  let after = SimTick.step (PartyAi.decide w) w
+  let shaman = after.Entities |> List.find (fun e -> e.Name = "Shaman")
+
+  Assert.Equal(0, shaman.Health)
+  Assert.Equal(PartyWiped, SimState.outcome after)
+  Assert.False(SimState.continues after)
 
 /// Flame Shock is the shaman's damage spell: Earth Shock carries an interrupt, so
 /// the script keeps it out of the rotation and spends it on a cast instead.

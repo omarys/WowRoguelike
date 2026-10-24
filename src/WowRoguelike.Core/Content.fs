@@ -3109,7 +3109,10 @@ module Content =
   /// mana) and Healing Way 3/3 (+18% a stack to the target's next Healing Wave).
   /// Ancestral Healing 3/3 comes in beside it as `CritArmorBp`.
   ///
-  /// shortcut: Improved Reincarnation is not modelled — it needs a death.
+  /// shortcut: Improved Reincarnation is modelled as the cooldown cut alone
+  /// (`.pi/research/level24/shaman.md` §5) — its +20% health and mana at 2/2 is
+  /// already baked into `reincarnation`'s fraction, the same way a rank's numbers
+  /// are baked into its `Ability`.
   let private shamanTalents =
     { Talents.none with
         HealDoneBp = 1000
@@ -3118,6 +3121,7 @@ module Content =
         TotemEffectBp = 2500
         CritArmorBp = 2500
         HealingWayBp = 1800
+        CooldownOff = [ "Reincarnation", secTicks -600.0 ]
         Spells =
           { Spell = "Healing Wave"
             CostBp = 0
@@ -3193,7 +3197,8 @@ module Content =
     |> List.map (fun a ->
       { a with
           ResourceCost = a.ResourceCost * (10000 - Talents.costBp a.Name (heals a) t) / 10000
-          CastTicks = max (ticks 0) (a.CastTicks - Talents.castOff a.Name t) })
+          CastTicks = max (ticks 0) (a.CastTicks - Talents.castOff a.Name t)
+          CooldownTicks = max (ticks 0) (a.CooldownTicks + Talents.cooldownOff a.Name t) })
 
   /// The four healer cooldowns, as single-rank abilities. It is the talent tree
   /// that hands each one over and not a trainer, so none of them carries a level:
@@ -3243,6 +3248,29 @@ module Content =
       Range = 8
       TargetKind = Ally
       Effects = [ ConsumeHealOverTime ] }
+
+  /// Reincarnation: the Shaman's own corpse gets up again, which is why it is the
+  /// one `Self` ability a dead member still casts. The cooldown is the whole point
+  /// of the button — once a run, at best — and it is `Reincarnation`'s 30 minutes
+  /// less `shamanTalents`' Improved Reincarnation, which is data, not a branch.
+  ///
+  /// 20% health and mana, plus the 20% the same 2/2 talent adds on top, so the
+  /// fraction is 40 because the build carries it (`.pi/research/level24/shaman.md`
+  /// §5).
+  ///
+  /// shortcut: the Ankh reagent and the ghost walk back to the body are not
+  /// modelled — the sim has no items and no death state past `Health = 0`, so the
+  /// Shaman stands up where he fell. 1.12 also trained this at 30, and the kit has
+  /// it at every level like the tree's other buttons.
+  let reincarnation =
+    { Name = "Reincarnation"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 1800.0
+      ResourceCost = 0
+      Interruptible = false
+      Range = 0
+      TargetKind = Self
+      Effects = [ Resurrect(40, 40) ] }
 
   /// The healer's traits: the two talents that are neither a stat nor a spell
   /// line land here, where the rest of the class bonuses already live.
@@ -3723,7 +3751,7 @@ module Content =
           level
           [ shamanLightningBoltRanks; earthShockRanks; flameShockRanks; shamanHealingWaveRanks ]
         @ totemKit shamanTalents level
-        @ [ naturesSwiftness ]))
+        @ [ naturesSwiftness; reincarnation ]))
       { X = 3; Y = 7 }
 
   /// Night Elf Hunter: level-24 leather only — hunters too train mail at 40 — on

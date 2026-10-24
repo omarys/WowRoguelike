@@ -98,7 +98,7 @@ is a floor and not a true BiS.
 ## 4. What the sim models, and what it does not
 
 Modelled: Lightning Bolt, Earth Shock (with its interrupt), Flame Shock (direct + DoT),
-Healing Wave, and the rank-4 base-stat line.
+Healing Wave, Reincarnation (§5), and the rank-4 base-stat line.
 
 **Not modelled, with a `shortcut:` comment in `Content.fs`:**
 
@@ -110,11 +110,43 @@ Healing Wave, and the rank-4 base-stat line.
 - **Shock cooldowns are shared in WoW.** The sim gives each ability its own cooldown, so
   a shaman can chain Earth Shock and Flame Shock; in the game one locks out the other for
   6 s. `shortcut:` recorded on the abilities.
+- **Reincarnation's Ankh reagent and the ghost walk back to the corpse.** The
+  resurrection itself is modelled (§5); what 1.12 wraps around it is not.
 
-## 5. Sources
+## 5. Reincarnation and Improved Reincarnation
+
+Every number the sim's resurrection uses. `Content.reincarnation` is the ability and
+`shamanTalents.CooldownOff` is the talent's cooldown cut.
+
+| Source | Cooldown | Restores | Cost / reagent | Confidence |
+|---|---|---|---|---|
+| Reincarnation, Classic Era (build 1.15.9) | 30 min | 20% health, 20% mana | none, 1 Ankh, self only, instant | `V` |
+| Reincarnation, 1.12 (patch 1.1.1) | 60 min | 20% health, 20% mana | none, 1 Ankh, self only, instant | `V` |
+| Improved Reincarnation 1/2 | −10 min | +10% health and mana | Restoration tier 2 | `V` |
+| Improved Reincarnation 2/2 | −20 min | +20% health and mana | Restoration tier 2 | `V` |
+| Learned at | level 30 in 1.12 (level 8 in Classic Era) | — | — | `V` |
+
+**Contradiction, and the value the sim uses.** The two cooldown rows cannot both hold:
+30 min less rank 2's 20 min is 10 min, while 1.12's 60 min less the same 20 min is 40.
+This project models 1.12 mechanics with Classic Era numbers, so the sim takes
+**30 min base, less 10 min at 2/2 = 20 min** — chosen rather than derived; the 1.12 base
+of 60 min would make the button unusable more than once a run either way. The restored
+fraction has no such conflict: 20% + 20% at 2/2 = **40% health and mana**, and the sim's
+shaman build carries the talent at 2/2, so `Content.reincarnation` restores 40% of both.
+
+Not modelled (`shortcut:` on the ability): the Ankh reagent, the ghost-walk to the
+corpse, and the level-30 trainer gate — the sim's kit is the level-60 tree on a level-24
+body, exactly as Nature's Swiftness and Swiftmend are.
+
+## 6. Sources
 
 1. https://wowcalc.net/en/classic/wiki/spells/shaman — every rank table above.
 2. https://classicdb.ch/?spell=8042 (Earth Shock rank 4) — 125-133.
 3. https://www.wowhead.com/classic/spell=939/healing-wave — Healing Wave rank 5, 389-453.
 4. `.pi/research/level24/base_stats_new_classes.md` — the three shaman base arrays.
 5. `.pi/research/level24/druid.md` — the verified ≤24 gear pieces reused in §3.
+6. https://warcraft.wiki.gg/wiki/Reincarnation and https://www.wowdb.com/spells/20608-reincarnation
+   — cooldown and the 20% health/mana tooltip (Classic Era, 1.15.9).
+7. https://warcraft.wiki.gg/wiki/Improved_Reincarnation — −10/−20 min and +10/+20% health
+   and mana at 1/2 and 2/2.
+8. https://warcraft.wiki.gg/wiki/Patch_1.1.1 — Reincarnation "once every hour" at launch.

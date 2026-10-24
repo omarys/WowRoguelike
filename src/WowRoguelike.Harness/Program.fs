@@ -109,7 +109,7 @@ let private comps (seedCount: int) (level: int option) =
     let mutable x = w
 
     for _ in 1 .. maxTicks do
-      if SimState.outcome x = Running then
+      if SimState.continues x then
         x <- SimTick.step (Bench.autoPilot x) x
 
     x

@@ -337,7 +337,7 @@ module SimTick =
       let w = mapEntity actorId (fun e -> { e with Casting = None }) w
 
       match tryEntity c.Target w with
-      | Some t when alive t -> resolveAbility actorId c.Target c.Ability w
+      | Some t when alive t || Ability.resurrects c.Ability -> resolveAbility actorId c.Target c.Ability w
       | _ ->
         w
         |> logLine (sprintf "%s's %s fizzles (target gone)" (nameOf actorId w) c.Ability.Name))

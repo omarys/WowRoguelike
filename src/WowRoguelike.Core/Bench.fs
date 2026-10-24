@@ -14,7 +14,7 @@ module Bench =
 
   let runEncounter (seed: uint64) (maxTicks: int) : World =
     let rec loop (w: World) (remaining: int) =
-      if remaining <= 0 || SimState.outcome w <> Running then
+      if remaining <= 0 || not (SimState.continues w) then
         w
       else
         loop (SimTick.step (autoPilot w) w) (remaining - 1)
@@ -319,7 +319,7 @@ module Bench =
     let mutable live = 0
 
     for _ in 1..(ticks - warmup) do
-      if SimState.outcome w = Running then
+      if SimState.continues w then
         clock.Restart()
         let commands = autoPilot w
         pilotMs <- pilotMs + clock.Elapsed.TotalMilliseconds
@@ -401,7 +401,7 @@ module Bench =
     let mutable worstWorld = w
 
     for _ in 1..(ticks - 50) do
-      if SimState.outcome w = Running then
+      if SimState.continues w then
         let _, replans = searchPressure w
         let commands = autoPilot w
         clock.Restart()
@@ -445,7 +445,7 @@ module Bench =
     let planning = ResizeArray<int>()
     let mutable started = 0
 
-    while started < ticks && SimState.outcome w = Running do
+    while started < ticks && SimState.continues w do
       let _, replans = searchPressure w
       planning.Add replans
       w <- SimTick.step (autoPilot w) w

@@ -762,6 +762,17 @@ module SimCombat =
             |> (fun w -> { w with Entities = summon :: w.Entities })
             |> logLine (sprintf "%s summons %s" actor.Name spec.Name)
 
+        | Resurrect(healthPct, manaPct) ->
+          match tryEntity targetId w with
+          | Some t when not (alive t) ->
+            w
+            |> mapEntity targetId (fun t ->
+              { t with
+                  Health = max 1 (t.MaxHealth * healthPct / 100)
+                  Resource = max t.Resource (t.MaxResource * manaPct / 100) })
+            |> logLine (sprintf "%s raises %s from the dead" actor.Name t.Name)
+          | _ -> w
+
         | Charge ->
           match tryEntity actorId w, tryEntity targetId w with
           | Some a, Some t ->
@@ -829,6 +840,16 @@ module SimCombat =
       | Some t when canReach ability.Range actor t w -> Some t.Id
       | _ -> None
     | Ally -> allyInNeed actor ability w
+    // Nothing in the kits picks a corpse on its own: who to bring back is a
+    // decision, not a target search (see `PartyAi.decide`).
+    | Corpse -> None
+
+  /// An ability a dead member casts at its own corpse — Reincarnation, which
+  /// exists precisely to be used once the member playing it has lost.
+  let internal castsFromCorpse (e: Entity) (abilityName: string) =
+    not (alive e)
+    && (e.Abilities
+        |> List.exists (fun a -> a.Name = abilityName && Ability.resurrects a))
 
   let internal startOrResolve (actor: Entity) (targetId: EntityId) (ability: Ability) (w: World) : World =
     // Using an ability interrupts a move in progress: the character stops to
@@ -905,7 +926,7 @@ module SimCombat =
     | UseAbility(actorId, abilityName, targetId) ->
       match tryEntity actorId w with
       | None -> w
-      | Some actor when not (canAct actor) -> w
+      | Some actor when not (canAct actor) && not (castsFromCorpse actor abilityName) -> w
       | Some actor ->
         match actor.Abilities |> List.tryFind (fun a -> a.Name = abilityName) with
         | None -> w |> logLine (sprintf "%s has no ability %s" actor.Name abilityName)
@@ -931,11 +952,11 @@ module SimCombat =
               match tryEntity targetId w with
               | None -> false
               | Some t ->
-                alive t
-                && (match ability.TargetKind with
-                    | Self -> t.Id = actor.Id
-                    | Foe -> t.Faction <> actor.Faction
-                    | Ally -> t.Faction = actor.Faction)
+                (match ability.TargetKind with
+                 | Self -> t.Id = actor.Id && (alive t || Ability.resurrects ability)
+                 | Corpse -> t.Faction = actor.Faction && not (alive t)
+                 | Foe -> alive t && t.Faction <> actor.Faction
+                 | Ally -> alive t && t.Faction = actor.Faction)
                 && (ability.TargetKind = Self || canReach ability.Range actor t w)
 
             if not targetOk then

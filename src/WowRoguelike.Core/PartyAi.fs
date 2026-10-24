@@ -942,9 +942,28 @@ module PartyAi =
               | Some p when p <> e.Pos -> cmd at (MoveTo(e.Id, p))
               | _ -> [])
 
+    // The floor. A resurrection cannot be decided in `healerOrders`: that only ever
+    // sees the living, and Reincarnation is cast *by* the Shaman's own corpse. So
+    // it is decided here, where the dead are still part of the world, and it is
+    // decided only while a hostile is left — a corpse is not worth standing up to
+    // an empty room, and a full wipe is not a moment to spend a thirty-minute
+    // cooldown.
+    let resurrections =
+      if SimState.aliveHostiles w |> List.isEmpty then
+        []
+      else
+        w.Entities
+        |> List.filter (fun e -> e.Faction = Party && not (SimState.alive e))
+        |> List.collect (fun e ->
+          e.Abilities
+          |> List.filter (fun a -> Ability.resurrects a && canUse e a.Name)
+          |> List.truncate 1
+          |> List.collect (fun a -> cmd at (UseAbility(e.Id, a.Name, e.Id))))
+
     prePull
     @ movement
     @ leaderless
+    @ resurrections
     @ (if target.IsNone then
          []
        else

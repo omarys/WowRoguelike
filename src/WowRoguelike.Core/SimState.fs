@@ -69,6 +69,27 @@ module SimState =
     elif List.isEmpty (aliveParty w) then PartyWiped
     else Running
 
+  /// A corpse on the floor that can still bring itself back. Reincarnation is
+  /// cast by the dead Shaman, so a party that looks wiped is a wipe that has not
+  /// happened yet: the tick loop has to outlive `PartyWiped` long enough for the
+  /// order to land. A pack that is already dead is the exception — `EncounterCleared`
+  /// means the fight is over however many bodies are lying around.
+  let resurrectionPending (w: World) =
+    not (List.isEmpty (aliveHostiles w))
+    && w.Entities
+       |> List.exists (fun e ->
+         e.Faction = Party
+         && not (alive e)
+         && (e.Abilities
+             |> List.exists (fun a ->
+               Ability.resurrects a
+               && (e.Cooldowns |> Map.tryFind a.Name |> Option.defaultValue (ticks 0)) <= ticks 0)))
+
+  /// Whether the run still has a Tick worth spending. `outcome` keeps its
+  /// meaning — a wiped party is still `PartyWiped` — and this only says when to
+  /// stop asking it, so that a resurrection gets the Tick that saves the run.
+  let continues (w: World) = outcome w = Running || resurrectionPending w
+
   let healthPct (e: Entity) = e.Health * 100 / e.MaxHealth
 
   /// Mana, rage or energy left, as a percentage of the pool.
@@ -197,10 +218,12 @@ module SimState =
           | Self -> t.Id = actor.Id
           | Foe -> t.Faction <> actor.Faction
           | Ally -> t.Faction = actor.Faction
+          | Corpse -> t.Faction = actor.Faction
 
         w.Entities
         |> List.filter (fun t ->
-          alive t
+          // A resurrection's targets are exactly the bodies `alive` excludes.
+          (alive t || Ability.resurrects ability)
           && factionOk t
           && (ability.TargetKind = Self || canReach ability.Range actor t w))
 
