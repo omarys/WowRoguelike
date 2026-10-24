@@ -753,9 +753,11 @@ module Content =
 
   let flameShock = rank24 flameShockRanks
 
-  /// Healing Wave ranks 1-7 (levels 1-40): 389-453 for 200 mana at rank 5, on a
+  /// Healing Wave ranks 1-9 (levels 1-56): 389-453 for 200 mana at rank 5, on a
   /// 3.0 s cast. A damage shaman will not cast it — the party's healer does the
-  /// healing — but it is what a shaman has, so it is in the kit.
+  /// healing — but it is what a shaman has, so it is in the kit. The mana curve
+  /// is monotonic 200 → 265 → 340 → 400 → 460; ranks 8 and 9 are the level 48 and
+  /// 56 trains a level-60 Shaman actually stands on.
   let shamanHealingWaveRanks: AbilityDef =
     { Name = "Healing Wave"
       Resource = Mana
@@ -770,7 +772,9 @@ module Content =
               18, 155, 3.0, 279, 327
               24, 200, 3.0, 389, 453
               32, 265, 3.0, 552, 638
-              40, 340, 3.0, 759, 873 ] do
+              40, 340, 3.0, 759, 873
+              48, 400, 3.0, 1014, 1136
+              56, 460, 3.0, 1234, 1382 ] do
             { Level = level
               Cost = cost
               CastTicks = secTicks cast
@@ -1498,6 +1502,9 @@ module Content =
       BlockValue = 0
       PushbackResistanceBp = 0
       BackstabCritBonusBp = 0
+      BonusHealing = 0
+      Talents = Talents.none
+      Totem = None
       Engaged = true
       CallForHelpBelowHealthPct = None
       HasCalledForHelp = false
@@ -1559,6 +1566,9 @@ module Content =
       BlockValue = 0
       PushbackResistanceBp = 0
       BackstabCritBonusBp = 0
+      BonusHealing = 0
+      Talents = Talents.none
+      Totem = None
       Engaged = false
       CallForHelpBelowHealthPct = callForHelpBelowPct
       HasCalledForHelp = false
@@ -2813,7 +2823,10 @@ module Content =
       FixedPool: int option
       /// The class's pre-raid best-in-slot outfit at 60 as (armour, stats) — what
       /// the level-24 pieces grow into (`.pi/research/levelscale/bis-60.md`).
-      Gear60: int * (int * int * int * int * int) }
+      Gear60: int * (int * int * int * int * int)
+      /// The build this character runs. `Talents.none` for everything that does
+      /// not have one, which is every class but the four healers.
+      Talents: Talents }
 
   /// The five classes a run starts with, in marching order. A roster is names
   /// rather than a type because it is what the class-select screen stores and
@@ -2948,10 +2961,24 @@ module Content =
   /// at level 24); it is level-dependent in Classic and is not yet.
   let private derive (buffs: PartyBuffKind list) (sheet: Sheet) (d: Dressed) (traits: Traits) =
     let s, armorBp, attackPower = buffed buffs d.Stats
+    let talents = sheet.Talents
+
+    // Ancestral Knowledge and Divine Intellect are a share of Intellect taken
+    // before the pool is derived, which is why they beat a flat bonus outright:
+    // one point of Intellect is fifteen mana, not one.
+    let intellect = s.Intellect * (10000 + talents.IntellectBp) / 10000
+    // Spiritual Guidance adds a share of Spirit to every direct heal. It lands on
+    // the entity so `resolveAbility` can add it without knowing about talents.
+    let bonusHealing = s.Spirit * talents.SpiritToHealingBp / 10000
+    // shortcut: combat regeneration is a flat 1 mana a Tick, so Reflection's and
+    // Meditation's 15% floors away to nothing; give regen a fractional
+    // accumulator when Spirit is what drives it.
+    let regen = partyRegen * (10000 + talents.RegenBp) / 10000
 
     {| MaxHealth = d.BaseHealth + pool s.Stamina 10
-       MaxResource = defaultArg sheet.FixedPool (d.BaseMana + pool s.Intellect 15)
-       RegenPerTick = partyRegen
+       MaxResource = defaultArg sheet.FixedPool (d.BaseMana + pool intellect 15)
+       RegenPerTick = regen
+       BonusHealing = bonusHealing
        CritChanceBp = 500 + s.Agility * 10 + traits.CritBonusBp
        DodgeChanceBp = 500 + s.Agility * 5 + traits.DodgeBonusBp
        Armor = d.Armor + armorBp + s.Agility * 2 + traits.ArmorBonus
@@ -3031,6 +3058,9 @@ module Content =
       BlockValue = d.BlockValue
       PushbackResistanceBp = traits.PushbackResistanceBp
       BackstabCritBonusBp = traits.BackstabCritBonusBp
+      BonusHealing = d.BonusHealing
+      Talents = sheet.Talents
+      Totem = None
       Engaged = true
       CallForHelpBelowHealthPct = None
       HasCalledForHelp = false
@@ -3048,6 +3078,132 @@ module Content =
         BlockChanceBp = 500
         BlockValue = 8 }
 
+  // =========================================================================
+  // The four level-60 healer builds
+  // =========================================================================
+
+  // One build per healing class, as the points a level-60 actually spends. Each
+  // is written as the talents it buys in the order the tree hands them out, so a
+  // reader can check it against a talent calculator; what the record cannot
+  // express — a stack, a cooldown button, a proc — is named in the comment beside
+  // the build and left out rather than half-modelled.
+
+  /// The totem buttons a Shaman's tree discounts. Totemic Focus is -25% on all of
+  /// them, which is a per-spell cost line and nothing else.
+  let private totemDiscount =
+    [ for name in
+        [ "Healing Stream Totem"
+          "Mana Spring Totem"
+          "Stoneskin Totem"
+          "Grace of Air Totem"
+          "Mana Tide Totem" ] do
+        { Spell = name
+          CostBp = 2500
+          HealBp = 0
+          CastTicksOff = ticks 0 } ]
+
+  /// Shaman 0/5/46: Purification 5/5 (+10% healing), Improved Healing Wave 5/5
+  /// (-0.5 s cast), Tidal Focus 5/5 (-5% healing mana), Tidal Mastery 5/5 (+5%
+  /// crit), Healing Focus 5/5 (-70% pushback), Ancestral Knowledge 5/5 (+5% Int),
+  /// Restorative Totems 5/5 (+25% totem effect) and Totemic Focus 5/5 (-25% totem
+  /// mana).
+  ///
+  /// shortcut: Healing Way's stack, Ancestral Healing's armour proc, Nature's
+  /// Swiftness and Improved Reincarnation are not modelled — the first two need a
+  /// per-spell stack and a proc roll, the last two need a cooldown and a death.
+  let private shamanTalents =
+    { Talents.none with
+        HealDoneBp = 1000
+        HealCostBp = 500
+        IntellectBp = 500
+        TotemEffectBp = 2500
+        Spells =
+          { Spell = "Healing Wave"
+            CostBp = 0
+            HealBp = 0
+            CastTicksOff = secTicks 0.5 }
+          :: totemDiscount }
+
+  /// Paladin 31/20/0, the standard PvE holy build: Divine Intellect 5/5 (+10%
+  /// Int), Spiritual Focus 5/5 (-70% pushback), Healing Light 3/3 (+12% Flash of
+  /// Light), Illumination 5/5 (a heal crit refunds its whole cost) and Holy Power
+  /// 5/5 (+5% crit).
+  ///
+  /// shortcut: Divine Favor is a cooldown on the next heal and is not modelled;
+  /// import a cooldown button into the Effect vocabulary when one is needed.
+  let private paladinTalents =
+    { Talents.none with
+        IntellectBp = 1000
+        ManaRefundOnCritBp = 10000
+        Spells =
+          [ { Spell = "Flash of Light"
+              CostBp = 0
+              HealBp = 1200
+              CastTicksOff = ticks 0 } ] }
+
+  /// Druid 5/0/46, Moonglow into Swiftmend: Gift of Nature 5/5 (+10% healing),
+  /// Tranquil Spirit 5/5 (-10% Healing Touch mana), Improved Rejuvenation 3/3
+  /// (+15% Rejuvenation), Nature's Focus 5/5 (-70% pushback) and Reflection 3/3
+  /// (+15% mana regen while casting).
+  ///
+  /// shortcut: Swiftmend and Nature's Swiftness are cooldowns — one eats a
+  /// Rejuvenation, the other makes the next heal instant — and neither is
+  /// modelled; they need a cooldown button and an aura-consuming effect.
+  let private druidTalents =
+    { Talents.none with
+        HealDoneBp = 1000
+        RegenBp = 1500
+        Spells =
+          [ { Spell = "Healing Touch"
+              CostBp = 1000
+              HealBp = 0
+              CastTicksOff = ticks 0 }
+            { Spell = "Rejuvenation"
+              CostBp = 0
+              HealBp = 1500
+              CastTicksOff = ticks 0 } ] }
+
+  /// Priest 21/30/0, deep holy: Spiritual Healing 5/5 (+10% healing), Improved
+  /// Healing 3/3 (-15% Lesser/Greater Heal mana), Holy Specialization 5/5 (+5%
+  /// crit), Spiritual Guidance 5/5 (+25% of Spirit as bonus healing) and
+  /// Meditation 3/3 (+15% mana regen while casting).
+  ///
+  /// shortcut: Inspiration's +25% armour on a heal crit is left out — a heal crit
+  /// changes no number in this model today, so the proc would have to roll dice
+  /// nothing else rolls, and Inner Focus and Power Infusion are cooldowns that
+  /// are not modelled either.
+  let private priestTalents =
+    { Talents.none with
+        HealDoneBp = 1000
+        RegenBp = 1500
+        SpiritToHealingBp = 2500
+        Spells =
+          [ for name in [ "Lesser Heal"; "Heal" ] do
+              { Spell = name
+                CostBp = 1500
+                HealBp = 0
+                CastTicksOff = ticks 0 } ] }
+
+  /// Fold a build's per-spell lines into the kit: a talent that shortens a cast
+  /// or cheapens a spell changes the `Ability` record once, at construction, so
+  /// the tick loop never learns that talents exist.
+  let private withTalents (t: Talents) (kit: Ability list) =
+    let heals (a: Ability) =
+      a.Effects |> List.exists (function Heal _ | HealOverTime _ -> true | _ -> false)
+
+    kit
+    |> List.map (fun a ->
+      { a with
+          ResourceCost = a.ResourceCost * (10000 - Talents.costBp a.Name (heals a) t) / 10000
+          CastTicks = max (ticks 0) (a.CastTicks - Talents.castOff a.Name t) })
+
+  /// The healer's traits: the two talents that are neither a stat nor a spell
+  /// line land here, where the rest of the class bonuses already live.
+  let private healerTraits (attackCritBp: int) (pushbackResistanceBp: int) =
+    { Traits.none with
+        CritBonusBp = attackCritBp
+        PushbackResistanceBp = pushbackResistanceBp }
+
   // Sourced level-24 sheets. Base attributes and base health/mana are the
   // vanilla class+race row for level 24 (Human Warrior, Night Elf Rogue, Gnome
   // Mage, Human Priest, Night Elf Druid); the gear totals and weapons are the
@@ -3062,6 +3218,7 @@ module Content =
   let private warrior (buffs: PartyBuffKind list) (level: int) (id: int) =
     let sheet =
       { Base = humanWarriorBase
+        Talents = Talents.none
         Gear =
           [ gear "Sparkleshell Mantle" (Some 24) 161 (0, 4, 10, 0, 0)
             gear "Sentry Cloak" (Some 19) 21 (0, 4, 5, 0, 0)
@@ -3120,7 +3277,7 @@ module Content =
       "Priest"
       Healer
       Cloth
-      Traits.none
+      (healerTraits 500 7000)
       { Base = humanPriestBase
         Gear =
           [ gear "Green Tinted Goggles" None 35 (0, 0, 8, 0, 7)
@@ -3137,6 +3294,7 @@ module Content =
             gear "Staff of the Blessed Seer" (Some 18) 0 (0, 0, 2, 0, 3) ]
 
         Gear60 = (542, (8, 11, 133, 208, 133))
+        Talents = priestTalents
         ApPerStrength = 1
         ApPerAgility = 0
         FixedPool = None }
@@ -3151,9 +3309,11 @@ module Content =
       partyThreatBp
       // Lesser Heal is the downrank: smaller, and the heal a Priest actually
       // reaches for on a small hole because nothing is wasted as overheal.
-      (AbilityDef.kitAt
-        level
-        [ lesserHealRanks; healRanks; renewRanks; smiteRanks; shadowWordPainRanks ])
+      (withTalents
+        priestTalents
+        (AbilityDef.kitAt
+          level
+          [ lesserHealRanks; healRanks; renewRanks; smiteRanks; shadowWordPainRanks ]))
       { X = 1; Y = 6 }
 
   /// Night Elf Rogue: 221 armour from the set plus 200 from Agility, Assassin's
@@ -3169,6 +3329,7 @@ module Content =
       Leather
       Traits.none
       { Base = nightElfRogueBase
+        Talents = Talents.none
         Gear =
           [ gear "Sentinel's Medallion" (Some 18) 0 (0, 6, 2, 0, 0)
             gear "Dark Leather Shoulders" (Some 23) 68 (0, 7, 0, 0, 0)
@@ -3215,6 +3376,7 @@ module Content =
       Cloth
       Traits.none
       { Base = gnomeMageBase
+        Talents = Talents.none
         Gear =
           [ gear "Spellpower Goggles Xtreme" None 46 (0, 0, 0, 0, 0)
             gear "Sentinel's Medallion" (Some 9) 0 (0, 2, 2, 0, 0)
@@ -3265,7 +3427,7 @@ module Content =
       "Druid"
       Healer
       Leather
-      Traits.none
+      (healerTraits 0 7000)
       { Base = nightElfDruidBase
         Gear =
           [ gear "Azure Silk Hood" (Some 24) 33 (0, 0, 0, 0, 0)
@@ -3280,6 +3442,7 @@ module Content =
             gear "Staff of the Blessed Seer" (Some 18) 0 (0, 0, 2, 0, 3) ]
 
         Gear60 = (614, (8, 8, 127, 212, 161))
+        Talents = druidTalents
         ApPerStrength = 1
         ApPerAgility = 0
         FixedPool = None }
@@ -3292,9 +3455,16 @@ module Content =
         ]
       Mana
       partyThreatBp
-      (AbilityDef.kitAt
-        level
-        [ healingTouchR4Ranks; regrowthRanks; rejuvenationRanks; entanglingRootsRanks; wrathRanks; moonfireRanks ])
+      (withTalents
+        druidTalents
+        (AbilityDef.kitAt
+          level
+          [ healingTouchR4Ranks
+            regrowthRanks
+            rejuvenationRanks
+            entanglingRootsRanks
+            wrathRanks
+            moonfireRanks ]))
       { X = 2; Y = 7 }
 
   /// Human Paladin: mail at 24 — plate is trained at 40 — with Verigan's Fist
@@ -3314,7 +3484,7 @@ module Content =
       "Paladin"
       Healer
       Chainmail
-      Traits.none
+      (healerTraits 500 7000)
       { Base = humanPaladinBase
         Gear =
           [ gear "Sparkleshell Mantle" (Some 24) 161 (0, 4, 10, 0, 0)
@@ -3326,6 +3496,7 @@ module Content =
             gear "Verigan's Fist" None 0 (0, 0, 7, 6, 12) ]
 
         Gear60 = (3162, (8, 13, 137, 185, 177))
+        Talents = paladinTalents
         ApPerStrength = 2
         ApPerAgility = 0
         FixedPool = None }
@@ -3338,13 +3509,15 @@ module Content =
         ]
       Mana
       partyThreatBp
-      (AbilityDef.kitAt
-        level
-        [ flashOfLightRanks
-          holyLightRanks
-          judgementRanks
-          paladinHammerOfJusticeRanks
-          divineProtectionRanks ])
+      (withTalents
+        paladinTalents
+        (AbilityDef.kitAt
+          level
+          [ flashOfLightRanks
+            holyLightRanks
+            judgementRanks
+            paladinHammerOfJusticeRanks
+            divineProtectionRanks ]))
       { X = 1; Y = 8 }
 
   /// Gnome Warlock: cloth, the same washed-out set as the Mage — five of the
@@ -3367,6 +3540,7 @@ module Content =
       Cloth
       Traits.none
       { Base = gnomeWarlockBase
+        Talents = Talents.none
         Gear =
           [ gear "Green Tinted Goggles" None 35 (0, 0, 8, 0, 7)
             gear "Talbar Mantle" None 30 (0, 0, 3, 6, 0)
@@ -3418,7 +3592,7 @@ module Content =
       "Shaman"
       Healer
       Leather
-      Traits.none
+      (healerTraits 500 7000)
       { Base = orcShamanBase
         Gear =
           [ gear "Azure Silk Hood" (Some 24) 33 (0, 0, 0, 0, 0)
@@ -3433,6 +3607,7 @@ module Content =
             gear "Staff of the Blessed Seer" (Some 18) 0 (0, 0, 2, 0, 3) ]
 
         Gear60 = (3162, (0, 5, 139, 188, 169))
+        Talents = shamanTalents
         ApPerStrength = 1
         ApPerAgility = 0
         FixedPool = None }
@@ -3445,9 +3620,11 @@ module Content =
         ]
       Mana
       partyThreatBp
-      (AbilityDef.kitAt
-        level
-        [ shamanLightningBoltRanks; earthShockRanks; flameShockRanks; shamanHealingWaveRanks ])
+      (withTalents
+        shamanTalents
+        (AbilityDef.kitAt
+          level
+          [ shamanLightningBoltRanks; earthShockRanks; flameShockRanks; shamanHealingWaveRanks ]))
       { X = 3; Y = 7 }
 
   /// Night Elf Hunter: level-24 leather only — hunters too train mail at 40 — on
@@ -3474,6 +3651,7 @@ module Content =
       Leather
       Traits.none
       { Base = nightElfHunterBase
+        Talents = Talents.none
         Gear =
           [ gear "Scout's Medallion" (Some 18) 0 (0, 6, 2, 0, 0)
             gear "Serpent's Shoulders" (Some 18) 68 (0, 9, 0, 0, 0)

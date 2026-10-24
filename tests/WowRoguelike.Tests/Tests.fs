@@ -1550,10 +1550,11 @@ let ``the paladin is built on the researched level-24 set`` () =
 
   // Base (47, 34, 46, 35, 38) plus the seven verified pieces: Str +27, Agi +7,
   // Sta +39, Int +9, Spi +12. Mark of the Wild adds 4 to all five and Arcane
-  // Intellect 7 Intellect, so Stamina is 89 and Intellect 55.
-  // Health = 247 + (20 + 10 x 69); mana = 525 + (20 + 15 x 35).
+  // Intellect 7 Intellect, so Stamina is 89 and Intellect 55 — and Divine
+  // Intellect is another 10% on top of that, which is 60.
+  // Health = 247 + (20 + 10 x 69); mana = 525 + (20 + 15 x 40).
   Assert.Equal(957, paladin.MaxHealth)
-  Assert.Equal(1070, paladin.MaxResource)
+  Assert.Equal(1145, paladin.MaxResource)
   // 557 from the four mail pieces, 90 from 45 Agility, 275 Devotion Aura, 105
   // Mark of the Wild.
   Assert.Equal(1027, paladin.Armor)
@@ -1827,12 +1828,75 @@ let ``the shaman is built on the researched level-24 set`` () =
   )
 
   // Base health 234, base mana 476; Stamina 68 and Intellect 98 once Mark of the
-  // Wild and Arcane Intellect are up.
+  // Wild and Arcane Intellect are up, and 102 after Ancestral Knowledge's 5%.
   Assert.Equal(734, shaman.MaxHealth)
-  Assert.Equal(1666, shaman.MaxResource)
+  Assert.Equal(1726, shaman.MaxResource)
   Assert.Equal(421, shaman.Armor)
   // A 47-71 staff at 3.0 s, the same verified ≤24 weapon the Druid carries.
   Assert.Equal((47, 71), (shaman.AutoAttack.Value.Min, shaman.AutoAttack.Value.Max))
+
+/// The healing talents are worth real healing and not just a number on a sheet:
+/// one Healing Wave from the talented shaman lands a strictly larger heal than
+/// the same shaman with every point taken out, on the same seed and the same
+/// wound. Purification's 10% alone would overlap the rank's roll; Spiritual
+/// Guidance's share of Spirit is what puts the two apart for certain.
+[<Fact>]
+let ``a resto shaman's heal beats the same shaman with no talents`` () =
+  let party = Content.partyOf [ "Warrior"; "Shaman" ] 24
+  let tank = party.[0]
+  let shaman = { party.[1] with BonusHealing = 0 }
+
+  let oneHeal (shaman: Entity) =
+    let wounded =
+      { tank with
+          Pos = { X = 5; Y = 5 }
+          Health = 300 }
+
+    let healer = { shaman with Pos = { X = 5; Y = 6 } }
+    let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+    let enemy =
+      { Content.mob 100 "Near" CreatureType.Humanoid 21 4000 2000 (Some tap) [] None { X = 6; Y = 5 } with
+          Engaged = true
+          Target = Some wounded.Id }
+
+    let mutable w =
+      { Tick = ticks 0
+        Grid = Grid.create 12 10
+        Entities = [ wounded; healer; enemy ]
+        Pending = []
+        Rng = Rng.streamsOf 7UL
+        PartyBuffs = []
+        Quests = []
+        Log = [] }
+
+    let healIn (line: string) =
+      let parts = line.Split ' '
+
+      if parts.[0] = "Shaman" && parts.[1] = "heals" then
+        match System.Int32.TryParse parts.[parts.Length - 1] with
+        | true, n -> n
+        | _ -> 0
+      else
+        0
+
+    let mutable healed = 0
+
+    // A 2.5-3.0 s cast, so a hundred Ticks is one cast with room to spare.
+    for _ in 1..100 do
+      if healed = 0 then
+        w <- SimTick.step (Bench.autoPilot w) w
+        healed <- w.Log |> List.sumBy healIn
+
+    healed
+
+  let talented = oneHeal shaman
+  let plain = oneHeal { shaman with Talents = Talents.none }
+
+  Assert.True(
+    talented > plain,
+    sprintf "the talented shaman should heal for more: %d vs %d" talented plain
+  )
 
 /// Nine classes is the whole roster, and every one of them has to build at 24:
 /// a builder that returns the wrong name, or none at all, fails here.

@@ -177,6 +177,10 @@ type Aura =
   | Blocking of remaining: int<tick>
   /// Shield Wall: a share of every point of damage taken is removed.
   | ShieldWalled of remaining: int<tick> * reductionBp: int
+  /// A Shaman totem's gift: armour, and crit and dodge in basis points. It is
+  /// re-applied every Tick the carrier is within the totem's radius, so it
+  /// lapses shortly after the totem dies or the member walks away.
+  | TotemBoon of remaining: int<tick> * armor: int * critBp: int * dodgeBp: int
 
 /// Every case of `Aura` is matched in exactly one place — here. Everywhere else
 /// asks this module a question, so adding an aura breaks compilation in this
@@ -197,6 +201,7 @@ module Aura =
     | Disarmed r when r > ticks 1 -> Some(Disarmed(r - ticks 1))
     | Blocking r when r > ticks 1 -> Some(Blocking(r - ticks 1))
     | ShieldWalled(r, bp) when r > ticks 1 -> Some(ShieldWalled(r - ticks 1, bp))
+    | TotemBoon(r, a, c, d) when r > ticks 1 -> Some(TotemBoon(r - ticks 1, a, c, d))
     | _ -> None
 
   let describe =
@@ -212,6 +217,7 @@ module Aura =
     | Disarmed r -> sprintf "disarm(%d)" r
     | Blocking r -> sprintf "block(%d)" r
     | ShieldWalled(r, bp) -> sprintf "wall(%d,-%d)" r bp
+    | TotemBoon(r, a, c, d) -> sprintf "totem(%d,+%d,+%d,+%d)" r a c d
 
   /// The name a player sees, short enough to fit over a sprite.
   let label =
@@ -227,13 +233,15 @@ module Aura =
     | Disarmed _ -> "DISARMED"
     | Blocking _ -> "BLOCK"
     | ShieldWalled _ -> "SHIELD WALL"
+    | TotemBoon _ -> "TOTEM"
 
   /// True when the aura helps its holder rather than hurting it.
   let isHelpful =
     function
     | Rejuvenation _
     | Blocking _
-    | ShieldWalled _ -> true
+    | ShieldWalled _
+    | TotemBoon _ -> true
     | _ -> false
 
   /// Ticks left before it falls off.
@@ -249,6 +257,7 @@ module Aura =
     | Sundered(r, _)
     | Corrupted(r, _)
     | Blocking r -> r
+    | TotemBoon(r, _, _, _)
     | ShieldWalled(r, _) -> r
 
   /// Whole seconds left, rounded up so a live aura never reads "0s".
@@ -369,6 +378,7 @@ module Aura =
     | Corrupted _ -> 7
     | Disarmed _ -> 8
     | Blocking _ -> 9
+    | TotemBoon _ -> 10
     | ShieldWalled _ -> 10
 
   /// Does casting `newer` overwrite `older`?
@@ -413,6 +423,52 @@ module Aura =
     | Disarmed _ -> true
     | _ -> false
 
+  /// Flat armour a totem's boon adds.
+  let armorBonus =
+    function
+    | TotemBoon(_, a, _, _) -> a
+    | _ -> 0
+
+  /// Crit chance a totem's boon adds, in basis points.
+  let critBonusBp =
+    function
+    | TotemBoon(_, _, c, _) -> c
+    | _ -> 0
+
+  /// Dodge chance a totem's boon adds, in basis points.
+  let dodgeBonusBp =
+    function
+    | TotemBoon(_, _, _, d) -> d
+    | _ -> 0
+
+/// What a totem hands the party while it stands. The numbers are the totem's own
+/// rank, so a talent that makes the totem better is a multiplier on these.
+type TotemPulse =
+  /// Health to every wounded party member in reach, every pulse.
+  | Heals of amount: int
+  /// Mana to every party member in reach, every pulse.
+  | RestoresMana of amount: int
+  /// A share of max mana to every party member in reach, every pulse (Mana
+  /// Tide, which hands out 24% over its twelve seconds).
+  | ManaFraction of maxManaBp: int
+  /// Flat armour for as long as the totem stands (Stoneskin).
+  | ArmorBoon of amount: int
+  /// Agility for as long as the totem stands (Grace of Air). Agility is crit and
+  /// dodge in this stat model and nothing else, so it arrives as basis points of
+  /// each.
+  | AgilityBoon of amount: int
+
+/// A Shaman's totem: what it gives, how often, and how far. A totem is an
+/// ordinary Entity — it has health, a tile and a lifetime — and this is the only
+/// thing that tells the tick loop its kind.
+type Totem =
+  { Pulse: TotemPulse
+    /// Tiles from the totem a party member still benefits. Chebyshev, like every
+    /// other radius in the sim.
+    Radius: int
+    /// Ticks between pulses. Zero for a boon that is on for the whole lifetime.
+    Period: int<tick> }
+
 /// Something a caster calls to its side: a Hunter's pet, a Warlock's demon, a
 /// Shaman's totem. It becomes a real Entity — it has health, it can be attacked,
 /// and it is drawn on the grid — because a pet that cannot die and a totem that
@@ -431,7 +487,9 @@ type SummonSpec =
     /// Ticks it lasts before expiring on its own. None = until killed.
     Lifetime: int<tick> option
     /// Ticks to cross one tile. A totem never moves, so it is immobile.
-    MoveTicksPerTile: int<tick> }
+    MoveTicksPerTile: int<tick>
+    /// What it does to the party while it stands. A pet has none.
+    Totem: Totem option }
 
 /// The closed vocabulary of mechanics an Ability can have (Q28b). Adding a new
 /// *mechanic* means adding a case here; adding a new *ability* means writing a
@@ -693,6 +751,79 @@ module Traits =
       PushbackResistanceBp = 0
       BackstabCritBonusBp = 0 }
 
+/// What one talent tree does to one named spell. A talent that touches a single
+/// spell is a line here rather than a branch in the healing pipeline: the ability
+/// is built once at construction and this is folded into it there.
+type SpellTalent =
+  { Spell: string
+    /// Percent off this spell's mana cost, in basis points.
+    CostBp: int
+    /// Percent added to this spell's heal, in basis points.
+    HealBp: int
+    /// Ticks taken off this spell's cast time.
+    CastTicksOff: int<tick> }
+
+/// The talent points a character has spent, for the handful of effects modelled.
+/// A build is fixed for the length of a run — nothing here respecs — so it is a
+/// constant on the hero sheet, next to the level-60 gear it was chosen with, and
+/// `Talents.none` is the default that leaves a hero exactly as it was.
+///
+/// This is deliberately not the whole tree. A talent the vocabulary cannot
+/// express — a heal-after-heal stack, a cooldown button, a proc — is named in a
+/// comment beside its build and left out rather than half-modelled.
+type Talents =
+  { /// Percent added to every heal this character lands (Purification, Gift of
+    /// Nature, Spiritual Healing), in basis points.
+    HealDoneBp: int
+    /// Percent off the mana cost of every healing spell (Tidal Focus), bp.
+    HealCostBp: int
+    /// Percent added to Intellect before the pools are derived (Ancestral
+    /// Knowledge, Divine Intellect), bp.
+    IntellectBp: int
+    /// Percent added to mana regeneration (Reflection, Meditation), bp.
+    RegenBp: int
+    /// Share of a heal's mana cost handed back when that heal crits
+    /// (Illumination), bp.
+    ManaRefundOnCritBp: int
+    /// Percent of Spirit added to every heal as flat bonus healing (Spiritual
+    /// Guidance), bp.
+    SpiritToHealingBp: int
+    /// Percent added to what a totem gives the party (Restorative Totems), bp.
+    TotemEffectBp: int
+    /// The per-spell lines: cast time, cost and heal for one named spell.
+    Spells: SpellTalent list }
+
+module Talents =
+
+  let none =
+    { HealDoneBp = 0
+      HealCostBp = 0
+      IntellectBp = 0
+      RegenBp = 0
+      ManaRefundOnCritBp = 0
+      SpiritToHealingBp = 0
+      TotemEffectBp = 0
+      Spells = [] }
+
+  let spell (name: string) (t: Talents) = t.Spells |> List.tryFind (fun s -> s.Spell = name)
+
+  /// Percent this character adds to one spell's heal, in basis points: the tree's
+  /// own bonus plus the spell's own line.
+  let healBp (name: string) (t: Talents) =
+    10000
+    + t.HealDoneBp
+    + (spell name t |> Option.map (fun s -> s.HealBp) |> Option.defaultValue 0)
+
+  /// Percent off one spell's mana cost, in basis points. `healing` picks up the
+  /// tree-wide healing discount as well as the spell's own line.
+  let costBp (name: string) (healing: bool) (t: Talents) =
+    (if healing then t.HealCostBp else 0)
+    + (spell name t |> Option.map (fun s -> s.CostBp) |> Option.defaultValue 0)
+
+  /// Ticks off one spell's cast time.
+  let castOff (name: string) (t: Talents) =
+    spell name t |> Option.map (fun s -> s.CastTicksOff) |> Option.defaultValue (ticks 0)
+
 type Entity =
   { Id: EntityId
     Name: string
@@ -784,6 +915,14 @@ type Entity =
     PushbackResistanceBp: int
     /// Extra crit chance on Backstab (Rogue trait).
     BackstabCritBonusBp: int
+    /// Flat healing added to every direct heal before the tree's multiplier.
+    /// Spiritual Guidance turns Spirit into exactly this.
+    BonusHealing: int
+    /// The trees this character has spent points in.
+    Talents: Talents
+    /// Set on a Shaman's totem and None on everything else, so the tick loop can
+    /// find its totems without a second entity list.
+    Totem: Totem option
     /// False until something engages it; the threat table starts at zero on
     /// entering combat.
     Engaged: bool

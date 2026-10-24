@@ -329,7 +329,13 @@ module SimCombat =
           w |> logLine (sprintf "%s hits %s for %d" actor.Name targetName amount)
 
         | Heal(lo, hi) ->
-          let amount, w = rollRange lo hi w
+          let rolled, w = rollRange lo hi w
+
+          // The tree's share of the heal lands on the rolled number, beside the
+          // flat bonus healing Spiritual Guidance turns Spirit into. One roll,
+          // one multiply, and a character with no talents multiplies by 10000.
+          let amount =
+            (rolled + actor.BonusHealing) * Talents.healBp ability.Name actor.Talents / 10000
 
           let before =
             tryEntity targetId w |> Option.map (fun t -> t.Health) |> Option.defaultValue 0
@@ -343,6 +349,27 @@ module SimCombat =
 
           let w =
             if actor.Faction = Party then addHealThreat actor effective w else w
+
+          // Illumination: a heal that crits hands its mana cost back. The crit
+          // roll happens only when a talent pays for it, because a plain heal
+          // crit changes no number this model computes.
+          // shortcut: the crit pays the refund and does not also enlarge the
+          // heal; double the amount when heal crits are meant to show as 1.5x.
+          let w =
+            if actor.Talents.ManaRefundOnCritBp <= 0 then
+              w
+            else
+              let roll, w = rollRange 0 9999 w
+
+              if roll < actor.CritChanceBp then
+                let refund = ability.ResourceCost * actor.Talents.ManaRefundOnCritBp / 10000
+
+                w
+                |> mapEntity actorId (fun e ->
+                  { e with Resource = min e.MaxResource (e.Resource + refund) })
+                |> logLine (sprintf "%s's heal crits and returns %d mana" actor.Name refund)
+              else
+                w
 
           w |> logLine (sprintf "%s heals %s for %d" actor.Name targetName effective)
 
@@ -479,6 +506,10 @@ module SimCombat =
           | None -> w
 
         | HealOverTime(duration, perTick) ->
+          // The tree's share of a heal-over-time is applied to its per-Tick
+          // amount, which is what Improved Rejuvenation buys.
+          let perTick = perTick * Talents.healBp ability.Name actor.Talents / 10000
+
           match tryEntity targetId w with
           | Some t ->
             w
@@ -604,6 +635,9 @@ module SimCombat =
                 BlockValue = 0
                 PushbackResistanceBp = 0
                 BackstabCritBonusBp = 0
+                BonusHealing = 0
+                Talents = Talents.none
+                Totem = spec.Totem
                 Engaged = true
                 CallForHelpBelowHealthPct = None
                 HasCalledForHelp = false
