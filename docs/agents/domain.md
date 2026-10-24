@@ -188,6 +188,7 @@ the `VERIFY` block names which is which.
 | `level24/mobs.md`, `mobs_armour_and_spells.md` | Creature armour and spell data. |
 | `ranks/{warrior,rogue,mage,priest,druid}.md` | Full rank tables, levels 1–60. |
 | `ranks/ranks-{paladin,shaman,hunter,warlock}.md` | Rank tables for the four classes the earlier pass missed, plus armour and `VERIFY` lists. |
+| `nether.wowhead.com/tooltip/spell/<id>?dataEnv=4` | Not a file — the vanilla tooltip dataset, for ranks a table stops short of (Healing Wave 8–10). It prints the value at the scaling cap, the same convention the tables use, and `hi` one higher than they record. `dataEnv=8` is **Wrath** (Level 80, "25% of base mana"); it returns different numbers for the same spell id. Validate any new id against a rank the tables already have — ranks 5 and 7 pinned this one. |
 | `wc/mobs.md`, `wc/quests-and-scripts.md` | The 1.12 creature rows and the quest/script chain. |
 | `vanilla-attack-table.md` | Miss/dodge/parry/glance/block/crit by level delta, spell miss, armour. |
 | `level60-kits-at-24.md` | Level-60 kits scaled down to 24 by pool ratio. |
@@ -205,6 +206,12 @@ Warcraft Wiki is the authority. **Classic Era numbers win when sources conflict.
 
 Each is recorded in a commit body or a code comment; this is so you do not repeat
 the investigation.
+
+**A totem is faction `Party` but is not a party member.** It carries
+`Faction = Party` so mobs can target it; `SimState.aliveParty` filters `Totem.IsNone`.
+Without that filter a live totem answers for a dead party in `outcome`, offers itself
+as a heal target, and joins the formation — it read as `alive=7.6` on a five-person
+party until `3c098f7`.
 
 **Performance claims were repeatedly falsified by measurement.** A\* was "50–100×
 too slow" (actually ~2.5×, now well under 1% of the tick budget). Replacing
@@ -393,28 +400,55 @@ on `591e9bf` and `a164db3`, so it is not the pass-through change.
    the stun at the 45-energy gate it wipes at 26 left), so treat that number as
    retired.
 
-   **Healer and DPS composition, measured once with `sim comps 25`** (25 seeds per
-   map, scripted party, ~18 minutes; a player will do better — this is the floor a
-   composition sets):
+   **Healer and DPS composition, re-measured with `sim comps 25` after the talent,
+   totem and resurrection work** (25 seeds per map, scripted party, ~28 minutes; a
+   player will do better — this is the floor a composition sets). The rows this table
+   carried before that work are retired: `a05ae24` gave every class its level-60
+   talents, so a level-24 hero is no longer the hero those rows measured.
 
    | round | gully cleared | gully alive | gully median | graveyard |
    |---|---|---|---|---|
-   | Warrior/Priest/Mage/Rogue/Warlock | 20/25 | 3.5 | 924 | 23 wipes, 2 unresolved, alive 0.4 |
-   | Warrior/Druid/Mage/Rogue/Warlock | 17/25 | 3.0 | 896 | 24 wipes, 1 unresolved, alive 0.2 |
-   | Warrior/Paladin/Mage/Rogue/Warlock | **25/25** | **4.8** | **810** | 23 wipes, 2 unresolved, alive 0.2 |
-   | Warrior/Paladin/Priest/Mage/Warlock | 25/25 | 5.0 | 905 | 24 unresolved, alive 4.8 |
-   | Warrior/Paladin/Druid/Mage/Warlock | 25/25 | 5.0 | 900 | 20 unresolved, alive 4.0 |
-   | Warrior/Paladin/Mage/Warlock/Hunter | 25/25 | 4.4 | 840 | 15 wipes, 10 unresolved, alive 1.9 |
+   | Warrior/Priest/Mage/Rogue/Warlock | 21/25 | 3.6 | 912 | 21 wipes, 4 unresolved, alive 0.5 |
+   | Warrior/Druid/Mage/Rogue/Warlock | 24/25 | 4.5 | 870 | 21 wipes, 4 unresolved, alive 0.7 |
+   | Warrior/Paladin/Mage/Rogue/Warlock | **25/25** | **5.0** | **775** | 22 wipes, 3 unresolved, alive 0.6 |
+   | Warrior/Shaman/Mage/Rogue/Warlock | 24/25 | 4.5 | 1034 | **6 wipes, 19 unresolved, alive 3.6** |
+   | Warrior/Paladin/Priest/Mage/Warlock | 25/25 | 5.0 | 900 | 1 wipe, 24 unresolved, alive 4.6 |
+   | Warrior/Paladin/Druid/Mage/Warlock | 25/25 | 5.0 | 888 | 3 wipes, 22 unresolved, alive 4.4 |
+   | Warrior/Paladin/Shaman/Mage/Warlock | 25/25 | 5.0 | 918 | 3 wipes, 22 unresolved, alive 3.7 |
+   | Warrior/Paladin/Mage/Warlock/Hunter | 22/25 | 4.3 | 828 | 18 wipes, 7 unresolved, alive 1.2 |
 
-   Paladin is the only healer that clears gully every time with three DPS behind it;
-   a second healer buys nothing on a map the party can win, and on graveyard it makes
-   the party unkillable *and* unable to finish — 20-24 of 25 runs hit the tick cap
-   with four to five alive, which is the alternating-route stall above, not a healing
-   stalemate (no hostile is ever engaged, party HP never moves). Swapping the Rogue
-   for a Hunter costs gully survivability (4.8 -> 4.4 alive) and buys graveyard
-   longevity (23 wipes -> 15, alive 0.2 -> 1.9), which is the pull distance working:
-   fewer mobs wake up per pull. **Graveyard median is not a clear test for any
-   five-member party** — it is a wipe-rate and stall-rate test.
+   Paladin is still the only healer that clears gully every time with three DPS
+   behind it; a second healer buys nothing on a map the party can win, and on
+   graveyard it makes the party unkillable *and* unable to finish — 22-24 of 25 runs
+   hit the tick cap with four to five alive, which is the alternating-route stall
+   above, not a healing stalemate (no hostile is ever engaged, party HP never moves).
+   Druid is the biggest mover (17/25 -> 24/25 with the talents and Rebirth), so
+   "Druid is the weak healer" is retired with the rest of the old rows. The Shaman
+   holds gully but is the slowest single healer (1034 against 775) and is the one
+   healer whose graveyard row inverts the pattern: 6 wipes against Paladin's 22,
+   because it out-heals a level-24 pack, and 19 unresolved with 3.6 alive, because a
+   healer that does no damage is a pull that never closes. Swapping the Rogue for a
+   Hunter costs gully survivability (5.0 -> 4.3 alive) and buys graveyard longevity
+   (22 wipes -> 18, alive 0.6 -> 1.2), which is the pull distance working: fewer mobs
+   wake up per pull. **Graveyard median is not a clear test for any five-member
+   party** — it is a wipe-rate and stall-rate test.
+
+   **The same ladder at level 60** (`sim comps 10 --level 60`, round 1) is the scale
+   work's problem, not the kit's:
+
+   | healer | gully | graveyard |
+   |---|---|---|
+   | Priest | 10/10, alive 5.0, median 390 | 10 unresolved at 24000, alive 5.0 |
+   | Druid | 10/10, alive 5.0, median 367 | 10 unresolved at 24000, alive 5.0 |
+   | Paladin | 10/10, alive 5.0, median 390 | 10 unresolved at 24000, alive 5.0 |
+   | Shaman | 10/10, alive 5.0, median 480 | 10 unresolved at 24000, alive 5.0 |
+
+   Every composition clears gully and none of them even wipes on graveyard: all ten
+   seeds of all four healers sit at the 24000-tick cap with five alive and hostiles
+   still standing. At level 24 graveyard is a wipe-rate test; at 60 it is a stall, so
+   either mob health outgrew party damage or the pull stalls outright — that
+   distinction is the first thing the level work should settle, and gully is already
+   fine. The Shaman is 20-30% slower than the other three at both anchors.
 4. **The pull protocol is specified by the user and only its first line exists.**
    The intended shape (user's words, condensed): *pre-combat CC that does not start
    combat (Rogue's Sap) first; then a ranged member opens on the priority enemy from
