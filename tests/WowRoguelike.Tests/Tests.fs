@@ -3325,6 +3325,75 @@ let ``the tank holds still when the mob's back is already clear`` () =
   Assert.True(Grid.isFloor w.Grid (backIfAt mob { X = 5; Y = 5 }), "the fixture needs the back clear")
   Assert.Equal(None, moveFor (EntityId 1) (PartyAi.decide w))
 
+/// The corridor freeze. `claimedByOther` reports a mover's tile as free, because
+/// teammates travel a corridor in single file through one tile — but an aside that
+/// trusts it then steps onto the body, the two collide in `advanceMovement`, and the
+/// pair churns in place. In graveyard this held the Tank and the Mage against each
+/// other for 40000 ticks with the whole party alive and nothing engaged.
+[<Fact>]
+let ``no ally steps aside onto a tile a body already holds`` () =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  let tank =
+    { Content.hero 1 "Warrior" Tank 1000 1000 tap 50000 [ Content.sunderArmor ] { X = 4; Y = 4 } with
+        Goal = Some { X = 8; Y = 7 } }
+
+  let mage =
+    Content.hero 2 "Mage" Dps 1000 1000 tap 10000 [ Content.fireball ] { X = 4; Y = 5 }
+
+  // Every tile around the Mage is held. One holder is mid-move, which is the case
+  // `claimedByOther` calls free — the tile the aside used to pick.
+  let holders =
+    [ (3, 4), None
+      (5, 4), None
+      (3, 5), None
+      (5, 5), None
+      (3, 6), Some { X = 5; Y = 6 }
+      (4, 6), None
+      (5, 6), None ]
+    |> List.mapi (fun i ((x, y), dest) ->
+      { Content.hero (3 + i) "Filler" Dps 1000 1000 tap 10000 [ Content.fireball ] { X = x; Y = y } with
+          Destination = dest })
+
+  let w =
+    { Tick = ticks 0
+      Grid =
+        Grid.ofRows
+          [ "#########"
+            "#.......#"
+            "#.......#"
+            "#.......#"
+            "#.......#"
+            "#.......#"
+            "#.......#"
+            "#.......#"
+            "#########" ]
+      Entities = tank :: mage :: holders
+      Pending = []
+      Rng = Rng.streamsOf 3UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  // The fixture is only worth anything if the Mage really has no free tile.
+  let held p = w.Entities |> List.exists (fun o -> o.Pos = p && o.Id <> EntityId 2 && SimState.alive o)
+
+  Path.neighbours (fun p -> Grid.isFloor w.Grid p && not (held p)) { X = 4; Y = 5 }
+  |> List.iter (fun p -> failwithf "the fixture leaves %A free, so the mage has somewhere to go" p)
+
+  // The aside is the only thing issuing moves here: no hostile is alive.
+  let aside =
+    PartyAi.decide w
+    |> List.choose (fun c ->
+      match c.Kind with
+      | MoveTo(a, p) -> Some(a, p)
+      | _ -> None)
+
+  Assert.NotEmpty(aside)
+
+  for (who, p) in aside do
+    Assert.False(held p, sprintf "%A stepped aside onto %A, where a body already stands" who p)
+
 /// Wedged in a dead end, every tile the Tank could stand on leaves the mob's back
 /// against a wall and the casters' line broken. The mob has to move, and it moves
 /// by following: the Tank steps away and the mob takes the tile it just left.

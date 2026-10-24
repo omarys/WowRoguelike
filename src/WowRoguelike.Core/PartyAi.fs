@@ -880,10 +880,19 @@ module PartyAi =
                 // one away, and an unstable sort then shuttles the ally between
                 // them every tick while the Tank stays blocked. A fixed tie-break
                 // makes the ally keep walking in one direction until it is clear.
+                //
+                // Stepping aside needs a tile that is empty *now*, not one whose
+                // occupant is already moving: `claimedByOther` lets a mover keep
+                // its tile free so the party can trail in single file, and a
+                // cluster where every mover is blocked by another mover then
+                // picks the same occupied tiles over and over. That froze the
+                // Tank against the Mage in graveyard for 40000 ticks with the
+                // whole party alive and nothing engaged (`probe` on seed 1).
+                let occupied p =
+                  w.Entities |> List.exists (fun o -> o.Id <> e.Id && SimState.alive o && o.Pos = p)
+
                 let aside =
-                  Path.neighbours
-                    (fun p -> Grid.isFloor w.Grid p && not (SimState.claimedByOther w e.Id p))
-                    e.Pos
+                  Path.neighbours (fun p -> Grid.isFloor w.Grid p && not (occupied p)) e.Pos
                   |> List.sortByDescending (fun p -> Pos.chebyshev p t.Pos, p.X, p.Y)
                   |> List.tryHead
 
