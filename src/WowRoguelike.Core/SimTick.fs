@@ -33,6 +33,48 @@ module SimTick =
         | _, None -> e)
       w
 
+  /// A totem works on the party from the tile it stands on: the two that hand out
+  /// a number do it on their own clock, and the two that give a boon keep an aura
+  /// on everyone in reach. An aura is re-applied every Tick, so it lapses shortly
+  /// after the totem dies or the member walks out of range — which is why a totem
+  /// needs no cleanup pass of its own.
+  let advanceTotems (w: World) =
+    let totems = w.Entities |> List.filter (fun e -> alive e && e.Totem.IsSome)
+
+    if List.isEmpty totems then
+      w
+    else
+      let party = aliveParty w
+
+      let apply (w: World) (t: Entity) (e: Entity) =
+        match t.Totem.Value.Pulse with
+        | Heals amount when amount > 0 ->
+          mapEntity e.Id (fun m -> { m with Health = min m.MaxHealth (m.Health + amount) }) w
+        | RestoresMana amount ->
+          mapEntity e.Id (fun m -> { m with Resource = min m.MaxResource (m.Resource + amount) }) w
+        | ManaFraction bp ->
+          let amount = e.MaxResource * bp / 10000
+          mapEntity e.Id (fun m -> { m with Resource = min m.MaxResource (m.Resource + amount) }) w
+        | ArmorBoon armor ->
+          mapEntity e.Id (fun m -> { m with Auras = Aura.refresh (TotemBoon(ticks 2, armor, 0, 0)) m.Auras }) w
+        | AgilityBoon agility ->
+          // Agility is ten crit and five dodge per point, the rates `derive` turns a
+          // hero's own Agility into.
+          let boon = TotemBoon(ticks 2, 0, agility * 10, agility * 5)
+          mapEntity e.Id (fun m -> { m with Auras = Aura.refresh boon m.Auras }) w
+        | Heals _ -> w
+
+      (w, totems)
+      ||> List.fold (fun w t ->
+        let spec = t.Totem.Value
+
+        if spec.Period <= ticks 0 || w.Tick % spec.Period <> ticks 0 then
+          w
+        else
+          party
+          |> List.filter (fun e -> Pos.chebyshev t.Pos e.Pos <= spec.Radius)
+          |> List.fold (fun w e -> apply w t e) w)
+
   /// Heal-over-time and Polymorph's regen tick down once a second.
   let advanceAuraHealing (w: World) =
     mapAll
@@ -586,6 +628,7 @@ module SimTick =
     |> advanceCooldowns
     |> advanceRegen
     |> advanceSummons
+    |> advanceTotems
     |> advanceAuras
     |> advanceAuraHealing
     |> advanceAuraDamage

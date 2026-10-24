@@ -1792,6 +1792,8 @@ let ``the warlock is built on the researched level-24 set`` () =
 
 /// The shaman's kit is the level-24 one: no Windfury Weapon (30), no Chain
 /// Lightning (32), and Earth Shock rank 4 which is also the party's second kick.
+/// Stoneskin (16) and Healing Stream (20) are the totems a 24 has trained; Grace of
+/// Air (42), Mana Tide (40) and Mana Spring (26) are above the bracket.
 [<Fact>]
 let ``the shaman's kit is the level-24 one`` () =
   let shaman =
@@ -1807,7 +1809,15 @@ let ``the shaman's kit is the level-24 one`` () =
     effectsOf "Flame Shock"
   )
   Assert.Equal<Effect list>([ Heal(389, 453) ], effectsOf "Healing Wave")
-  Assert.Equal(4, List.length shaman.Abilities)
+  Assert.Equal<string list>(
+    [ "Lightning Bolt"
+      "Earth Shock"
+      "Flame Shock"
+      "Healing Wave"
+      "Stoneskin Totem"
+      "Healing Stream Totem" ],
+    shaman.Abilities |> List.map (fun a -> a.Name)
+  )
 
 /// Orc base (43, 28, 45, 39, 49) plus the Druid's verified ≤24 pieces.
 [<Fact>]
@@ -1897,6 +1907,61 @@ let ``a resto shaman's heal beats the same shaman with no talents`` () =
     talented > plain,
     sprintf "the talented shaman should heal for more: %d vs %d" talented plain
   )
+
+/// A totem is an Entity that pulses on its own clock: the Healing Stream totem
+/// heals every party member in reach every two seconds, and stops the Tick it runs
+/// out of time. The hostile is there so the party is in combat and out-of-combat
+/// regeneration cannot pass for a totem's work.
+[<Fact>]
+let ``a healing stream totem heals the party until it expires`` () =
+  let tank = { (Content.partyOf [ "Warrior" ] 24).[0] with Health = 200 }
+
+  let totem =
+    { tank with
+        Name = "Healing Stream Totem"
+        Pos = { X = 6; Y = 5 }
+        MaxHealth = 5
+        Health = 5
+        Abilities = []
+        AutoAttack = None
+        Owner = Some tank.Id
+        ExpiresInTicks = Some(secTicks 6.0)
+        Totem = Some { Pulse = Heals 44; Radius = 5; Period = secTicks 2.0 } }
+
+  let swing = { Min = 0; Max = 0; Ticks = secTicks 2.7; Range = 1 }
+
+  let enemy =
+    { Content.mob 100 "Near" CreatureType.Humanoid 21 4000 2000 (Some swing) [] None { X = 8; Y = 5 } with
+        Engaged = true
+        Target = Some tank.Id }
+
+  let mutable w =
+    { Tick = ticks 0
+      Grid = Grid.create 12 10
+      Entities = [ tank; totem; enemy ]
+      Pending = []
+      Rng = Rng.streamsOf 11UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let tankHealth () =
+    w.Entities |> List.find (fun e -> e.Id = tank.Id) |> fun e -> e.Health
+
+  for _ in 1..50 do
+    w <- SimTick.step [] w
+
+  let healed = tankHealth ()
+  Assert.True(healed > 200, sprintf "the totem should have healed the tank: %d" healed)
+
+  // Twenty seconds later the six-second totem is long gone, so the pool stays
+  // where the last pulse left it.
+  for _ in 1..400 do
+    w <- SimTick.step [] w
+
+  let settled = tankHealth ()
+  Assert.False(w.Entities |> List.exists (fun e -> e.Name = "Healing Stream Totem" && SimState.alive e))
+  Assert.Equal(settled, tankHealth ())
 
 /// Nine classes is the whole roster, and every one of them has to build at 24:
 /// a builder that returns the wrong name, or none at all, fails here.

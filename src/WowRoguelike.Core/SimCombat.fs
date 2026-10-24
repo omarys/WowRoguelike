@@ -78,8 +78,9 @@ module SimCombat =
   /// the attacker's skill; a mob's is 5% flat plus 0.1% per level it has on you.
   let dodgeChanceBp (attacker: Entity) (target: Entity) =
     let delta = levelDelta attacker target
+    let boon = target.Auras |> List.sumBy Aura.dodgeBonusBp
 
-    if target.Faction = Party then target.DodgeChanceBp + max 0 delta * 4
+    if target.Faction = Party then target.DodgeChanceBp + boon + max 0 delta * 4
     else max 0 (target.DodgeChanceBp + 500 + delta * 10)
 
   /// Mobs parry; the Party does not, so its parry is zero and needs no field.
@@ -128,7 +129,7 @@ module SimCombat =
       Parry = parryChanceBp attacker target
       Glancing = glancingChanceBp attacker target
       Block = target.BlockChanceBp + (target.Auras |> List.sumBy Aura.blockBonusBp)
-      Crit = attacker.CritChanceBp + levelCritBonusBp attacker target }
+      Crit = attacker.CritChanceBp + (attacker.Auras |> List.sumBy Aura.critBonusBp) + levelCritBonusBp attacker target }
 
   /// Chance (basis points) a spell misses or is fully resisted, by level
   /// difference. A miss is a full resist — partial resists come only from
@@ -188,7 +189,7 @@ module SimCombat =
       let roll, w = rollRange 0 9999 w
 
       let mitigate raw =
-        let armor = max 0 (t.Armor - (t.Auras |> List.sumBy Aura.armorReduction))
+        let armor = max 0 (t.Armor + (t.Auras |> List.sumBy Aura.armorBonus) - (t.Auras |> List.sumBy Aura.armorReduction))
         raw * (10000 - armorMitigationBp attacker.Level armor) / 10000
 
       match attackTable chances roll with

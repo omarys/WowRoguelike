@@ -408,6 +408,52 @@ module PartyAi =
         | _ -> []
       | _ -> []
 
+  /// A Shaman keeps one totem of each element up, the way the class plays them:
+  /// earth, air, then water, each dropped at his feet to stand for two minutes.
+  /// They are instant casts, so one a Tick is enough to have all three down — and
+  /// three orders for one actor in one Tick is exactly what the sim forbids.
+  let private totemOrders (w: World) (e: Entity) (party: Entity list) (at: int<tick>) =
+    let element name =
+      match name with
+      | "Stoneskin Totem" -> 0
+      | "Grace of Air Totem" -> 1
+      | "Mana Tide Totem"
+      | "Healing Stream Totem"
+      | "Mana Spring Totem" -> 2
+      | _ -> -1
+
+    let standing =
+      w.Entities
+      |> List.filter (fun t -> t.Owner = Some e.Id && t.Totem.IsSome && SimState.alive t)
+      |> List.map (fun t -> element t.Name)
+      |> Set.ofList
+
+    // Mana Tide is a five-minute cooldown and the party's reserve: it is worth a
+    // totem only when the casters are actually short.
+    let lowestManaPct =
+      party
+      |> List.filter (fun p -> p.MaxResource > 0)
+      |> List.map SimState.resourcePct
+      |> List.fold min 100
+
+    e.Abilities
+    |> List.tryPick (fun a ->
+      let slot = element a.Name
+      let summons = a.Effects |> List.exists (function Summon s -> s.Totem.IsSome | _ -> false)
+
+      if
+        summons
+        && slot >= 0
+        && not (standing.Contains slot)
+        && (a.Name <> "Mana Tide Totem" || lowestManaPct < 60)
+        && canUse e a.Name
+      then
+        Some(UseAbility(e.Id, a.Name, e.Id))
+      else
+        None)
+    |> Option.map (cmd at)
+    |> Option.defaultValue []
+
   /// Expected damage of a finisher at the points the Rogue is holding. Eviscerate
   /// is linear in points, so the midpoint of its one-point pair plus the step per
   /// extra point is its average hit.
@@ -610,9 +656,11 @@ module PartyAi =
     let party = SimState.aliveParty w
 
     // Only members who can start something get orders: re-issuing a cast mid-cast
-    // is a queueing policy, not a decision.
+    // is a queueing policy, not a decision. A totem is not a member — it has no
+    // abilities and must never be told to walk, so it takes no orders at all.
     let actors =
-      party |> List.filter (fun e -> e.Casting.IsNone && not (SimState.isSleeping e))
+      party
+      |> List.filter (fun e -> e.Casting.IsNone && not (SimState.isSleeping e) && e.Totem.IsNone)
 
     let role r = actors |> List.filter (fun e -> e.Role = Some r)
     let melee (e: Entity) = e.Abilities |> List.exists (fun a -> a.TargetKind = Foe && a.Range <= 1)
@@ -874,12 +922,21 @@ module PartyAi =
          [ yield! role Tank |> List.collect (fun e -> tankOrders w e onTank at)
            yield! role Healer
                   |> List.collect (fun e ->
-                    match healerOrders w e party at with
-                    // Nothing to heal: a healer with mana to spare adds damage
-                    // rather than standing idle, but keeps a reserve for the heal
-                    // that has to land next.
-                    | [] when SimState.resourcePct e >= 55 -> rangedOrders w e target at
-                    | orders -> orders)
+                    // Totems first: they are instant, they last two minutes, and a
+                    // Shaman with no earth totem down is a Tank taking the full
+                    // spread of every swing.
+                    let totems =
+                      if SimState.inCombat w then totemOrders w e party at else []
+
+                    if not totems.IsEmpty then
+                      totems
+                    else
+                      match healerOrders w e party at with
+                      // Nothing to heal: a healer with mana to spare adds damage
+                      // rather than standing idle, but keeps a reserve for the heal
+                      // that has to land next.
+                      | [] when SimState.resourcePct e >= 55 -> rangedOrders w e target at
+                      | orders -> orders)
            yield! role Dps |> List.filter melee |> List.collect (fun e -> meleeOrders w e target at)
            yield! role Dps |> List.filter ranged |> List.collect (fun e -> rangedOrders w e target at) ])
 

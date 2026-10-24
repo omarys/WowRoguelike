@@ -3570,6 +3570,53 @@ module Content =
         [ shadowBoltRanks; corruptionRanks; curseOfAgonyRanks; warlockImmolateRanks; fearRanks ])
       { X = 3; Y = 6 }
 
+  /// The Shaman's totems, at the ranks a level-60 casts. Each is a `Summon`, so it
+  /// is a real Entity with a tile, a lifetime and a radius: a hostile can kill it,
+  /// it never shares a tile with a body, and it expires on its own clock.
+  ///
+  /// Restorative Totems is the multiplier on the two that hand a number out on a
+  /// pulse, and Totemic Focus is already in the kit as a per-spell cost line, so
+  /// neither is a special case here.
+  ///
+  /// shortcut: a totem's own health and armour are flat level-60 numbers rather
+  /// than a share of the Shaman's, so a geared Shaman's totems die as fast as a
+  /// fresh one's; scale them off his Stamina if area damage starts eating them.
+  let private totemKit (t: Talents) (level: int) : Ability list =
+    let pulse (p: TotemPulse) =
+      match p with
+      | Heals n -> Heals(n * (10000 + t.TotemEffectBp) / 10000)
+      | RestoresMana n -> RestoresMana(n * (10000 + t.TotemEffectBp) / 10000)
+      | other -> other
+
+    let totem name cost cooldown requirement lifetime radius period p =
+      (requirement,
+       { Name = name
+         CastTicks = ticks 0
+         CooldownTicks = cooldown
+         ResourceCost = cost
+         Interruptible = false
+         Range = 0
+         TargetKind = Self
+         Effects =
+           [ Summon
+               { Name = name
+                 Health = 5
+                 Armor = 0
+                 Swing = None
+                 Lifetime = Some lifetime
+                 MoveTicksPerTile = secTicks 1000.0
+                 Totem = Some { Pulse = pulse p; Radius = radius; Period = period } } ] })
+
+    // Earth, air, then water: the order the Shaman drops them in, which is the
+    // priority the Party's AI reads off the kit.
+    [ totem "Stoneskin Totem" 80 (ticks 0) 16 (secTicks 120.0) 20 (ticks 0) (ArmorBoon 435)
+      totem "Grace of Air Totem" 120 (ticks 0) 42 (secTicks 120.0) 20 (ticks 0) (AgilityBoon 77)
+      totem "Mana Tide Totem" 240 (secTicks 300.0) 40 (secTicks 12.0) 20 (secTicks 2.0) (ManaFraction 400)
+      totem "Healing Stream Totem" 100 (ticks 0) 20 (secTicks 120.0) 20 (secTicks 2.0) (Heals 44)
+      totem "Mana Spring Totem" 100 (ticks 0) 26 (secTicks 120.0) 20 (secTicks 2.0) (RestoresMana 12) ]
+    |> List.filter (fun (requirement, _) -> level >= requirement)
+    |> List.map snd
+
   /// Orc Shaman: the Druid's verified leather-and-cloth set, which is as far as
   /// the ≤24 pieces are sourced — shaman trains mail at 40, so nothing better is
   /// available in the bracket. Strength 43 makes him the best melee of the
@@ -3581,9 +3628,9 @@ module Content =
   /// untestable as a healer. He is the weakest of the four on paper — Healing
   /// Wave costs 200 for 389-453 where a Priest's heal is cheaper per point.
   ///
-  /// shortcut: no totems. `Summon`/`SummonSpec` have no caller in the sim yet, and
-  /// a totem would be that path's first test. Lightning Shield and Rockbiter are
-  /// also left out: nothing in the vocabulary retaliates or imbues a weapon.
+  /// shortcut: Lightning Shield and Rockbiter are left out — nothing in the
+  /// vocabulary retaliates or imbues a weapon. The totems are in, one per element
+  /// as the class plays them; `PartyAi.totemOrders` keeps them up.
   let private shaman (buffs: PartyBuffKind list) (level: int) (id: int) =
     heroStats
       buffs
@@ -3624,7 +3671,8 @@ module Content =
         shamanTalents
         (AbilityDef.kitAt
           level
-          [ shamanLightningBoltRanks; earthShockRanks; flameShockRanks; shamanHealingWaveRanks ]))
+          [ shamanLightningBoltRanks; earthShockRanks; flameShockRanks; shamanHealingWaveRanks ]
+        @ totemKit shamanTalents level))
       { X = 3; Y = 7 }
 
   /// Night Elf Hunter: level-24 leather only — hunters too train mail at 40 — on
