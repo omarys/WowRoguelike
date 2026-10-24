@@ -1,6 +1,6 @@
 # Level bands and per-class ladders
 
-Evidence for scaling the dungeons by character level. Five source reports sit beside this
+Evidence for scaling the dungeons by character level. Six source reports sit beside this
 file; this page is the index and the summary.
 
 | File | Covers |
@@ -10,6 +10,7 @@ file; this page is the index and the summary.
 | `priest-druid-ladder.md` | Priest and Druid ability ranks by level 13–40, gear by level band |
 | `mage-ladder.md` | Mage ability ranks by level 13–40, wands, gear by level band |
 | `map-assets.md` | whether each image in `images/Maps/` can become a tile grid, and what is missing |
+| `healer-procs.md` | Healing Way, Inspiration/Ancestral Healing, Illumination, and the four "next spell" cooldowns |
 
 Confidence is marked in every source table: `V` verified from a cited page, `M` corroborated
 second source, `U`/`UNVERIFIED` inference — do not ship a `U` as fact.
