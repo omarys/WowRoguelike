@@ -1,36 +1,28 @@
 # Handoff — WowRoguelike
 
-Repo: `/home/omary/Dev/WowRoguelike`. Written at `654fc35`; the reviewed change set
-was committed at `72e15f9` and merged as HEAD `1e49951`, and the level-scale work
-described below is staged on top of it, uncommitted. **169/169 tests pass, ~1m20s**
+Repo: `/home/omary/Dev/WowRoguelike`. Written at `654fc35`, rewritten at `1fe8f95`.
+**The tree is clean at `1fe8f95`; 185/185 tests pass, ~1m**
 (`dotnet test tests/WowRoguelike.Tests/WowRoguelike.Tests.fsproj`), Release build 0
-warnings.
-**The change set is committed but was never reviewed.** `git diff 654fc35..72e15f9`
-is 295 files (+14,894/−705); ~7,000 of those added lines are F# and tests, the rest
-are extracted `Assets/` PNGs and generated maps. It landed as one commit with an
-empty body, so the design log has no record of it — the review is still owed, and
-this file is the brief for it. `images/` is now gitignored; `docs/HANDOFF.md` is
-gone, replaced by this file, and was moved rather than rewritten.
+warnings, `mise run hooks-run` clean. Every change below is committed, each with a
+body that records the decision and its measured outcome — `git log` is the design
+log again, and `654fc35..HEAD` is where the level-scale, kit and corridor work lives.
 
-**A second change set is staged and uncommitted on top of that** (HEAD is still the
-`1e49951` merge): the level-scale work — ability ranks for all nine classes, the
-level-24→60 gear curve, weapon rungs up to 60, the `smtrace`
-harness command, two research checking scripts, eight research files, and the doc
-updates. **163/163 tests pass, ~1m40s**; `mise run runs` reads `seeds=120
-cleared=120 wiped=0 unresolved=0 median-ticks=950 min=794 max=1080`, which is this
-file's baseline exactly. `mise run hooks-run` is clean. It is committed on top of `1e49951`, so citing a
-hash here would go stale on the next amend; the amend to `72e15f9`'s empty commit
-message is still owed.
+**The `654fc35..72e15f9` change set was never reviewed.** 295 files
+(+14,894/−705); ~7,000 of those added lines are F# and tests, the rest are extracted
+`Assets/` PNGs and generated maps. It landed as one commit with an empty body, so
+the design log has no record of it — **that review is still owed, and this file is
+the brief for it.** `images/` is gitignored; `docs/HANDOFF.md` is gone, replaced by
+this file, and was moved rather than rewritten.
 
-**The Rogue control kit and the party-lead walk described in §8 are not in the
-worktree.** They were written and then discarded before ever being staged:
-reverting a delegate's edits with `git checkout -- .` also throws away every
-unstaged change, and that work was unstaged. §8's Sap / Cheap Shot / Kidney Shot /
-hound / stun-as-mitigation paragraphs are therefore a specification to reimplement,
-not a description of the tree — the mechanics, the numbers and the test names are
-recorded there. The `11480` / `10453` clears quoted in §9 came from that work and
-will not reproduce until it is redone, and the `950 → 960 → 988` median drift no
-longer exists.
+**What has landed since:** the level-scale work (`9ab48f3` and the healer ranks and
+totems above it), the **Rogue control kit at `ae920c9`** — §8's Sap / Cheap Shot /
+Kidney Shot / pre-pull openers are implemented, tested and in the tree, so §8 now
+reads as a description of the code rather than a specification to reimplement —
+and the corridor work in §9 item 1: `8d01db5`, `978a1bc`, `d5eb335`, `5f43d19`,
+`82e64f1`. The map browser (`5651086`, `779290a`) is the MonoGame shell's only
+content. The `11480` / `10453` clears quoted in §9 came from the Rogue-kit work and
+reproduce again; the `950 → 960 → 988` median drift does not, because the corridor
+changes moved it.
 
 Read this file, then the artifacts it points at. Do not re-derive settled
 decisions — each one has a reason that is easy to undo by accident.
@@ -62,7 +54,7 @@ read it rather than trusting this file for feature state.
 | `docs/adr/0001-…`, `0002-…` | The Core never sees real time; splitmix64, integer-only Core arithmetic. |
 | `Content.fs` — the `VERIFY` block at the top | **Every number is classified sourced or placeholder.** Trust the sourced ones. |
 | `.pi/research/**` | The research the content is built from. Layout in §7. |
-| Git commit bodies | Each records a decision *and its measured outcome*. `git log` is the design log — but note the last ~5.8k lines are uncommitted, so the log stops being one at `654fc35`. |
+| Git commit bodies | Each records a decision *and its measured outcome*. `git log` is the design log — the one gap is `72e15f9`, which landed a 295-file change set with an empty body, so the log stops being one between `654fc35` and the level-scale work above it. |
 
 ## 3. Architecture, and the rule that enforces it
 
@@ -103,7 +95,7 @@ unexpressible. Every `Aura` case is matched in exactly one place (`module Aura`)
 ```bash
 mise run build     # solution in Release; compiles the ink narrative first
 mise run publish   # dist/ — the game plus Assets/ and MonoGame's native libs
-mise run test      # 169 tests, ~1m20s
+mise run test      # 185 tests, ~1m
 mise run runs      # outcome distribution over 120 seeds — THE regression signal
 mise run sim -- smrun cathedral med 16000    # run a wing headless, report survivors
 mise run sim -- sm graveyard min             # place a wing at a band
@@ -617,17 +609,18 @@ Call the **Skill** tool for these, in this order:
 2. **`domain-modeling`** — slice 4 introduces `Phase` vocabulary; update
    `CONTEXT.md` inline as terms resolve, and offer an ADR only if the decision is
    hard to reverse, surprising without context, and a real trade-off.
-3. **`code-review`** — before anything is committed. **~7k uncommitted lines**
-   across 30+ tracked files have never been reviewed, and the last review found a
+3. **`code-review`** — the `654fc35..72e15f9` set is still unreviewed (see the
+   header). Run Standards and Spec as parallel sub-agents. The last review found a
    genuine P1 (a move order could path an entity into a wall) that all 51
-   then-existing tests missed. Run Standards and Spec as parallel sub-agents.
-   The level-scale half of the change set has been checked by two research scripts
-   and 169 tests; the gear curve and the rank tables have not been read by a
-   reviewer.
+   then-existing tests missed. Everything committed since that set has a body and a
+   measurement behind it, but the gear curve and the rank tables have not been read
+   by a reviewer.
 4. **`diagnosing-bugs`** — for the pathing deadlock in §8/§9. It is a
-   reproduce-then-fix job: `smtrace <wing> <band> 20000 2000 v` already prints the
-   route, the goal, the mob targets and the stall flag, so the reproduction exists
-   before any code changes.
+   reproduce-then-fix job, and the reproduction step is already done: `smtrace <wing>
+   <band> 20000 2000 v` prints route, goal, mob targets and the stall flag, and §9
+   item 2 records the exact stall state at seed 1 level 60, down to the mover whose
+   destination is a standing teammate's tile. The trap is that the obvious fix
+   (clearing that destination) has already been tried and measured as a regression.
 5. **`ponytail`** — already active as a mode; read it if the session drifts toward
    over-building. Note the harness grew a `smtrace` command and two Python scripts
    this session; resist adding more tooling where an existing command would answer
