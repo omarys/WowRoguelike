@@ -4,7 +4,7 @@ Written at commit `aba0722`, with that session's work on top as one WIP commit
 `40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**221/221 tests green**, Release build clean — re-verified on this tree with
+**222/222 tests green**, Release build clean — re-verified on this tree with
 `dotnet test tests/WowRoguelike.Tests -c Release`.
 
 Everything settled — the brief, the architecture rules, the run table, and every
@@ -118,10 +118,29 @@ so these are one-off seeds, not whole cells: graveyard L33 with the Druid, Palad
 and Hunter rosters, and library L36 with Priest+Mage+Warlock+Hunter.
 
 They are **not** the freeze. The party is alive, the Tank holds a goal and mobs are
-left 11–20 tiles away: it walks and does not close. Library L36
-Priest+Mage+Warlock+Hunter **seed 2** still has 15 mobs and six healthy members at
-tick 60000, which is double the harness cap, so raising the budget will not answer
-it — that one is a real remaining stall and the next thing to measure. The three
+left 11–20 tiles away: it walks and does not close.
+
+**One of the four is understood, and the obvious fix for it is wrong.** Library L36
+Priest+Mage+Warlock+Hunter **seed 2** still has 15 mobs at tick 60000, double the
+harness cap. The Tank sits at `(19,125)` with `goal = Some (32,106)`, `path = 0`,
+`stall = 10`, `Destination = None`; a settled **Priest** stands on `(20,125)`, the
+only exit, and both side tiles are walls. `Path.astar` with `claimedByOther`
+returns **0 steps** (the claim-free search returns 27), so `stepToward` has no route
+to keep and the stall backoff repeats forever. Note the asymmetry: the Tank's
+*combat* branch already routes with `routeThrough` (hostile claims only) for
+exactly this reason, but the out-of-combat leader walk does not.
+
+The first attempt at it — order whoever stands between the Tank and its goal to
+walk on toward that goal — **fixed this seed (clears at tick 7680) and cost the
+ladder more than it bought**: 32 clean cells fell to 29 and parked seeds rose from
+4 to 8, with graveyard L33 losing cells it had just won. It was reverted, and the
+revert restores 32 / 4 / 0 wipes exactly. The lesson is the one this file keeps
+re-teaching: the out-of-combat walk and the formation orders pull in opposite
+directions, so a corridor fix belongs in the movement layer, not as another
+`PartyAi` order. `SimTick.advanceMovement` already permits two bodies *passing*
+through one tile — what it will not do is let a body *settle* on one that is going
+nowhere. Letting a leader step onto a stationary ally's tile (and hold there until
+it frees) is the smaller, local change, and it is the next thing to try. The three
 graveyard seeds have not been re-run at a longer cap yet.
 
 ## Bug 1 as it stood — the parks (CLOSED above: one dead totem)

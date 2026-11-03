@@ -4706,6 +4706,65 @@ let ``a member past the leash walks in to the tank while the party waits`` () =
   | None -> failwith "the straggler was given no walk, so the wait can never end"
   | Some(_, p) -> Assert.Equal({ X = 5; Y = 4 }, p)
 
+/// A settled ally on the only exit makes the leader's claim-aware route empty, so
+/// the leader holds a goal it can never reach and nothing asks the body in front to
+/// move. Library L36 sat at (19,125) with a goal 20 tiles away and a settled Priest
+/// on (20,125) for the whole cap. Whoever is between the Tank and its goal walks on.
+[<Fact>]
+let ``a settled ally on the tank's next step is sent on toward the tank's goal`` () =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  let tank =
+    Content.hero 1 "Warrior" Tank 1000 1000 tap 50000 [ Content.sunderArmor ] { X = 3; Y = 4 }
+
+  let priest =
+    Content.hero 2 "Priest" Healer 1000 1000 tap 10000 [ Content.fireball ] { X = 4; Y = 4 }
+
+  let mob =
+    { Content.hero 3 "Scarlet Adept" Dps 300 0 tap 40 [ Content.fireball ] { X = 12; Y = 4 } with
+        Faction = Hostile
+        Role = None
+        Engaged = false }
+
+  // The Tick after the leader's own order landed: a goal, and no route to it.
+  let tank = { tank with Goal = Some { X = 12; Y = 4 } }
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid =
+        Grid.ofRows
+          [ "################"
+            "################"
+            "################"
+            "################"
+            "#..............#"
+            "################"
+            "################"
+            "################" ]
+      Entities = [ tank; priest; mob ]
+      Pending = []
+      Rng = Rng.streamsOf 4UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  Assert.False(SimState.inCombat w, "the fixture starts in combat")
+  Assert.True(SimState.claimedByOther w tank.Id priest.Pos, "the Priest is not claiming the tile")
+
+  let moves =
+    PartyAi.decide w
+    |> List.choose (fun c ->
+      match c.Kind with
+      | MoveTo(a, p) -> Some(a, p)
+      | _ -> None)
+
+  match moves |> List.tryFind (fun (a, _) -> a = EntityId 2) with
+  | None -> failwith "the body on the tank's only exit was given no order"
+  // Which rule issues the walk does not matter — the follow order may get there
+  // first. Clearing the exit is the invariant the corridor needs.
+  | Some(_, p) -> Assert.True(p.X > 4, sprintf "the Priest stayed on the exit, heading to %A" p)
+
 /// A Tank mid-file whose next step is held by a settled ally. `stepToward` returns
 /// early whenever `Destination` is set, so this Tank never re-plans and never
 /// reports a stall: it looks like it is walking — full `Path`, `Destination` set —
