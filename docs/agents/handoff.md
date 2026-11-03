@@ -242,14 +242,63 @@ That also means the ladder's older `unresolved=6` and this run's 10 parked seeds
 are not comparable — different trees and no per-seed list on the old run. Quote
 this table, not that number.
 
-### Where to look next
+### Confirmed cause: `waiting` freezes the party, and nothing can un-freeze it
 
-`strikeTarget` is handed `hostiles` already filtered to "within `leash` of the
-Tank or targeting it" (`PartyAi.fs:1055-1067`), and LoS was thought to gate that
-filter. It does not — the nearest mob passes `lineOfSight` and is still not
-selected. Read that filter as it is written before theorising further; the next
-cheap probe is to print its inputs (`hostiles` length, each mob's distance, whether
-it targets the party, its `Awake`/dormancy state) for this exact cell.
+The filter is not the problem; the list is empty before it is consulted. `waiting`
+(`PartyAi.fs:1044-1050`):
+
+```fsharp
+let waiting =
+  not (SimState.inCombat w)
+  && (drinking
+      || match tank with
+         | None -> false
+         | Some t -> party |> List.exists (fun m -> Pos.chebyshev m.Pos t.Pos > leash))
+
+let hostiles = if waiting then [] else ...
+```
+
+`leash` is 8 (`PartyAi.fs:30`). On the parked library cell at the cap, out of combat:
+
+| member | pos | chebyshev to Tank | goal | stall |
+|---|---|---|---|---|
+| Warrior (Tank) | 16,125 | 0 | none | 0 |
+| Rogue | 17,125 | 1 | (18,125) | 0 |
+| Shaman | 23,125 | 7 | **none** | 0 |
+| Mage | 24,125 | 8 | (18,125) | **9** |
+| Warlock | 25,125 | **9** | (18,125) | **9** |
+
+One member is one tile past the leash, so `waiting` is true, `hostiles` is empty,
+the Tank takes no goal, nobody engages — and therefore `inCombat` stays false and
+the wait never ends. The corridor is one tile wide (no floor at `y=124`/`y=126`),
+so the queue cannot go round: `Path.astar` with bodies claimed returns `route=0,
+expanded=1` for the Mage (boxed by the Shaman at 23, the Warlock at 25 and walls)
+and `route=0, expanded=8453` for the Warlock. The Shaman at 23 is **idle** — 7
+tiles from the Tank is inside the leash, so it is never given a follow order — and
+the two behind it can never pass it.
+
+So: within-leash members stand wherever they are, the file behind them jams on a
+one-tile corridor, the last member stays over the leash, and `waiting` holds the
+whole party out of combat forever. This also explains why the park fix does not
+touch these cells: the Tank held no goal and only the *followers* were stalled.
+
+### Two candidate fixes, both needing the ladder
+
+1. **While `waiting`, give every member the follow tile, not just those beyond the
+   leash.** The idle Shaman is the blocker and it has a free tile west, so the queue
+   drains forward one step per tick until the last member is inside the leash and
+   `waiting` clears. Risk: out-of-combat churn — everyone converging on one tile
+   every time the party is out of combat can oscillate, and the formation tile is
+   shared, so members may tail-chase.
+2. **Bound the wait.** After *N* ticks out of combat with no member closing, drop
+   `waiting` and fight with the party split. Risk: this is exactly the pull the
+   leash was added for — it would trade a stall for wipes, so it needs the ladder,
+   not an argument.
+
+The red test to write first: a one-tile-wide corridor, Tank and two members behind
+it, one idle member *inside* the leash between them, mobs three tiles ahead of the
+Tank. Assert the party reaches the mobs. On the current tree that test hangs at the
+cap, which is the bug stated in the smallest shape that has it.
 
 Older note, still worth keeping: a graveyard L60 run to the 24000-tick cap with the
 hostile count frozen was previously attributed to `advanceMovement` holding a mover
