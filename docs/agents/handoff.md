@@ -52,6 +52,18 @@ only.
 | Composition ladder — 36 cells, one healer per class | re-measured after the totem fix: 32 cells clean, 4 cells with one seed parked, 0 wipes |
 | Corridor parks — a Tank whose next step is held by a settled ally now counts as stuck | fixed: 5 of 6 park seeds clear; graveyard 5 shuffles instead, below |
 
+## Totems are scenery (changed after the above)
+
+Asked for directly, and it simplified the sim rather than adding to it: a totem now
+claims no tile (`SimState.claimedByOther`, `SimTick.advanceMovement`'s `held`,
+`separateStacked`), is dropped on the Shaman's own tile instead of a free neighbour
+(so a totem can no longer fail for want of room — only a pet still searches), and
+carries `Lifetime = None` so it stands where it was dropped until that element is
+dropped again. The slot rule in `SimCombat`'s `Summon` is now the only thing that
+dismisses one. Measured after the change: **32 of 36 cells clean, 4 parked seeds,
+0 wipes** — the same ladder result as before it, so this bought correctness and a
+simpler corner rule, not clearances. 223/223 tests green, `bench-30` unchanged.
+
 ## CLOSED — both open bugs below were one dead totem
 
 The two bugs written up under this heading were re-diagnosed by measurement on

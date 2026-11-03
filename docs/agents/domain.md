@@ -266,6 +266,15 @@ engaged, falling back to the spring while the tide is on cooldown. Divine Protec
 is still unreached: it is damage immunity, not a heal and not mana, so `cooldownFor`
 has no shape for it either.
 
+**A totem is scenery, not a body.** It claims no tile — `SimState.claimedByOther`
+skips it, `SimTick.advanceMovement`'s `held` set skips it, and `separateStacked`
+neither counts it nor moves it — so the party walks over it and none of the corridor
+traffic rules apply to it. It is dropped on the Shaman's own tile rather than a free
+neighbour, which also removes the old "has no room to summon" failure for totems
+(only a pet still needs a free tile). And it has no clock: the kit passes
+`Lifetime = None`, so a totem stands where it was dropped until that element is
+dropped again — the slot rule is the only thing that dismisses one.
+
 **A cooldown button is only as reachable as the branch that routes to it.** The trip
 above is necessary but not sufficient: `heal` is reached only through the dispatch at
 `PartyAi.fs:521-523`, and that dispatch read `projectedPct` — health plus the HoT

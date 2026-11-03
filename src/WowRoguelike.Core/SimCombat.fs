@@ -837,12 +837,18 @@ module SimCombat =
                            |> Option.exists (fun standing -> TotemSlot.ofPulse standing.Pulse = slot)
                       )) }
 
+          // A totem takes up no space, so it is dropped on the Shaman's own tile
+          // and cannot fail for want of room. A pet still needs a free tile of its
+          // own — that is the case the search below exists for.
           let spot =
-            Path.neighbours
-              (fun p -> Grid.isFloor w.Grid p && not (claimedByOther w actorId p))
-              actor.Pos
-            |> List.sortBy (fun p -> Pos.chebyshev actor.Pos p)
-            |> List.tryHead
+            match spec.Totem with
+            | Some _ -> Some actor.Pos
+            | None ->
+              Path.neighbours
+                (fun p -> Grid.isFloor w.Grid p && not (claimedByOther w actorId p))
+                actor.Pos
+              |> List.sortBy (fun p -> Pos.chebyshev actor.Pos p)
+              |> List.tryHead
 
           match spot with
           | None ->

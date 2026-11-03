@@ -3983,8 +3983,10 @@ module Content =
       { X = 3; Y = 6 }
 
   /// The Shaman's totems, at the ranks a level-60 casts. Each is a `Summon`, so it
-  /// is a real Entity with a tile, a lifetime and a radius: a hostile can kill it,
-  /// it never shares a tile with a body, and it expires on its own clock.
+  /// is a real Entity with a tile and a radius: a hostile can kill it, and the party
+  /// walks over it — a totem claims no tile (see `SimState.claimedByOther`) and
+  /// never expires, so it stays where it was dropped until that element is dropped
+  /// again.
   ///
   /// Restorative Totems is the multiplier on the two that hand a number out on a
   /// pulse, and Totemic Focus is already in the kit as a per-spell cost line, so
@@ -4000,7 +4002,7 @@ module Content =
       | RestoresMana n -> RestoresMana(n * (10000 + t.TotemEffectBp) / 10000)
       | other -> other
 
-    let totem name cost cooldown requirement lifetime radius period p =
+    let totem name cost cooldown requirement radius period p =
       (requirement,
        { Name = name
          CastTicks = ticks 0
@@ -4015,17 +4017,21 @@ module Content =
                  Health = 5
                  Armor = 0
                  Swing = None
-                 Lifetime = Some lifetime
+                 // No lifetime: a totem stands where it was dropped until the
+                 // Shaman drops that element again. A clock made placement a
+                 // moving target for `PartyAi.totemOrders` and re-cast the same
+                 // totem every two minutes to keep an aura the party already had.
+                 Lifetime = None
                  MoveTicksPerTile = secTicks 1000.0
                  Totem = Some { Pulse = pulse p; Radius = radius; Period = period } } ] })
 
     // Earth, air, then water: the order the Shaman drops them in, which is the
     // priority the Party's AI reads off the kit.
-    [ totem "Stoneskin Totem" 80 (ticks 0) 16 (secTicks 120.0) 20 (ticks 0) (ArmorBoon 435)
-      totem "Grace of Air Totem" 120 (ticks 0) 42 (secTicks 120.0) 20 (ticks 0) (AgilityBoon 77)
-      totem "Mana Tide Totem" 240 (secTicks 300.0) 40 (secTicks 12.0) 20 (secTicks 2.0) (ManaFraction 400)
-      totem "Healing Stream Totem" 100 (ticks 0) 20 (secTicks 120.0) 20 (secTicks 2.0) (Heals 44)
-      totem "Mana Spring Totem" 100 (ticks 0) 26 (secTicks 120.0) 20 (secTicks 2.0) (RestoresMana 12) ]
+    [ totem "Stoneskin Totem" 80 (ticks 0) 16  20 (ticks 0) (ArmorBoon 435)
+      totem "Grace of Air Totem" 120 (ticks 0) 42  20 (ticks 0) (AgilityBoon 77)
+      totem "Mana Tide Totem" 240 (secTicks 300.0) 40 20 (secTicks 2.0) (ManaFraction 400)
+      totem "Healing Stream Totem" 100 (ticks 0) 20  20 (secTicks 2.0) (Heals 44)
+      totem "Mana Spring Totem" 100 (ticks 0) 26  20 (secTicks 2.0) (RestoresMana 12) ]
     |> List.filter (fun (requirement, _) -> level >= requirement)
     |> List.map snd
 

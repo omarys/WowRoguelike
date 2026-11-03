@@ -2506,6 +2506,54 @@ let ``Illumination returns a crit heal's mana`` () =
   Assert.Equal(100, withIllumination)
   Assert.True(without < 100, sprintf "the plain Paladin should have paid: %d" without)
 
+/// A totem is scenery, not a body: it claims no tile, so the party walks over it,
+/// and it has no clock, so it stands where it was dropped until that element is
+/// dropped again. Both were asked for after a Shaman parked a corridor with a
+/// Stoneskin Totem nobody could step past.
+[<Fact>]
+let ``a totem claims no tile and never expires`` () =
+  let shaman = (Content.partyOf [ "Shaman" ] 60).[0]
+
+  let spec =
+    shaman.Abilities
+    |> List.find (fun a -> a.Name = "Stoneskin Totem")
+    |> fun a -> a.Effects |> List.pick (function Summon s -> Some s | _ -> None)
+
+  Assert.True(spec.Totem.IsSome, "the Stoneskin Totem must still be a totem")
+  Assert.Equal(None, spec.Lifetime)
+
+  let tank = { (Content.partyOf [ "Warrior" ] 60).[0] with Pos = { X = 5; Y = 5 } }
+
+  let totem =
+    { tank with
+        Id = EntityId 99
+        Name = "Stoneskin Totem"
+        Pos = { X = 6; Y = 5 }
+        Abilities = []
+        AutoAttack = None
+        Owner = Some tank.Id
+        Totem = Some { Pulse = ArmorBoon 435; Radius = 5; Period = secTicks 2.0 } }
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 12 10
+      Entities = [ { tank with Destination = Some { X = 6; Y = 5 } }; totem ]
+      Pending = []
+      Rng = Rng.streamsOf 12UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  Assert.False(SimState.claimedByOther w tank.Id totem.Pos, "the totem claimed its tile")
+
+  let w = SimTick.step [] w
+  let at id = SimState.tryEntity id w |> Option.get
+
+  Assert.Equal({ X = 6; Y = 5 }, (at tank.Id).Pos)
+  Assert.Equal({ X = 6; Y = 5 }, (at totem.Id).Pos)
+  Assert.True(SimState.alive (at totem.Id), "walking onto the totem killed it")
+
 /// A totem is an Entity that pulses on its own clock: the Healing Stream totem
 /// heals every party member in reach every two seconds, and stops the Tick it runs
 /// out of time. The hostile is there so the party is in combat and out-of-combat

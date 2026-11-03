@@ -139,10 +139,12 @@ module SimState =
   /// through does not claim it: two members may pass through one tile as long as
   /// neither means to stop there, and `SimTick.advanceMovement` separates them if
   /// a cross-over still lands them together. Keeping transit tiles open is what
-  /// stops a two-wide corridor from refusing to carry traffic both ways.
+  /// stops a two-wide corridor from refusing to carry traffic both ways. A totem
+  /// claims nothing at all: it is scenery the party may stand on.
   let claimedByOther (w: World) (self: EntityId) (p: Pos) =
     w.Entities
-    |> List.exists (fun e -> alive e && e.Id <> self && e.Pos = p && e.Destination.IsNone)
+    |> List.exists (fun e ->
+      alive e && e.Id <> self && e.Totem.IsNone && e.Pos = p && e.Destination.IsNone)
 
   /// A free tile to stand on next to `spot`, preferring the one nearest the mover.
   ///

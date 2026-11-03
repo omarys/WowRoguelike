@@ -224,7 +224,9 @@ module SimTick =
     let _, entities =
       (([], []), w.Entities)
       ||> List.fold (fun (taken, acc) e ->
-        if not (alive e) then
+        if not (alive e) || e.Totem.IsSome then
+          // A totem takes no space and never gives ground: leave it where it was
+          // summoned and let bodies share its tile.
           taken, e :: acc
         else
           let spot =
@@ -248,7 +250,8 @@ module SimTick =
     // `held` is every tile a body will still be standing on when this tick ends:
     // a body with no destination, or one whose step does not complete now
     // (`MoveTicksLeft > 1` is exactly the case that only decrements). A body whose
-    // step lands this tick is vacating, so its tile can be taken.
+    // step lands this tick is vacating, so its tile can be taken. A totem is not a
+    // body: it holds nothing and nobody has to walk around it.
     //
     // It used to be "any body with no destination", which let a mover settle onto
     // a body that was mid-step and still three ticks from leaving. `separateStacked`
@@ -258,6 +261,7 @@ module SimTick =
       w.Entities
       |> List.filter (fun e ->
         alive e
+        && e.Totem.IsNone
         && (e.Destination.IsNone || e.MoveTicksLeft > ticks 1))
       |> List.map (fun e -> e.Pos)
       |> Set.ofList
