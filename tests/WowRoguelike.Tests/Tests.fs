@@ -5089,6 +5089,42 @@ let ``a stationary ally no longer severs the route behind it`` () =
   // ...and stopped in front of it, because the blocking tile is still taken.
   Assert.Equal(4, (posOf (EntityId 1)).X)
 
+/// The trade. A mover whose next step is a settled ally takes that ally's tile and
+/// hands back its own, which is the only way a one-wide corridor lets its leader
+/// past somebody with no order to move. Library L36 parked a whole wing this way:
+/// the Tank held a goal 20 tiles off with a settled Priest on the only exit, the
+/// claim-aware search returned no route, and `stepToward` backed off forever. Only
+/// Party trades with Party, and only with somebody that is not the Tank.
+[<Fact>]
+let ``a settled ally trades tiles with the body that steps into it`` () =
+  let grid =
+    Grid.ofRows [ "########"; "########"; "#......#"; "########"; "########" ]
+
+  let tap = { Min = 1; Max = 1; Ticks = ticks 1; Range = 1 }
+
+  let mover =
+    { Content.hero 2 "Priest" Healer 1000 1000 tap 10000 [] { X = 1; Y = 2 } with
+        Goal = Some { X = 6; Y = 2 } }
+
+  let blocker = Content.hero 1 "Mage" Dps 1000 1000 tap 50000 [] { X = 2; Y = 2 }
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = grid
+      Entities = [ blocker; mover ]
+      Pending = []
+      Rng = Rng.streamsOf 5UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let after = [ 1 .. 40 ] |> List.fold (fun w _ -> SimTick.step [] w) w
+  let posOf id = (after.Entities |> List.find (fun e -> e.Id = id)).Pos
+
+  Assert.Equal(6, (posOf (EntityId 2)).X)
+  Assert.True((posOf (EntityId 1)).X < 6, "the blocker never gave ground")
+
 /// Thundercrack and Terrify are both stuns, so a Mob that always picks its first
 /// control spell would never use the second one.
 [<Fact>]

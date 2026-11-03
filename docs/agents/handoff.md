@@ -125,35 +125,31 @@ Dps` and `a member past the leash walks in to the tank while the party waits` in
 `tests/WowRoguelike.Tests/Tests.fs`, plus the whole 221-test suite, the
 `bench-30` snapshot unchanged, and the 36-cell ladder at 0 wipes.
 
-**What is left (4 seeds, 4 cells).** Every remaining cell clears its other seeds,
-so these are one-off seeds, not whole cells: graveyard L33 with the Druid, Paladin
-and Hunter rosters, and library L36 with Priest+Mage+Warlock+Hunter.
+**Nothing is left on the ladder: 36 of 36 cells clean, 0 wipes.** The four parked
+seeds were one movement bug, and the fix is the one this file pointed at. `stepToward`
+found a relaxed route when the claim-aware one was empty (a settled ally's tile
+passable), and then **threw that route away** — `if taken next` discarded the whole
+plan and set the stall backoff, so a leader whose very next step was a settled ally
+backed off forever. The Tile Library's Tank at `(19,125)` was exactly that: goal
+`(32,106)`, claim-aware route 0 steps, relaxed route 27, `path = 0`, `stall = 10`,
+a settled Priest on the only exit and walls either side.
 
-They are **not** the freeze. The party is alive, the Tank holds a goal and mobs are
-left 11–20 tiles away: it walks and does not close.
+Two changes in `SimTick.fs`, both in the movement layer:
 
-**One of the four is understood, and the obvious fix for it is wrong.** Library L36
-Priest+Mage+Warlock+Hunter **seed 2** still has 15 mobs at tick 60000, double the
-harness cap. The Tank sits at `(19,125)` with `goal = Some (32,106)`, `path = 0`,
-`stall = 10`, `Destination = None`; a settled **Priest** stands on `(20,125)`, the
-only exit, and both side tiles are walls. `Path.astar` with `claimedByOther`
-returns **0 steps** (the claim-free search returns 27), so `stepToward` has no route
-to keep and the stall backoff repeats forever. Note the asymmetry: the Tank's
-*combat* branch already routes with `routeThrough` (hostile claims only) for
-exactly this reason, but the out-of-combat leader walk does not.
+- a settled ally on the next step no longer discards the route — the mover keeps
+  walking at it, and anything else on that tile (a hostile, a body mid-step) still
+  means the route is stale;
+- `swapStep` trades tiles when the step lands: the mover takes the ally's tile and
+  hands back its own, atomically, so `separateStacked` never sees a stack. Party
+  trades with Party only, and never with the Tank — the Tank is the formation's
+  anchor, which is also what keeps `a stationary ally no longer severs the route
+  behind it` honest.
 
-The first attempt at it — order whoever stands between the Tank and its goal to
-walk on toward that goal — **fixed this seed (clears at tick 7680) and cost the
-ladder more than it bought**: 32 clean cells fell to 29 and parked seeds rose from
-4 to 8, with graveyard L33 losing cells it had just won. It was reverted, and the
-revert restores 32 / 4 / 0 wipes exactly. The lesson is the one this file keeps
-re-teaching: the out-of-combat walk and the formation orders pull in opposite
-directions, so a corridor fix belongs in the movement layer, not as another
-`PartyAi` order. `SimTick.advanceMovement` already permits two bodies *passing*
-through one tile — what it will not do is let a body *settle* on one that is going
-nowhere. Letting a leader step onto a stationary ally's tile (and hold there until
-it frees) is the smaller, local change, and it is the next thing to try. The three
-graveyard seeds have not been re-run at a longer cap yet.
+Ordering the blocker forward instead had cost 3 cells; this costs none: the ladder
+went 32 clean / 4 parked to **36 clean / 0 parked, 0 wipes**, and library L36 seed 2
+now clears at tick 7121. `bench-30` was refreshed deliberately (seed 3: 1133 → 1139
+ticks, party hp 4958 → 4771, same `EncounterCleared`, mobs untouched), because traffic
+through a corridor is not the same route once bodies trade places.
 
 ## Bug 1 as it stood — the parks (CLOSED above: one dead totem)
 

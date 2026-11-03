@@ -1142,11 +1142,24 @@ seed out of three, and a single-cell difference is not a ranking.
    `claimedByOther` was then relaxed to allow **transit**, at the request of the
    owner: a tile is claimed only by a body that has settled on it (`Destination =
    None`), so two members may pass through one tile as long as neither means to stop
-   there. The earlier soft-claim attempt failed because a walker could step onto an
+   there — the earlier soft-claim attempt failed because a walker could step onto an
    ally and *stay*; this version keeps `no two living entities share a tile` by
    ending the tick with `SimTick.separateStacked`, which steps a duplicated body to a
    free neighbour. Neither entity is ever banned mid-tile and no route is lost, so a
    corridor carries traffic both ways instead of refusing it.
+
+   **The trade comes last, and it is what finishes the corridors.** A settled ally
+   used to discard the mover's route (`if taken next` → abandon the plan, set the
+   stall backoff), so a leader whose *first* step was a settled ally backed off
+   forever — a `Tank` at `(19,125)` with goal `(32,106)`, a settled `Priest` on the
+   only exit, claim-aware route 0 steps and relaxed route 27. Now a settled Party
+   body on the next step no longer discards the route, and when the step lands
+   `SimTick.swapStep` trades tiles: the mover takes the ally's tile and hands back
+   its own, atomically, so `separateStacked` never sees a stack. Party trades with
+   Party only (a hostile's tile is a target, not a place to stand) and never with
+   the Tank, which is the formation's anchor — that guard is what keeps
+   `a stationary ally no longer severs the route behind it` meaning what it says.
+   The ladder went from 32 of 36 cells clean to **36 of 36, 0 wipes**.
 
    Measured on the eight-seed freeze probe (24000 ticks): 8/8 frozen before, 0/8
    after, including the two seeds where the Tank lived and blocked the door.

@@ -220,6 +220,44 @@ module SimTick =
   /// stop being able to path past anything. Whoever shares with an earlier entry in
   /// the list steps to the nearest free neighbour. Only a cross-over leaves a
   /// neighbour unavailable, so this moves nobody on an ordinary Tick.
+  /// A mover whose step lands on a settled ally's tile trades places with it. In a
+  /// one-wide corridor nobody else can yield, so without the trade the leader holds a
+  /// goal it can never reach: the body in front has no order to move, so the tile is
+  /// never freed and the route is dropped as stale every backoff. Only Party trades
+  /// with Party — a hostile's tile is a target, not a place to stand — and the trade
+  /// is atomic, so `separateStacked` never sees two bodies on one tile.
+  let private swapStep (w: World) =
+    let settledPartyAt (p: Pos) =
+      w.Entities
+      |> List.tryFind (fun o ->
+        alive o
+        && o.Faction = Party
+        && o.Totem.IsNone
+        && o.Role <> Some Tank
+        && o.Pos = p
+        && o.Destination.IsNone)
+
+    let trades =
+      w.Entities
+      |> List.choose (fun e ->
+        match e.Destination with
+        | Some d when alive e && e.Faction = Party && e.MoveTicksLeft <= ticks 1 ->
+          match settledPartyAt d with
+          | Some b when b.Id <> e.Id -> Some(e.Id, e.Pos, b.Id, d)
+          | _ -> None
+        | _ -> None)
+
+    (w, trades)
+    ||> List.fold (fun acc (mover, from, blocker, toward) ->
+      acc
+      |> mapEntity mover (fun m ->
+        { m with
+            Pos = toward
+            Destination = None
+            MoveTicksLeft = ticks 0
+            MoveTicksTotal = ticks 0 })
+      |> mapEntity blocker (fun b -> { b with Pos = from }))
+
   let private separateStacked (w: World) =
     let _, entities =
       (([], []), w.Entities)
@@ -300,6 +338,7 @@ module SimTick =
                   MoveTicksTotal = ticks 0 })
       w
     |> separateStacked
+    |> swapStep
 
 
   /// Begin stepping toward a goal. A* plans the route once and the entity walks
@@ -358,7 +397,23 @@ module SimTick =
             Path = []
             StallTicks = pathRetryBackoff }
       | next :: rest ->
-        if taken next then
+        // A settled Party body on the next step is not a reason to throw the route
+        // away: it will trade tiles with the mover when the step lands (`swapStep`
+        // in `advanceMovement`), which is the only way a one-wide corridor lets its
+        // leader past an ally that has no order to move. Anything else — a hostile,
+        // or a body mid-step — still means the route is stale.
+        let aSettledAlly =
+          w.Entities
+          |> List.exists (fun o ->
+            alive o
+            && o.Id <> e.Id
+            && o.Faction = Party
+            && o.Totem.IsNone
+            && o.Role <> Some Tank
+            && o.Pos = next
+            && o.Destination.IsNone)
+
+        if taken next && not aSettledAlly then
           { e with
               Path = []
               StallTicks = pathRetryBackoff }
