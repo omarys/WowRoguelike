@@ -90,6 +90,7 @@ module Bench =
               Threat = Map.ofList [ EntityId 1, 1000 ] } ]
 
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = Grid.create width height
       Entities = party @ mobs
       Pending = []

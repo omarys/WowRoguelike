@@ -10,7 +10,17 @@ module SimState =
 
 
   /// Mobs notice the Party at this distance. Proximity aggro, as in WoW.
-  let aggroRadius = 6
+  ///
+  /// Held at a quarter of `packSpacing` (Content.fs), because those two numbers
+  /// are one decision and not two: a pull radius that reaches past the gap to the
+  /// next pack turns every fight into two fights, and the map cannot put enough
+  /// floor between rooms to compensate. At `packSpacing = 7` this is `7 / 4`
+  /// rounded up to 2 — a mob still wakes together with the pack it is standing in
+  /// (pack members are within two tiles of each other by construction), and the
+  /// pack behind it stays asleep. Raising one of the pair without the other is
+  /// what produced the measured graveyard problem of 14 and 17 simultaneously
+  /// engaged hostiles against packs of 3 to 4.
+  let aggroRadius = 2
 
   /// Raptors pull their neighbours in rather than dying quietly.
   let callForHelpRadius = 10
@@ -82,6 +92,13 @@ module SimState =
   /// A Rebirth already in flight counts too: the Druid's 2 s cast lands whether or
   /// not the last swing of the fight killed the Druid, and resolving the run on that
   /// tick would throw away a rescue that was already paid for.
+  ///
+  /// The price and the target are part of the test. A corpse only raises *itself*,
+  /// so a Corpse-target resurrection on a dead caster can never be cast; and a
+  /// corpse does not regenerate (`SimTick.fs:126`), so a resurrection the dead
+  /// caster cannot afford is one it can never afford. Counting either keeps
+  /// `continues` true until the caller's tick cap — a run that cannot end,
+  /// spending its remaining ticks on a party with nothing to order.
   let resurrectionPending (w: World) =
     not (List.isEmpty (aliveHostiles w))
     && w.Entities
@@ -91,6 +108,8 @@ module SimState =
               && (e.Abilities
                   |> List.exists (fun a ->
                     Ability.resurrects a
+                    && a.TargetKind = Self
+                    && e.Resource >= a.ResourceCost
                     && (e.Cooldowns |> Map.tryFind a.Name |> Option.defaultValue (ticks 0)) <= ticks 0)))
              || (e.Casting |> Option.exists (fun c -> Ability.resurrects c.Ability))))
 
@@ -150,6 +169,8 @@ module SimState =
   let isSleeping (e: Entity) = e.Auras |> List.exists Aura.isSleeping
 
   let isShifted (e: Entity) = e.Auras |> List.exists Aura.isSerpentForm
+
+  let isSilenced (e: Entity) = e.Auras |> List.exists Aura.isSilenced
 
   let serpentBonus (e: Entity) = e.Auras |> List.sumBy Aura.bonusDamage
 
@@ -248,6 +269,43 @@ module SimState =
 
   let mapAll (f: Entity -> Entity) (w: World) = { w with Entities = w.Entities |> List.map f }
 
+  /// The party is all corpses and something can still get up: the pull is lost, so
+  /// everything hostile goes home, whole, and forgets. Corpses are left where they
+  /// fell — they are the run's stake. The `Home` anchor is what makes the Shaman's
+  /// death spot matter: a body more than `aggroRadius` from every home is invisible
+  /// to the room it just lost to.
+  ///
+  /// shortcut: mobs teleport home instead of running; give them a walk if evade has
+  /// to be visible on screen.
+  let encounterReset (w: World) : World =
+    if not (List.isEmpty (aliveParty w)) || not (resurrectionPending w) then
+      w
+    else
+      mapAll
+        (fun e ->
+          if e.Faction <> Hostile then
+            e
+          else
+            { e with
+                Pos = defaultArg e.Home e.Pos
+                Destination = None
+                MoveTicksLeft = ticks 0
+                MoveTicksTotal = ticks 0
+                Goal = None
+                Path = []
+                StallTicks = ticks 0
+                Health = e.MaxHealth
+                Resource = e.MaxResource
+                Auras = []
+                Casting = None
+                Cooldowns = Map.empty
+                Threat = Map.empty
+                Target = None
+                ForcedTarget = None
+                Engaged = false
+                HasCalledForHelp = false })
+        w
+
   /// Any hostile action wakes a sleeper — the sourced rule — so an interrupt or
   /// a taunt ends a sleep as surely as damage does.
   let wake (targetId: EntityId) (w: World) =
@@ -284,7 +342,13 @@ module SimState =
       observers |> List.fold (fun acc m -> addThreat m.Id healer share acc) w
 
   let healEntity (targetId: EntityId) (amount: int) (w: World) =
-    mapEntity targetId (fun t -> { t with Health = min t.MaxHealth (t.Health + amount) }) w
+    mapEntity targetId (fun t ->
+      // Wound Poison: a poisoned target receives less than the heal that was paid
+      // for. Charged here rather than at the cast, so every heal in the game — the
+      // Druid's HoTs, a potion, a resurrection — meets the same cut.
+      let cut = t.Auras |> List.sumBy Aura.healingReceivedReductionBp
+      let amount = amount * max 0 (10000 - cut) / 10000
+      { t with Health = min t.MaxHealth (t.Health + amount) }) w
 
   /// Name lookup for log messages.
   let internal nameOf (id: EntityId) (w: World) =

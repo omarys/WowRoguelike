@@ -82,6 +82,10 @@ run = "dotnet run --project src/WowRoguelike.Harness -c Release -- bench"
 description = "Per-bucket tick cost, and the cost of a search that cannot succeed"
 run = "dotnet run --project src/WowRoguelike.Harness -c Release -- diagnose"
 
+[tasks.attrib]
+description = "Direct damage and healing by ability and caster; pass a wing and difficulty, e.g. `mise run attrib -- graveyard med`"
+run = "dotnet run --project src/WowRoguelike.Harness -c Release -- attrib"
+
 [tasks.hooks]
 description = "Install the git hooks (run once after cloning)"
 run = "pre-commit install --install-hooks && pre-commit install --hook-type pre-push"

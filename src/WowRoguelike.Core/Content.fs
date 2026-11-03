@@ -222,9 +222,14 @@ module Content =
   /// The rank a level-24 character has trained — what the class kits carry.
   let private rank24 = rankAt 24
 
-  /// Taunt (level 10): 10 s cooldown, one rank at every level. The table has it
-  /// free and at 1 tile; the 10 rage and the 8 tiles are the file's and stay,
-  /// because they are what a party of this level pulls with.
+  /// Taunt (level 10): 10 s cooldown, one rank at every level, and free — which
+  /// is the whole of vanilla's design of it and the whole reason it works. The
+  /// file priced it at 10 rage and kept the 8-tile range; the range stays (a
+  /// party of this level pulls with it) but the price cannot, because a Warrior's
+  /// income is now rage earned from damage and 10 of a flat 100 is a fifth of his
+  /// pool per taunt. Threat control competing with Heroic Strike and Shield Block
+  /// for the same bar is how a tank ends up unable to taunt, which is a wipe, not
+  /// a tuning question.
   let tauntRanks: AbilityDef =
     { Name = "Taunt"
       Resource = Rage
@@ -233,7 +238,7 @@ module Content =
       Interruptible = false
       Ranks =
         [ { Level = 10
-            Cost = 10
+            Cost = 0
             CastTicks = ticks 0
             CooldownTicks = secTicks 10.0
             Range = 8
@@ -672,6 +677,148 @@ module Content =
 
   let raptorStrike = rank24 raptorStrikeRanks
 
+  /// The hunter's pet, and the first `SummonSpec` instance in the game — `Summon`
+  /// and `SummonSpec` sat with no caller until it. Three ranks rather than one
+  /// because the pool has to grow with the party's: the same 3200 health at level
+  /// 24 would be a Tank the low dungeons cannot threaten. Its damage does not need
+  /// ranks, because the hunter's own shot is 41 DPS at 24 and 42 at 60, so one
+  /// swing keeps the pet at a steady ~60% of its owner across the whole ladder.
+  /// Health and armour are this file's estimate; the swing is derived from the
+  /// researched per-shot total in the hunter's weapon table below.
+  let private hunterPet (health: int) (armor: int) : SummonSpec =
+    { Name = "Pet"
+      Health = health
+      Armor = armor
+      Swing = Some(38, 62, secTicks 2.0)
+      Lifetime = None
+      MoveTicksPerTile = secTicks 0.4
+      Totem = None }
+
+  let summonPetRanks: AbilityDef =
+    { Name = "Summon Pet"
+      Resource = Mana
+      Stance = None
+      TargetKind = Self
+      Interruptible = false
+      Ranks =
+        [ for level, health, armor in [ 1, 260, 180; 24, 900, 700; 48, 3200, 2400 ] do
+            { Level = level
+              Cost = 0
+              CastTicks = ticks 0
+              CooldownTicks = ticks 0
+              Range = 1
+              Effects = [ Summon(hunterPet health armor) ] } ] }
+
+  let summonPet = rank24 summonPetRanks
+
+  /// Mend Pet rank 2 (level 20): 90 mana, 38 a second for five seconds — 190 total,
+  /// which is a fifth of a rank-3 pet. Vanilla channels it; here it is a five-second
+  /// heal-over-time so a hunter that has to move does not lose the whole heal.
+  /// `HealOverTime` is per second (Domain.fs:329), so the researched 38 hp/s is the
+  /// number and 190 is its product, not an input.
+  let mendPet: AbilityDef =
+    { Name = "Mend Pet"
+      Resource = Mana
+      Stance = None
+      TargetKind = Ally
+      Interruptible = false
+      Ranks =
+        [ { Level = 20
+            Cost = 90
+            CastTicks = ticks 0
+            CooldownTicks = ticks 0
+            Range = 8
+            Effects = [ HealOverTime(secTicks 5.0, 38) ] } ] }
+
+  /// Aimed Shot rank 1 (level 20): 75 mana, a 3 s cast, 6 s cooldown, +70 on the
+  /// weapon hit — the researched row, at the ranks the ladder has data for.
+  ///
+  /// Two departures from vanilla, both this game's: it is **trainable**, where
+  /// vanilla gates it behind 21 Marksmanship points a level-24 hunter cannot have,
+  /// and it does not scale, because `.pi/research/ranks/ranks-hunter.md` has no
+  /// ladder for it and this file does not invent one.
+  /// shortcut: a single rank, so a level-60 hunter's Aimed Shot is a level-20 one;
+  /// extend the ladder from the 1.15.9 tables when the 60 tier needs the damage.
+  let aimedShotRanks: AbilityDef =
+    { Name = "Aimed Shot"
+      Resource = Mana
+      Stance = None
+      TargetKind = Foe
+      Interruptible = true
+      Ranks =
+        [ { Level = 20
+            Cost = 75
+            CastTicks = secTicks 3.0
+            CooldownTicks = secTicks 6.0
+            Range = 8
+            Effects = [ WeaponDamage(10000, 70) ] } ] }
+
+  let aimedShot = rank24 aimedShotRanks
+
+  /// Scatter Shot: the hunter's interrupt, and the only silence in the game.
+  ///
+  /// Out of band by request — vanilla gates it behind 21 Survival points, so a
+  /// level-24 hunter never had it, and vanilla's is a 4 s disorient that damage
+  /// breaks rather than a silence. The numbers here are this file's: 60 mana, an
+  /// 8-tile range for the 5-35 yd band, and a 20 s cooldown so a hunter silences
+  /// roughly one caster per pack rather than every cast it sees.
+  /// shortcut: unverified cost/cooldown (research lists Scatter Shot only as
+  /// "not available at 24"); revisit if the 1.15.9 trainer data turns up.
+  let scatterShot: AbilityDef =
+    { Name = "Scatter Shot"
+      Resource = Mana
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ { Level = 20
+            Cost = 60
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 20.0
+            Range = 8
+            Effects = [ Interrupt; Silence(secTicks 3.0) ] } ] }
+
+  /// Multi-Shot rank 1 (level 18): 100 mana, instant, 10 s cooldown, weapon damage
+  /// to three targets and no flat bonus — the researched row. It is the one ability
+  /// in the kit whose value is per target rather than per hit, which is why the AI
+  /// will not spend it on a single body.
+  let multiShot: AbilityDef =
+    { Name = "Multi-Shot"
+      Resource = Mana
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ { Level = 18
+            Cost = 100
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 10.0
+            Range = 8
+            Effects = [ MultiShot 3 ] } ] }
+
+  /// Viper Sting: the target's mana, not its health. Vanilla trains it at 36, so
+  /// this is out of band like Scatter Shot, and no table in `.pi/research/` carries
+  /// its amounts — the numbers are this file's, sized against the mobs the sim
+  /// actually casts at: a Druid of the Fang carries **400** mana with **no
+  /// regeneration** (`Content.fs:1547`), so a sting of 120 is a third of its pool
+  /// and half an hour of casts is two stings. That is the intent: a sting that
+  /// shortens a caster's fight, not one that ends it.
+  /// shortcut: 15/s over 8 s and the 20 s cooldown are estimates; replace them and
+  /// add the ladder when the Viper Sting ranks are researched.
+  let viperSting: AbilityDef =
+    { Name = "Viper Sting"
+      Resource = Mana
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ { Level = 24
+            Cost = 90
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 20.0
+            Range = 8
+            Effects = [ DrainResource(secTicks 8.0, 15) ] } ] }
+
   // -- Shaman ---------------------------------------------------------------
   // An elemental shaman's kit, laddered to the cap. Windfury Weapon (30) and
   // Chain Lightning (32) are still out of it, and so are the totems. Cast times
@@ -914,6 +1061,28 @@ module Content =
               CooldownTicks = ticks 0
               Range = 1
               Effects = [ WeaponDamage(15000, bonus); ComboPoint 1 ] } ] }
+
+  /// Ambush: 250% weapon damage plus a step that more than quadruples by the top
+  /// rank. It exists from behind and out of stealth, and the 250% is the whole
+  /// reason to open with it: the Rogue's hardest blow, landed before the mob has
+  /// turned round. Stealth is not modelled as a state — `PartyAi` treats a full
+  /// health, untouched enemy as the one the Rogue met from behind, so this fires
+  /// once per pull and then never competes in the strike rotation.
+  let ambush: AbilityDef =
+    { Name = "Ambush"
+      Resource = Energy
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ for level, bonus in
+            [ 18, 70; 26, 100; 34, 125; 42, 185; 50, 230; 58, 290 ] do
+            { Level = level
+              Cost = 60
+              CastTicks = ticks 0
+              CooldownTicks = ticks 0
+              Range = 1
+              Effects = [ WeaponDamage(25000, bonus); ComboPoint 1 ] } ] }
 
   /// Eviscerate: the finisher. Damage is exactly linear in combo points (rank 4:
   /// 41-61 at one point, +31 a point to 165-185 at five), so a rank only needs
@@ -1369,6 +1538,29 @@ module Content =
 
   let shadowWordPain = rank24 shadowWordPainRanks
 
+  /// Shoot: a crossbow at the target for a flat one point of damage, and the reason
+  /// it exists is not damage. `aggroRadius` is 2, so the way a fight usually starts
+  /// is the Tank walking into a room — which is how a pull becomes a chain, and it
+  /// puts the Party wherever the pack happened to be standing. Six tiles is 30 yd. A
+  /// Warrior does not really carry a crossbow; this is a decision, taken to give the
+  /// class the ranged pull the class actually had (a thrown weapon), without a
+  /// `Thrown` slot the gear pool does not define.
+  let shootRanks: AbilityDef =
+    { Name = "Shoot"
+      Resource = Rage
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ { Level = 1
+            Cost = 0
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 6.0
+            Range = 6
+            Effects = [ Damage(1, 1) ] } ] }
+
+  let shoot = rank24 shootRanks
+
   /// Charge ranks 1-2: it generates rage rather than costing it, so the cost is
   /// negative — 9 at rank 1, 12 at rank 2. Both ranks stun for 1 s and then hit,
   /// and the 8 tiles are the codebase's 40-yd convention for the table's 1.6-5.
@@ -1388,6 +1580,27 @@ module Content =
               Effects = [ Charge; Stun(secTicks 1.0); Threat(300) ] } ] }
 
   let charge = rank24 chargeRanks
+
+  /// Intercept (level 20): the in-combat counterpart. Ten rage buys the same leap,
+  /// a three-second stun and a thirty-second cooldown, where Charge is free (it
+  /// pays rage) but cannot be used once anything is fighting you. That asymmetry
+  /// is the Warrior's opener and its gap closer, and they are not interchangeable.
+  let interceptRanks: AbilityDef =
+    { Name = "Intercept"
+      Resource = Rage
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ for level, rage in [ 20, 10; 40, 10 ] do
+            { Level = level
+              Cost = rage
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 30.0
+              Range = 8
+              Effects = [ Intercept; Stun(secTicks 3.0); Threat(200) ] } ] }
+
+  let intercept = rank24 interceptRanks
 
   /// Disarm (level 18): the target's weapon for 10 s, for 20 rage on a 20 s
   /// cooldown. One rank, and a level-24 Warrior has it.
@@ -1445,12 +1658,36 @@ module Content =
   let private partyRegen = 1
   let private mobRegen = 0
 
-  /// Out-of-combat regeneration, in basis points of the pool per Tick: 50 is
-  /// 0.5% a Tick, which at 20Hz is 10% a second — a party is whole again in the
-  /// ten seconds it takes to walk to the next room. Only the party regenerates;
-  /// a mob that heals up behind a corner would make a cleared room unwinnable.
-  let outOfCombatHealthBpPerTick = 50
-  let outOfCombatResourceBpPerTick = 75
+  /// Out-of-combat restoration is not a trickle: the party waits **five seconds** and
+  /// then gets the whole pool back, stepped at 10% a Tick so the bar visibly snaps up
+  /// instead of blinking. `outOfCombatRestTicks` is that wait — 100 Ticks at 20Hz.
+  ///
+  /// The restore is rounded **up**, and it has to be: a pool of 1073 HP regains 10 a
+  /// Tick under integer division and would need eleven Ticks to cover itself, so the
+  /// tenth Tick would leave the party a few points short and the "fully restored"
+  /// promise would quietly fail for every odd pool. Ceiling also keeps a point of
+  /// progress on pools too small to divide, where truncation would stall at zero.
+  let outOfCombatRestTicks = ticks 100
+
+  let outOfCombatHealthBpPerTick = 1000
+  let outOfCombatResourceBpPerTick = 1000
+
+  /// The gain is rounded **up**: ten percent of 1073 is 107, and ten such steps land at
+  /// 1070 — three points short of full — so the last Tick would leave the party
+  /// fractionally dirty and the "fully restored" promise would fail for every odd
+  /// pool. Ceiling also keeps a point of progress on pools too small to divide, where
+  /// truncation would stall at zero.
+  let outOfCombatHealthPerTick (maxHealth: int) =
+    max 1 ((maxHealth * outOfCombatHealthBpPerTick + 9999) / 10000)
+
+  let outOfCombatResourcePerTick (maxResource: int) =
+    max 1 ((maxResource * outOfCombatResourceBpPerTick + 9999) / 10000)
+
+  /// Vanilla's five-second rule, in Ticks. Regeneration is at its trickle while
+  /// this stands after a spell is paid for; it is not a duration in which the
+  /// character may not cast, it is the window that tells `SimTick` the caster has
+  /// not stopped yet.
+  let fiveSecondRule = secTicks 5.0
 
   let hero
     (id: int)
@@ -1474,6 +1711,7 @@ module Content =
       MaxHealth = hp
       Health = hp
       Pos = pos
+      Home = None
       Destination = None
       MoveTicksLeft = ticks 0
       MoveTicksTotal = ticks 0
@@ -1538,6 +1776,7 @@ module Content =
       MaxHealth = hp
       Health = hp
       Pos = pos
+      Home = Some pos
       Destination = None
       MoveTicksLeft = ticks 0
       MoveTicksTotal = ticks 0
@@ -2825,8 +3064,8 @@ module Content =
       ApPerAgility: int
       /// Rage and energy are fixed pools; mana is computed from Intellect.
       FixedPool: int option
-      /// The class's pre-raid best-in-slot outfit at 60 as (armour, stats) — what
-      /// the level-24 pieces grow into (`.pi/research/levelscale/bis-60.md`).
+      /// The class's Tier 1 / Molten Core outfit at 60 as (armour, stats) — what
+      /// the level-24 pieces grow into (`.pi/research/levelscale/raid-gear-60.md`).
       Gear60: int * (int * int * int * int * int)
       /// The build this character runs. `Talents.none` for everything that does
       /// not have one, which is every class but the four healers.
@@ -2896,8 +3135,8 @@ module Content =
   /// The last entry whose floor is at or below `level`; the first entry when the
   /// level is below every floor. Used for the weapons, whose floors are per class.
   ///
-  /// The last rung of each weapon ladder is the class's researched pre-raid
-  /// best-in-slot pick at level 60 (`.pi/research/levelscale/bis-60.md`), so a
+  /// The last rung of each weapon ladder is the class's researched raid pick at
+  /// level 60 (`.pi/research/levelscale/raid-gear-60.md`), so a
   /// level-60 party swings what the research says it wears. The Paladin's and
   /// Shaman's level-60 pick is a fast caster one-hander that would swing weaker
   /// than their level-40 weapon, so those two rungs keep its speed but carry the
@@ -2974,10 +3213,11 @@ module Content =
     // Spiritual Guidance adds a share of Spirit to every direct heal. It lands on
     // the entity so `resolveAbility` can add it without knowing about talents.
     let bonusHealing = s.Spirit * talents.SpiritToHealingBp / 10000
-    // shortcut: combat regeneration is a flat 1 mana a Tick, so Reflection's and
-    // Meditation's 15% floors away to nothing; give regen a fractional
-    // accumulator when Spirit is what drives it.
-    let regen = partyRegen * (10000 + talents.RegenBp) / 10000
+    // Meditation and Reflection are a share of regeneration, which is why the
+    // rate has to be Spirit-shaped for them to be worth anything at all: a flat
+    // point a Tick floors 15% away to nothing.
+    let spiritRegen = max 1 (s.Spirit * 4 / 100)
+    let regen = spiritRegen * (10000 + talents.RegenBp) / 10000
 
     {| MaxHealth = d.BaseHealth + pool s.Stamina 10
        MaxResource = defaultArg sheet.FixedPool (d.BaseMana + pool intellect 15)
@@ -3030,6 +3270,7 @@ module Content =
       MaxHealth = d.MaxHealth
       Health = d.MaxHealth
       Pos = pos
+      Home = None
       Destination = None
       MoveTicksLeft = ticks 0
       MoveTicksTotal = ticks 0
@@ -3104,6 +3345,7 @@ module Content =
         { Spell = name
           CostBp = 2500
           HealBp = 0
+          CritBp = 0
           CastTicksOff = ticks 0 } ]
 
   /// Shaman 0/5/46: Purification 5/5 (+10% healing), Improved Healing Wave 5/5
@@ -3130,6 +3372,7 @@ module Content =
           { Spell = "Healing Wave"
             CostBp = 0
             HealBp = 0
+            CritBp = 0
             CastTicksOff = secTicks 0.5 }
           :: totemDiscount }
 
@@ -3145,15 +3388,23 @@ module Content =
           [ { Spell = "Flash of Light"
               CostBp = 0
               HealBp = 1200
+              CritBp = 0
               CastTicksOff = ticks 0 } ] }
 
   /// Druid 5/0/46, Moonglow into Swiftmend: Gift of Nature 5/5 (+10% healing),
   /// Tranquil Spirit 5/5 (-10% Healing Touch mana), Improved Rejuvenation 3/3
-  /// (+15% Rejuvenation), Nature's Focus 5/5 (-70% pushback) and Reflection 3/3
-  /// (+15% mana regen while casting). Swiftmend is in the kit as a cooldown.
+  /// (+15% Rejuvenation), Nature's Focus 5/5 (-70% pushback), Reflection 3/3
+  /// (+15% mana regen while casting) and Improved Regrowth 5/5 (+50% crit chance
+  /// on Regrowth, which is the talent that makes Regrowth the Druid's crit heal
+  /// rather than a slow, expensive Rejuvenation). Swiftmend and Nature's
+  /// Swiftness are in the kit as cooldowns.
   ///
-  /// shortcut: Nature's Swiftness is a Balance-side talent and this build spends
-  /// nothing there, so the Druid's copy of the button is not in his kit.
+  /// The owner asked for Nature's Swiftness on the Druid after the L33 ladder
+  /// showed the class two seconds behind a Priest on every spike ("12 deaths
+  /// beside a Priest, 3 with a Priest in that seat", §"Balance status"), so the
+  /// button belongs here even though it is a Restoration talent the build reaches
+  /// by definition — 46 points in Restoration cannot miss an 11-point talent in
+  /// the same tree.
   let private druidTalents =
     { Talents.none with
         HealDoneBp = 1000
@@ -3162,10 +3413,17 @@ module Content =
           [ { Spell = "Healing Touch"
               CostBp = 1000
               HealBp = 0
+              CritBp = 0
               CastTicksOff = ticks 0 }
             { Spell = "Rejuvenation"
               CostBp = 0
               HealBp = 1500
+              CritBp = 0
+              CastTicksOff = ticks 0 }
+            { Spell = "Regrowth"
+              CostBp = 0
+              HealBp = 0
+              CritBp = 5000
               CastTicksOff = ticks 0 } ] }
 
   /// Priest 21/30/0, deep holy: Spiritual Healing 5/5 (+10% healing), Improved
@@ -3188,6 +3446,7 @@ module Content =
               { Spell = name
                 CostBp = 1500
                 HealBp = 0
+                CritBp = 0
                 CastTicksOff = ticks 0 } ] }
 
   /// Fold a build's per-spell lines into the kit: a talent that shortens a cast
@@ -3202,7 +3461,13 @@ module Content =
       { a with
           ResourceCost = a.ResourceCost * (10000 - Talents.costBp a.Name (heals a) t) / 10000
           CastTicks = max (ticks 0) (a.CastTicks - Talents.castOff a.Name t)
-          CooldownTicks = max (ticks 0) (a.CooldownTicks + Talents.cooldownOff a.Name t) })
+          CooldownTicks = max (ticks 0) (a.CooldownTicks + Talents.cooldownOff a.Name t)
+          // A tree that raises one spell's crit raises it on the ability, because
+          // the crit roll belongs to the heal that lands, not to the healer.
+          Effects =
+            match Talents.critBp a.Name t with
+            | 0 -> a.Effects
+            | bp -> a.Effects @ [ CritBonus bp ] })
 
   /// The four healer cooldowns, as single-rank abilities. It is the talent tree
   /// that hands each one over and not a trainer, so none of them carries a level:
@@ -3241,8 +3506,11 @@ module Content =
                                                   FreeMana = true
                                                   SureCrit = true }
 
-  /// Swiftmend: hand over what the Druid's own Rejuvenation had left and consume
-  /// it. The cost is 20% of base mana, and the cooldown is what keeps it honest.
+  /// Swiftmend: consume the Druid's own Rejuvenation or Regrowth on the target and
+  /// instantly heal 12 s of the first or 18 s of the second — a fixed amount, not the
+  /// healing left on the buff, so it is worth the same at the last tick as at the
+  /// first (`Aura.swiftmend`). The cost is 20% of base mana, and the cooldown is what
+  /// keeps it honest.
   let private swiftmend =
     { Name = "Swiftmend"
       CastTicks = ticks 0
@@ -3252,6 +3520,26 @@ module Content =
       Range = 8
       TargetKind = Ally
       Effects = [ ConsumeHealOverTime ] }
+
+  /// Innervate: the Druid's mana, given away. It is spent on whichever caster
+  /// has the deepest bar left to fill — the Priest in practice, the Paladin when
+  /// the Priest is already dead — and only in a fight long enough that the party
+  /// is going to run dry without it, which is what makes it a button with a
+  /// decision behind it rather than a fifth heal.
+  ///
+  /// Innervate: 1.12 reads "+400% mana regeneration for 20 s". That multiplies
+  /// whatever regeneration the target has, so it is worth five times as much to
+  /// a healer who stops casting — which is why the AI stops casting for it, and
+  /// why the effect is an aura rather than a lump of mana.
+  let innervate =
+    { Name = "Innervate"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 360.0
+      ResourceCost = 0
+      Interruptible = false
+      Range = 8
+      TargetKind = Ally
+      Effects = [ Innervate(secTicks 20.0, 40000) ] }
 
   /// Reincarnation: the Shaman's own corpse gets up again, which is why it is the
   /// one `Self` ability a dead member still casts. The cooldown is the whole point
@@ -3276,8 +3564,29 @@ module Content =
       TargetKind = Self
       Effects = [ Resurrect(40, 40) ] }
 
-  /// Rebirth: the only resurrection in the game that a *living* caster can put on
-  /// someone else mid-fight, which is what `Corpse` targeting is for. Rank 1's
+  /// Ancestral Spirit: the Shaman's resurrection, and the reason dying in a corner
+  /// is worth spending Reincarnation's thirty-minute cooldown. Corpse target, 2 s
+  /// cast, 40% of both pools. No cooldown of its own: the mana is the cost.
+  ///
+  /// The cost is an estimate: only the druid/mage/priest/rogue/warrior rank tables
+  /// were researched (`.pi/research/ranks/`), so there is no sourced Shaman number
+  /// to carry. 300 is a Warrior's Execute-scale spend, which is the price of the
+  /// button the run depends on rather than of a button cast on cooldown.
+  ///
+  /// shortcut: the out-of-combat rule is not enforced, as with `rebirth`.
+  let ancestralSpirit =
+    { Name = "Ancestral Spirit"
+      CastTicks = secTicks 2.0
+      CooldownTicks = ticks 0
+      ResourceCost = 300
+      Interruptible = true
+      Range = 8
+      TargetKind = Corpse
+      Effects = [ Resurrect(40, 40) ] }
+
+  /// Rebirth: one of the two resurrections a *living* caster can put on someone
+  /// else mid-fight, which is what `Corpse` targeting is for (the other is the
+  /// Shaman's `ancestralSpirit`). Rank 1's
   /// numbers from `.pi/research/ranks/druid.md:97`: 301 mana, 2 s cast, 30 min
   /// cooldown, 30 yd, 400 health and 700 mana restored. `Resurrect` restores
   /// fractions of the target's own pool, so those flat amounts are carried as 45%
@@ -3289,7 +3598,7 @@ module Content =
   /// spell exists for; the corpse's ghost walk and the reaction window are not.
   let rebirth =
     { Name = "Rebirth"
-      CastTicks = ticks 20
+      CastTicks = secTicks 2.0
       CooldownTicks = secTicks 1800.0
       ResourceCost = 301
       Interruptible = true
@@ -3331,7 +3640,7 @@ module Content =
             gear "Shadowfang" (Some 19) 0 (0, 0, 0, 0, 0)
             shieldPiece "Tower Shield" (Some 24) 483 (0, 0, 0, 0, 0) ]
 
-        Gear60 = (6523, (119, 34, 280, 10, 16))
+        Gear60 = (8068, (161, 21, 257, 0, 0))
         ApPerStrength = 2
         ApPerAgility = 0
         FixedPool = Some 100 }
@@ -3344,7 +3653,7 @@ module Content =
         level
         ([ tauntRanks; heroicStrikeRanks; sunderArmorRanks ]
          @ (if shielded then [ shieldBashRanks; shieldBlockRanks; shieldWallRanks ] else [])
-         @ [ chargeRanks; disarmRanks; executeRanks ])
+         @ [ chargeRanks; interceptRanks; disarmRanks; executeRanks; shootRanks ])
 
     heroStats
       buffs
@@ -3362,7 +3671,7 @@ module Content =
         (40, { Min = 87; Max = 131; Ticks = secTicks 2.8; Range = 1 })
         (60, { Min = 53; Max = 100; Ticks = secTicks 1.6; Range = 1 })
         ]
-      Mana
+      Rage
       tankStanceBp
       abilities
       { X = 1; Y = 5 }
@@ -3393,7 +3702,7 @@ module Content =
             gear "Seal of Wrynn" None 0 (3, 3, 4, 4, 3)
             gear "Staff of the Blessed Seer" (Some 18) 0 (0, 0, 2, 0, 3) ]
 
-        Gear60 = (542, (8, 11, 133, 208, 133))
+        Gear60 = (729, (0, 0, 165, 263, 149))
         Talents = priestTalents
         ApPerStrength = 1
         ApPerAgility = 0
@@ -3442,7 +3751,7 @@ module Content =
             gear "Assassin's Blade" (Some 19) 0 (3, 4, 0, 0, 0)
             gear "Assassin's Blade (off hand)" (Some 19) 0 (3, 4, 0, 0, 0) ]
 
-        Gear60 = (1272, (55, 251, 173, 8, 5))
+        Gear60 = (1488, (59, 236, 182, 0, 0))
         ApPerStrength = 1
         ApPerAgility = 1
         FixedPool = Some 100 }
@@ -3457,7 +3766,7 @@ module Content =
       partyThreatBp
       (AbilityDef.kitAt
         level
-        [ sinisterStrike; backstab; eviscerate; gouge; kick; sap; cheapShot; kidneyShot ])
+        [ sinisterStrike; backstab; ambush; eviscerate; gouge; kick; sap; cheapShot; kidneyShot ])
       { X = 1; Y = 7 }
     |> fun r ->
       // A second Assassin's Blade in the off hand: dual wield is learned at 10.
@@ -3494,7 +3803,7 @@ module Content =
             gear "Rod of the Sleepwalker" (Some 24) 0 (0, 0, 0, 11, 10)
             gear "Gravestone Scepter" None 0 (0, 0, 0, 0, 1) ]
 
-        Gear60 = (787, (12, 3, 159, 237, 42))
+        Gear60 = (742, (0, 0, 198, 258, 128))
         ApPerStrength = 0
         ApPerAgility = 0
         FixedPool = None }
@@ -3542,7 +3851,7 @@ module Content =
             gear "Lavishly Jeweled Ring" (Some 17) 0 (0, 2, 0, 6, 0)
             gear "Staff of the Blessed Seer" (Some 18) 0 (0, 0, 2, 0, 3) ]
 
-        Gear60 = (614, (8, 8, 127, 212, 161))
+        Gear60 = (1376, (0, 0, 196, 261, 158))
         Talents = druidTalents
         ApPerStrength = 1
         ApPerAgility = 0
@@ -3566,7 +3875,7 @@ module Content =
             entanglingRootsRanks
             wrathRanks
             moonfireRanks ]
-        @ [ swiftmend; rebirth ]))
+        @ [ swiftmend; naturesSwiftness; rebirth; innervate ]))
       { X = 2; Y = 7 }
 
   /// Human Paladin: mail at 24 — plate is trained at 40 — with Verigan's Fist
@@ -3597,7 +3906,7 @@ module Content =
             gear "Plains Ring" (Some 24) 0 (0, 0, 8, 3, 0)
             gear "Verigan's Fist" None 0 (0, 0, 7, 6, 12) ]
 
-        Gear60 = (3162, (8, 13, 137, 185, 177))
+        Gear60 = (8223, (74, 0, 203, 209, 113))
         Talents = paladinTalents
         ApPerStrength = 2
         ApPerAgility = 0
@@ -3629,9 +3938,9 @@ module Content =
   /// party's passives, which is the lowest armour of the nine and the largest
   /// mana pool.
   ///
-  /// shortcut: no demon. `Summon` and `SummonSpec` exist and the Imp/Voidwalker
-  /// are level-24 summons, but the Summon path has no caller yet, so adding a
-  /// pet here would be its first test. Life Tap has no effect in the vocabulary
+  /// shortcut: no demon. `Summon`'s only caller is the hunter's pet, so the Imp
+  /// and Voidwalker are still out, and adding a demon here would be the second.
+  /// Life Tap has no effect in the vocabulary
   /// (nothing moves health into mana) and is left out for the same reason.
   let private warlock (buffs: PartyBuffKind list) (level: int) (id: int) =
     heroStats
@@ -3655,7 +3964,7 @@ module Content =
             gear "Staff of the Shade" (Some 22) 0 (0, 0, 0, 0, 0)
             gear "Gravestone Scepter" None 0 (0, 0, 0, 0, 1) ]
 
-        Gear60 = (787, (12, 3, 159, 237, 42))
+        Gear60 = (6079, (0, 0, 178, 228, 133))
         ApPerStrength = 0
         ApPerAgility = 0
         FixedPool = None }
@@ -3756,7 +4065,7 @@ module Content =
             gear "Lavishly Jeweled Ring" (Some 17) 0 (0, 2, 0, 6, 0)
             gear "Staff of the Blessed Seer" (Some 18) 0 (0, 0, 2, 0, 3) ]
 
-        Gear60 = (3162, (0, 5, 139, 188, 169))
+        Gear60 = (729, (0, 0, 234, 227, 72))
         Talents = shamanTalents
         ApPerStrength = 1
         ApPerAgility = 0
@@ -3776,7 +4085,7 @@ module Content =
           level
           [ shamanLightningBoltRanks; earthShockRanks; flameShockRanks; shamanHealingWaveRanks ]
         @ totemKit shamanTalents level
-        @ [ naturesSwiftness; reincarnation ]))
+        @ [ naturesSwiftness; reincarnation; ancestralSpirit ]))
       { X = 3; Y = 7 }
 
   /// Night Elf Hunter: level-24 leather only — hunters too train mail at 40 — on
@@ -3787,9 +4096,9 @@ module Content =
   /// Arrow, +38.8 from 302 ranged attack power) rather than a bare weapon, because
   /// vanilla's ranged AP formula is `level x 2 + agility x 2 - 20` and the level
   /// term and the offset cannot be expressed through `ApPerAgility`.
-  /// shortcut: no pet. `Summon`/`SummonSpec` still have no caller, and a hunter
-  /// without its pet loses Growl, Bite and Mend Pet, so the kit is the shots
-  /// alone. Aspects, Hunter's Mark, Multi-Shot, Concussive Shot and Wing Clip are
+  /// shortcut: no pet. Vanilla's Growl, Bite and Claw have no home in the
+  /// vocabulary, so the pet is a plain swing rather than a threat-generating
+  /// companion. Aspects, Hunter's Mark, Multi-Shot, Concussive Shot and Wing Clip are
   /// also out: nothing in the vocabulary carries a ranged-attack-power buff, a
   /// multi-target shot, or a movement slow — `Effect` has stun, root, sleep and
   /// disarm, but no snare of any strength.
@@ -3817,7 +4126,7 @@ module Content =
             gear "Ring of Precision" (Some 20) 0 (0, 6, 0, 0, 3)
             gear "Protector's Band" (Some 18) 0 (4, 4, 2, 0, 0) ]
 
-        Gear60 = (1604, (43, 256, 188, 25, 5))
+        Gear60 = (2947, (0, 163, 192, 52, 40))
         ApPerStrength = 0
         ApPerAgility = 0
         FixedPool = None }
@@ -3830,7 +4139,17 @@ module Content =
         ]
       Mana
       partyThreatBp
-      (AbilityDef.kitAt level [ arcaneShotRanks; serpentStingRanks; raptorStrikeRanks ])
+      (AbilityDef.kitAt
+        level
+        [ arcaneShotRanks
+          serpentStingRanks
+          raptorStrikeRanks
+          aimedShotRanks
+          scatterShot
+          multiShot
+          viperSting
+          summonPetRanks
+          mendPet ])
       { X = 3; Y = 8 }
 
   /// Every class the sim can build, by the name a roster entry uses. None means
@@ -4170,6 +4489,7 @@ module Content =
       List.map2 (fun (e: Entity) p -> { e with Pos = p }) (partyOf defaultRoster level) spots @ creatures
 
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = Grid.ofRows gullyMap
       Entities = entities
       Pending = []
@@ -4313,6 +4633,7 @@ module Content =
           | None -> ()))
 
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = layout.Grid
       Entities = party @ mobs
       Pending = []
@@ -4466,6 +4787,7 @@ module Content =
         yield! place "dreamers-rock-east" mutanus |> Option.toList ]
 
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = grid
       Entities = party @ mobs
       Pending = []
@@ -4949,6 +5271,7 @@ module Content =
         partyTiles
 
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = grid
       Entities = party @ mobs
       Pending = []

@@ -182,6 +182,9 @@ type Aura =
   | Rooted of remaining: int<tick>
   /// Polymorph. Cannot act, breaks on any damage, and heals while transformed.
   | Polymorphed of remaining: int<tick>
+  /// Scatter Shot. No casting at all while it lasts, instant abilities included,
+  /// so a silenced caster cannot simply pick a cheaper spell and carry on.
+  | Silenced of remaining: int<tick>
   /// A heal-over-time. Heals `healPerTick` every Tick, and remembers which spell
   /// put it there: Renew, Rejuvenation and Regrowth are the same kind of effect
   /// and they stack, so the source is what tells them apart.
@@ -191,6 +194,23 @@ type Aura =
   | Sundered of remaining: int<tick> * armorReduction: int
   /// A damage-over-time. Deals `damagePerTick` every Tick, unmitigated.
   | Corrupted of remaining: int<tick> * damagePerTick: int
+  /// Deadly Poison: a damage-over-time that stacks instead of refreshing, because
+  /// the fifth dose is worth five times the first. The duration is shared; the
+  /// stacks are what the Tick multiplies by.
+  | DeadlyPoisoned of remaining: int<tick> * damagePerTick: int * stacks: int
+  /// Wound Poison: every heal the holder receives is cut by `reductionBp` per
+  /// stack, up to five. It stacks for the same reason Deadly Poison does — the
+  /// Rogue's job against a healer is to keep landing it — and it is the only
+  /// thing in the model that makes healing itself weaker rather than cheaper.
+  | Wounded of remaining: int<tick> * reductionBp: int * stacks: int
+  /// Mind-numbing Poison: the holder's casts take longer. The one poison that
+  /// changes what a caster can do rather than how fast it dies.
+  | Numbed of remaining: int<tick> * increaseBp: int
+  /// Crippling Poison: the holder crosses a tile slower, which is the whole of
+  /// what a snare is in a game where movement is a per-tile cost.
+  | Crippled of remaining: int<tick> * slowBp: int
+  /// Viper Sting. Drains `perTick` of the holder's resource every Tick.
+  | Drained of remaining: int<tick> * perTick: int
   /// Disarm. The holder cannot swing its auto-attack while this lasts.
   | Disarmed of remaining: int<tick>
   /// Shield Block: the holder blocks far more of what swings at it.
@@ -214,6 +234,17 @@ type Aura =
   /// waiting to be spent on the next spell. It falls off when it is used and
   /// when it times out.
   | Empowered of remaining: int<tick> * empower: Empower
+  /// Vanilla's five-second rule: time since the last spell left this character's
+  /// hands. While it stands, regeneration is the trickle rather than the rate —
+  /// which is why a caster that stops casting gets its mana back, and why an
+  /// innervated healer is told to stop.
+  | RecentlyCast of remaining: int<tick>
+  /// Innervate, held for its duration rather than paid in one lump: the holder's
+  /// regeneration is multiplied by `regenBp` (40000 = five times) while it
+  /// stands. Multiplying *whatever the holder has* is the point of the shape —
+  /// a target that keeps casting multiplies the five-second trickle and gets
+  /// nearly nothing, which is what vanilla's +400% does to a casting priest.
+  | Innervated of remaining: int<tick> * regenBp: int
 
 /// Every case of `Aura` is matched in exactly one place — here. Everywhere else
 /// asks this module a question, so adding an aura breaks compilation in this
@@ -228,9 +259,15 @@ module Aura =
     | Stunned r when r > ticks 1 -> Some(Stunned(r - ticks 1))
     | Rooted r when r > ticks 1 -> Some(Rooted(r - ticks 1))
     | Polymorphed r when r > ticks 1 -> Some(Polymorphed(r - ticks 1))
+    | Silenced r when r > ticks 1 -> Some(Silenced(r - ticks 1))
     | Rejuvenation(r, n, s) when r > ticks 1 -> Some(Rejuvenation(r - ticks 1, n, s))
     | Sundered(r, reduction) when r > ticks 1 -> Some(Sundered(r - ticks 1, reduction))
     | Corrupted(r, n) when r > ticks 1 -> Some(Corrupted(r - ticks 1, n))
+    | DeadlyPoisoned(r, n, s) when r > ticks 1 -> Some(DeadlyPoisoned(r - ticks 1, n, s))
+    | Wounded(r, bp, s) when r > ticks 1 -> Some(Wounded(r - ticks 1, bp, s))
+    | Numbed(r, bp) when r > ticks 1 -> Some(Numbed(r - ticks 1, bp))
+    | Crippled(r, bp) when r > ticks 1 -> Some(Crippled(r - ticks 1, bp))
+    | Drained(r, n) when r > ticks 1 -> Some(Drained(r - ticks 1, n))
     | Disarmed r when r > ticks 1 -> Some(Disarmed(r - ticks 1))
     | Blocking r when r > ticks 1 -> Some(Blocking(r - ticks 1))
     | ShieldWalled(r, bp) when r > ticks 1 -> Some(ShieldWalled(r - ticks 1, bp))
@@ -238,6 +275,8 @@ module Aura =
     | HealingWay(r, n) when r > ticks 1 -> Some(HealingWay(r - ticks 1, n))
     | Inspired(r, bp) when r > ticks 1 -> Some(Inspired(r - ticks 1, bp))
     | Empowered(r, e) when r > ticks 1 -> Some(Empowered(r - ticks 1, e))
+    | RecentlyCast r when r > ticks 1 -> Some(RecentlyCast(r - ticks 1))
+    | Innervated(r, bp) when r > ticks 1 -> Some(Innervated(r - ticks 1, bp))
     | _ -> None
 
   let describe =
@@ -247,9 +286,15 @@ module Aura =
     | Stunned r -> sprintf "stun(%d)" r
     | Rooted r -> sprintf "root(%d)" r
     | Polymorphed r -> sprintf "poly(%d)" r
+    | Silenced r -> sprintf "silence(%d)" r
+    | Drained(r, n) -> sprintf "drained(%d,%d)" r n
     | Rejuvenation(r, n, s) -> sprintf "rejuv(%d,+%d,%s)" r n s
     | Sundered(r, reduction) -> sprintf "sunder(%d,-%d)" r reduction
     | Corrupted(r, n) -> sprintf "dot(%d,%d)" r n
+    | DeadlyPoisoned(r, n, s) -> sprintf "deadly(%d,%d,x%d)" r n s
+    | Wounded(r, bp, s) -> sprintf "wound(%d,-%d,x%d)" r bp s
+    | Numbed(r, bp) -> sprintf "numb(%d,+%d)" r bp
+    | Crippled(r, bp) -> sprintf "cripple(%d,-%d)" r bp
     | Disarmed r -> sprintf "disarm(%d)" r
     | Blocking r -> sprintf "block(%d)" r
     | ShieldWalled(r, bp) -> sprintf "wall(%d,-%d)" r bp
@@ -258,6 +303,8 @@ module Aura =
     | Inspired(r, bp) -> sprintf "inspired(%d,+%d)" r bp
     | Empowered(r, e) ->
       sprintf "empowered(%d,%s%s%s)" r (if e.Instant then "i" else "") (if e.FreeMana then "f" else "") (if e.SureCrit then "c" else "")
+    | RecentlyCast r -> sprintf "recent(%d)" r
+    | Innervated(r, bp) -> sprintf "innervated(%d,x%d)" r bp
 
   /// The name a player sees, short enough to fit over a sprite.
   let label =
@@ -267,9 +314,15 @@ module Aura =
     | Stunned _ -> "STUN"
     | Rooted _ -> "ROOTED"
     | Polymorphed _ -> "POLYMORPH"
+    | Silenced _ -> "SILENCED"
+    | Drained _ -> "DRAINED"
     | Rejuvenation(_, _, source) -> source
     | Sundered _ -> "SUNDER"
     | Corrupted _ -> "CORRUPTION"
+    | DeadlyPoisoned _ -> "DEADLY POISON"
+    | Wounded _ -> "WOUND POISON"
+    | Numbed _ -> "NUMBED"
+    | Crippled _ -> "CRIPPLED"
     | Disarmed _ -> "DISARMED"
     | Blocking _ -> "BLOCK"
     | ShieldWalled _ -> "SHIELD WALL"
@@ -277,6 +330,8 @@ module Aura =
     | HealingWay _ -> "HEALING WAY"
     | Inspired _ -> "INSPIRED"
     | Empowered _ -> "EMPOWERED"
+    | RecentlyCast _ -> "CASTING"
+    | Innervated _ -> "INNERVATE"
 
   /// True when the aura helps its holder rather than hurting it.
   let isHelpful =
@@ -289,7 +344,6 @@ module Aura =
     | Inspired _
     | Empowered _ -> true
     | _ -> false
-
   /// Ticks left before it falls off.
   let remaining =
     function
@@ -300,18 +354,64 @@ module Aura =
     | Disarmed r -> r
     | SerpentForm(r, _)
     | Rejuvenation(r, _ , _)
+    | Silenced r
     | Sundered(r, _)
     | Corrupted(r, _)
+    | Drained(r, _)
     | Blocking r -> r
     | TotemBoon(r, _, _, _)
     | ShieldWalled(r, _)
     | HealingWay(r, _)
     | Inspired(r, _)
     | Empowered(r, _) -> r
+    | RecentlyCast r
+    | Innervated(r, _)
+    | DeadlyPoisoned(r, _, _)
+    | Wounded(r, _, _)
+    | Numbed(r, _)
+    | Crippled(r, _) -> r
 
   /// Whole seconds left, rounded up so a live aura never reads "0s".
   let remainingSeconds (a: Aura) : int =
     int (Math.Ceiling(float (int (remaining a)) / float tickRate))
+
+  // --- Poison readers ------------------------------------------------------
+  // Rogue poisons are the one aura family the engine reads for their *magnitude*
+  // rather than as a flag, so each gets a reader here and the call sites sum
+  // over the holder's auras.
+
+  /// Deadly Poison's damage for one Tick, already multiplied by its stacks.
+  let poisonTick =
+    function
+    | DeadlyPoisoned(_, perTick, stacks) -> perTick * stacks
+    | _ -> 0
+
+  /// Wound Poison's cut to healing received, summed over its stacks. The
+  /// five-stack cap is enforced where the aura is applied, not here.
+  let healingReceivedReductionBp =
+    function
+    | Wounded(_, bp, stacks) -> bp * stacks
+    | _ -> 0
+
+  /// Mind-numbing: how much longer the holder's casts take, in basis points.
+  let castTimeIncreaseBp =
+    function
+    | Numbed(_, bp) -> bp
+    | _ -> 0
+
+  /// Crippling: how much slower the holder crosses a tile, in basis points.
+  let movementSlowBp =
+    function
+    | Crippled(_, bp) -> bp
+    | _ -> 0
+
+  /// Stack count of a stacking aura; 1 for one that does not stack.
+  let stacksOf =
+    function
+    | DeadlyPoisoned(_, _, n) -> n
+    | Wounded(_, _, n) -> n
+    | HealingWay(_, n) -> n
+    | _ -> 1
 
   let isSleeping =
     function
@@ -323,6 +423,11 @@ module Aura =
     | SerpentForm _ -> true
     | _ -> false
 
+  let isSilenced =
+    function
+    | Silenced _ -> true
+    | _ -> false
+
   /// True when this aura stops its holder acting at all.
   let preventsActing =
     function
@@ -332,7 +437,7 @@ module Aura =
   /// True when this aura stops its holder casting.
   let preventsCasting =
     function
-    | Sleeping _ | SerpentForm _ | Stunned _ | Polymorphed _ -> true
+    | Sleeping _ | SerpentForm _ | Stunned _ | Polymorphed _ | Silenced _ -> true
     | _ -> false
 
   /// True when this aura stops its holder moving.
@@ -369,6 +474,8 @@ module Aura =
       match a with
       | Rejuvenation(r, _, _) -> r
       | Corrupted(r, _) -> r
+      | DeadlyPoisoned(r, _, _) -> r
+      | Drained(r, _) -> r
       | Polymorphed r -> r
       | _ -> ticks 0
 
@@ -413,13 +520,34 @@ module Aura =
         | _ -> acc)
       (ticks 0)
 
-  /// Healing still to come from the heal-over-time a named spell put up: what
-  /// Swiftmend hands over at once when it consumes one.
+  /// Healing still to come from the heal-over-time a named spell put up.
   let healOverTimePendingFor (source: string) (auras: Aura list) =
     auras
     |> List.sumBy (function
       | Rejuvenation(r, n, s) when s = source -> (r / secTicks 1.0) * n
       | _ -> 0)
+
+  /// What Swiftmend hands over at once, and which buff it eats: 12 seconds of the
+  /// target's Rejuvenation, or 18 seconds of its Regrowth — vanilla's numbers, and
+  /// deliberately **not** the healing still pending. That difference is the whole
+  /// play: a Swiftmend pressed at the last tick pays the same as one pressed at the
+  /// first, so the HoT should be left to tick down and only banked at its end. The
+  /// Rejuvenation is eaten first, as in the game, because the Druid re-casts it
+  /// cheaper than Regrowth's up-front heal.
+  let swiftmend (auras: Aura list) =
+    let secondsOn source =
+      auras
+      |> List.fold
+        (fun acc aura ->
+          match aura with
+          | Rejuvenation(_, n, s) when s = source -> max acc n
+          | _ -> acc)
+        0
+
+    match secondsOn "Rejuvenation", secondsOn "Regrowth" with
+    | 0, 0 -> None
+    | rejuv, _ when rejuv > 0 -> Some("Rejuvenation", rejuv * (secTicks 12.0 / secTicks 1.0))
+    | _, regrowth -> Some("Regrowth", regrowth * (secTicks 18.0 / secTicks 1.0))
 
   /// A key grouping auras of the same kind, so re-applying refreshes instead of
   /// stacking. Exhaustive, like everything here.
@@ -440,6 +568,14 @@ module Aura =
     | HealingWay _ -> 11
     | Inspired _ -> 12
     | Empowered _ -> 13
+    | Silenced _ -> 14
+    | Drained _ -> 15
+    | RecentlyCast _ -> 16
+    | Innervated _ -> 17
+    | DeadlyPoisoned _ -> 18
+    | Wounded _ -> 19
+    | Numbed _ -> 20
+    | Crippled _ -> 21
 
   /// Does casting `newer` overwrite `older`?
   let replaces (older: Aura) (newer: Aura) =
@@ -475,6 +611,13 @@ module Aura =
   let flatDamagePerTick =
     function
     | Corrupted(_, n) -> n
+    | _ -> 0
+
+  /// Resource drained per firing Tick, summed over auras. Viper Sting is the only
+  /// one, so this is zero or one number.
+  let flatDrainPerTick =
+    function
+    | Drained(_, n) -> n
     | _ -> 0
 
   /// True when this aura stops its holder swinging its auto-attack.
@@ -550,6 +693,19 @@ type TotemPulse =
   /// each.
   | AgilityBoon of amount: int
 
+/// Which totem slot a pulse occupies. A Shaman drops one totem per slot and a
+/// new one overrides what stood there — Mana Tide replaces Mana Spring rather
+/// than standing beside it — so the slot belongs to the pulse, not to a name list
+/// the AI keeps in parallel with its own data.
+module TotemSlot =
+  let ofPulse (p: TotemPulse) =
+    match p with
+    | ArmorBoon _ -> 0 (* earth *)
+    | AgilityBoon _ -> 1 (* air *)
+    | Heals _
+    | RestoresMana _
+    | ManaFraction _ -> 2 (* water *)
+
 /// A Shaman's totem: what it gives, how often, and how far. A totem is an
 /// ordinary Entity — it has health, a tile and a lifetime — and this is the only
 /// thing that tells the tick loop its kind.
@@ -593,10 +749,29 @@ type Effect =
   /// (10000 = 100%), plus its Strength bonus and a flat `bonus`. Physical, so
   /// it runs the same dodge/block/armour pipeline a swing does.
   | WeaponDamage of multiplierBp: int * bonus: int
+  /// Multi-Shot: weapon damage to the target and to up to `maxTargets - 1` other
+  /// hostiles within 8 tiles of it. Vanilla's r1 fires at 3 targets for weapon
+  /// damage each, no flat bonus (`.pi/research/level24/hunter.md`, Multi-Shot row).
+  | MultiShot of maxTargets: int
   /// Spell damage, mitigated by nothing (Q2a).
   | SpellDamage of min: int * max: int
   | Heal of min: int * max: int
+  /// Mana handed to a friendly target as a share of \emph{its own} pool (basis
+  /// points, 10000 = the whole bar). Innervate: vanilla models it as +400%
+  /// regeneration for twenty seconds, which is about a fifth of a Priest's pool,
+  /// and this grants that fifth once. A pool that refills over a duration and one
+  /// that refills at once end a fight the same way, and only one of them needs a
+  /// per-Tick aura.
+  /// Innervate: the target's mana regeneration is multiplied for a duration, and
+  /// it is multiplied *as it stands* — a caster who keeps casting multiplies the
+  /// five-second trickle and gains almost nothing, which is why the AI tells an
+  /// innervated caster to stop.
+  | Innervate of duration: int<tick> * regenBp: int
   | Interrupt
+  /// Scatter Shot's daze. The target cannot start any cast — instant abilities
+  /// included — for `duration`. Unlike Interrupt it does not care what the target
+  /// was already doing, so it also stops a caster that had not started yet.
+  | Silence of duration: int<tick>
   | Sleep of duration: int<tick>
   | Shapeshift of form: Form * duration: int<tick> * bonusDamage: int
   | Taunt
@@ -606,6 +781,11 @@ type Effect =
   /// A buff on the caster that changes the next spell it lands: Nature's
   /// Swiftness, Divine Favor, Inner Focus (`.pi/research/levelscale/healer-procs.md`).
   | Empowers of duration: int<tick> * empower: Empower
+  /// This ability's own crit chance, above the caster's (Improved Regrowth's +50%
+  /// on Regrowth). A crit heal is worth half again as much, so this is a healing
+  /// talent; it sits on the ability because the tree raises one spell, not the
+  /// caster.
+  | CritBonus of bp: int
   /// Swiftmend: heal for what the target's heal-over-time had left, and consume
   /// it. A heal, so it takes the healer's healing bonus like any other.
   | ConsumeHealOverTime
@@ -624,8 +804,18 @@ type Effect =
   | Threat of amount: int
   /// Damage-over-time: deal `damagePerTick` every Tick for `duration`, unmitigated.
   | DamageOverTime of duration: int<tick> * damagePerTick: int
+  /// Viper Sting: drain `amountPerTick` of the target's resource every Tick for
+  /// `duration`. A caster with an empty pool cannot pay for a cast, so on a
+  /// mana-using mob this is a throughput cut, not a damage ability — which is
+  /// what a hunter without a kick needs against a caster it cannot reach.
+  | DrainResource of duration: int<tick> * amountPerTick: int
   /// Charge: leap to a free tile beside the target.
   | Charge
+  /// Intercept: the same leap, for a Warrior already in the fight. Separate from
+  /// `Charge` because the two are opposites — Charge only works out of combat and
+  /// *grants* rage, Intercept works in combat and *costs* it — and the engine has
+  /// to enforce the first rule, not just the AI.
+  | Intercept
   /// Disarm: the target cannot swing its auto-attack for `duration`.
   | Disarm of duration: int<tick>
   /// Shield Block: raise the caster's block chance while it lasts.
@@ -875,6 +1065,8 @@ type SpellTalent =
     CostBp: int
     /// Percent added to this spell's heal, in basis points.
     HealBp: int
+    /// Percent added to this spell's crit chance, in basis points.
+    CritBp: int
     /// Ticks taken off this spell's cast time.
     CastTicksOff: int<tick> }
 
@@ -951,6 +1143,11 @@ module Talents =
   /// Ticks off one spell's cast time.
   let castOff (name: string) (t: Talents) =
     spell name t |> Option.map (fun s -> s.CastTicksOff) |> Option.defaultValue (ticks 0)
+
+  /// Percent one spell's crit chance is raised by, in basis points (Improved
+  /// Regrowth's half again on Regrowth). On the spell, not the caster.
+  let critBp (name: string) (t: Talents) =
+    spell name t |> Option.map (fun s -> s.CritBp) |> Option.defaultValue 0
 
   /// Ticks off one spell's cooldown.
   let cooldownOff (name: string) (t: Talents) =
@@ -1061,6 +1258,12 @@ type Entity =
     /// False until something engages it; the threat table starts at zero on
     /// entering combat.
     Engaged: bool
+    /// Where this Hostile stands when nothing has stirred it, and where a lost
+    /// pull puts it back. A body's distance from every mob's home is what decides
+    /// whether the room it just lost can see it again, so this is the anchor the
+    /// Shaman's death spot is measured against. `None` on Party members: a hero
+    /// has no spawn point to be sent back to.
+    Home: Pos option
     /// Raptors call for help rather than dying quietly. A percentage of max
     /// health, not an absolute value.
     CallForHelpBelowHealthPct: int option
@@ -1170,6 +1373,13 @@ module Quest =
 
 type World =
   { Tick: int<tick>
+    /// Ticks the party has spent continuously out of combat, reset the moment a
+    /// hostile engages. Out-of-combat regeneration is not a trickle: after five
+    /// seconds of rest the whole party is restored at once (see
+    /// `SimTick.advanceOutOfCombatRegen`). Lives on the World rather than on each
+    /// Entity because `SimState.inCombat` is itself a party-wide question — there
+    /// is one fight, not one per member, so there is one clock.
+    RestTicks: int<tick>
     Grid: Grid
     Entities: Entity list
     /// Issued but not yet applied, in issue order.

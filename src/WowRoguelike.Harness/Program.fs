@@ -13,8 +13,9 @@ let private usage () =
   printfn "sim maps                   render the Wailing Caverns rooms extracted from images/"
   printfn "sim wc                     render the stitched Wailing Caverns dungeon"
   printfn "sim sm [wing] [min|median|max]  render a Scarlet Monastery wing at one difficulty"
+  printfn "sim attrib [wing] [min|median|max] [maxTicks]  direct damage and healing by ability and caster"
   printfn "sim runs [n] [maxTicks]     run n seeds and summarise outcomes"
-  printfn "sim comps [n] [--level L]  party compositions through three rounds of healer/DPS swaps"
+  printfn "sim comps [n] [--level L]  party compositions through four rounds of healer/DPS swaps"
   printfn "sim snapshots [n]           one stable line per seed, the snapshot test's input"
   printfn "sim story [-i]             play the Wailing Caverns story (auto-picks choices)"
 
@@ -84,11 +85,16 @@ let private runs (n: int) (maxTicks: int) =
 /// number in Bench and `sim runs` is the default Warrior/Priest/Rogue/Mage/Druid
 /// party, so none of them says whether any other five are playable.
 ///
-/// Three rounds, each five members with a Warrior in front:
+/// Four rounds, each five members with a Warrior in front:
 ///   1. one healer plus Mage/Rogue/Warlock, once per healer, to rank the healers;
 ///   2. the winning healer plus each other healer, to see if a healing pair beats it;
 ///   3. the winning healer with the Rogue swapped for a Hunter, whose long range
-///      opens the pulls the Rogue has to walk into.
+///      opens the pulls the Rogue has to walk into;
+///   4. the winning healer with each three of the four damage dealers behind it.
+///
+/// Every roster below seats five different classes. A repeated class measures that
+/// class against itself, which is no comparison at all — it just weights the party
+/// toward one kit — so `report` refuses a roster with a duplicate in it.
 /// `--level L` seats every member at level L instead of the level the map seated
 /// them at, which is how the four healers are compared at level 60: at 60 the stats
 /// are the researched Gear60 sheet and the kit is the top rank of every ladder. The
@@ -97,11 +103,15 @@ let private runs (n: int) (maxTicks: int) =
 let private comps (seedCount: int) (level: int option) =
   let seeds = [ 1UL .. uint64 seedCount ]
 
+  // The three built wings at their median: the target level the balance question
+  // is asked at, and the level the party is seated at unless --level overrides it.
+  // Cathedral has no content yet, so it is not a balance target.
   let maps =
-    [ "gully", (fun (s: uint64) -> Content.gully s), 8000
-      "graveyard",
-      (fun (s: uint64) -> Content.scarletMonasteryAt "graveyard" Content.Median s),
-      24000 ]
+    Content.scarletWings
+    |> List.filter (fun w -> w.Name <> "cathedral")
+    |> List.map (fun w ->
+      let budget = if w.Name = "graveyard" then 24000 else 32000
+      w.Name, (fun (s: uint64) -> Content.scarletMonasteryAt w.Name Content.Median s), w.Median, budget)
 
   // The scripted party, not the player: these numbers are the floor a composition
   // sets under a player, not a verdict on what a player could do with it.
@@ -114,14 +124,12 @@ let private comps (seedCount: int) (level: int option) =
 
     x
 
-  let seat (roster: string list) (w: World) =
-    match level with
-    | Some l -> Content.withRosterAt l roster w
-    | None -> Content.withRoster roster w
+  let seat (roster: string list) (at: int) (w: World) =
+    Content.withRosterAt (level |> Option.defaultValue at) roster w
 
-  let measure (roster: string list) (make: uint64 -> World) maxTicks =
+  let measure (roster: string list) (make: uint64 -> World) (at: int) maxTicks =
     let results =
-      seeds |> List.map (fun s -> play (seat roster (make s)) maxTicks)
+      seeds |> List.map (fun s -> play (seat roster at (make s)) maxTicks)
 
     let count o =
       results |> List.filter (fun w -> SimState.outcome w = o) |> List.length
@@ -131,23 +139,50 @@ let private comps (seedCount: int) (level: int option) =
     let alive =
       results |> List.map (fun w -> float (SimState.aliveParty w |> List.length)) |> List.average
 
-    count EncounterCleared, count PartyWiped, List.item (List.length seeds / 2) ticks, alive
+    // Per seat, averaged over the seeds: share of the resource pool left when the
+    // run ended, and how often that seat finished dead. A composition that stalls
+    // on empty pools is a sustain problem; one that wipes with pools to spare is a
+    // throughput or targeting problem. Without this the two look identical.
+    let per pick cls =
+      results
+      |> List.map (fun w -> w.Entities |> List.filter (fun e -> e.Name = cls) |> List.sumBy pick)
+      |> List.average
+
+    let seats =
+      roster
+      |> List.distinct
+      |> List.map (fun cls ->
+        cls,
+        per (fun e -> float e.Resource / float (max 1 e.MaxResource)) cls,
+        per (fun e -> if SimState.alive e then 0.0 else 1.0) cls)
+
+    count EncounterCleared, count PartyWiped, List.item (List.length seeds / 2) ticks, alive, seats
 
   let report (label: string) (roster: string list) =
+    // A roster is a comparison, and a class cannot be compared with itself: two
+    // copies of one kit just weight the party toward it and read as a finding
+    // about the class. Fail here rather than publish that row.
+    if List.distinct roster <> roster then
+      failwithf "%s seats the same class twice: %A" label roster
+
     let totals =
       maps
-      |> List.map (fun (mapName, make, maxTicks) ->
-        let cleared, wiped, median, alive = measure roster make maxTicks
+      |> List.map (fun (mapName, make, at, maxTicks) ->
+        let cleared, wiped, median, alive, seats = measure roster make at maxTicks
 
         printfn
-          "  %-34s %-10s cleared=%-3d wiped=%-3d unresolved=%-3d median-ticks=%-6d alive=%.1f"
+          "  %-34s %-10s L%-2d cleared=%-3d wiped=%-3d unresolved=%-3d median-ticks=%-6d alive=%.1f"
           label
           mapName
+          at
           cleared
           wiped
           (seedCount - cleared - wiped)
           median
           alive
+
+        for cls, mana, dead in seats do
+          printfn "       %-9s mana=%3.0f%% dead=%3.0f%%" cls (mana * 100.0) (dead * 100.0)
 
         cleared, median)
 
@@ -160,7 +195,7 @@ let private comps (seedCount: int) (level: int option) =
     "seeds=%d level=%s per map, maps: %s"
     seedCount
     (level |> Option.map string |> Option.defaultValue "content")
-    (maps |> List.map (fun (m, _, _) -> m) |> String.concat ", ")
+    (maps |> List.map (fun (m, _, _, _) -> m) |> String.concat ", ")
 
   printfn "\nround 1 - one healer, three DPS"
 
@@ -183,6 +218,19 @@ let private comps (seedCount: int) (level: int option) =
 
   report (sprintf "Warrior/%s/Mage/Warlock/Hunter" best) ([ "Warrior"; best ] @ [ "Mage"; "Warlock"; "Hunter" ])
   |> ignore
+
+  printfn "\nround 4 - the damage dealers, beside %s" best
+
+  // Round 1-3 vary the healers and make one DPS swap. This varies the damage
+  // dealers with the healer fixed, which is the only way to tell a weak DPS class
+  // from a party that is simply short a role.
+  for dpsSet in
+    [ [ "Mage"; "Rogue"; "Warlock" ]
+      [ "Mage"; "Hunter"; "Warlock" ]
+      [ "Mage"; "Rogue"; "Hunter" ]
+      [ "Hunter"; "Rogue"; "Warlock" ] ] do
+    report (sprintf "Warrior/%s/%s" best (String.concat "/" dpsSet)) ([ "Warrior"; best ] @ dpsSet)
+    |> ignore
 
   printfn "\nbest single healer: %s" best
 
@@ -421,6 +469,54 @@ let main argv =
       if tick % every = 0 then line ()
 
     line ()
+    0
+  | "attrib" :: rest ->
+    // Which spell produced the number. A class ladder says how much a Paladin
+    // healed; this is the same run split by the ability the combat log already
+    // names, beside the per-caster total that ladder reports. Direct hits and
+    // heals only — an aura's periodic tick emits no line, so nothing here counts
+    // it and these totals are not a full throughput figure.
+    let wing = rest |> List.tryItem 0 |> Option.defaultValue "graveyard"
+
+    let difficulty =
+      match rest |> List.tryItem 1 with
+      | Some "min" -> Content.Minimum
+      | Some "max" -> Content.Maximum
+      | _ -> Content.Median
+
+    let limit = rest |> List.tryItem 2 |> Option.map int |> Option.defaultValue 12000
+    let mutable w = Content.scarletMonasteryAt wing difficulty 1UL
+    let mutable tick = 0
+
+    while tick < limit && not (SimState.aliveHostiles w |> List.isEmpty) do
+      w <- SimTick.step (Bench.autoPilot w) w
+      tick <- tick + 1
+
+    let totals = Attribution.byCaster w
+
+    printfn
+      "%s %A level=%d ticks=%d/%d  direct damage and healing only"
+      wing
+      difficulty
+      (Content.levelOf difficulty (Content.wingOf wing))
+      tick
+      limit
+
+    Attribution.byAbility w
+    |> Map.toList
+    |> List.map (fun ((caster, ability), t) -> caster, ability, t)
+    |> List.groupBy (fun (caster, _, _) -> caster)
+    |> List.sortByDescending (fun (_, cells) ->
+      cells |> List.sumBy (fun (_, _, t) -> t.Damage + t.Healing))
+    |> List.iter (fun (caster, cells) ->
+      for _, ability, t in
+        cells |> List.sortByDescending (fun (_, _, t) -> t.Damage + t.Healing) do
+        printfn "  %-20s %-18s dmg=%6d heal=%6d" caster ability t.Damage t.Healing
+
+      let t = totals |> Map.tryFind caster |> Option.defaultValue Attribution.empty
+
+      printfn "  %-20s %-18s dmg=%6d heal=%6d" caster "-- total" t.Damage t.Healing)
+
     0
   | "sm" :: rest ->
     let wing = rest |> List.tryItem 0 |> Option.defaultValue "graveyard"

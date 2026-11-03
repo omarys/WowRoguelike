@@ -92,7 +92,8 @@ module Path =
   /// by Pos. The grid is already a flat array, so this removes a persistent-map
   /// lookup and its allocation from every relaxation — which at roughly nine
   /// microseconds per expansion was the dominant cost of a long search (task 13).
-  let private search
+  let private searchWith
+    (budget: int)
     (heuristic: Pos -> Pos -> int)
     (g: Grid)
     (blocked: (Pos -> bool))
@@ -127,7 +128,7 @@ module Path =
       let mutable closest = index start
       let mutable closestH = heuristic start goal
 
-      while not found && not openList.IsEmpty && expanded < nodeBudget do
+      while not found && not openList.IsEmpty && expanded < budget do
         match openList.Pop() with
         | None -> ()
         | Some(_, current) ->
@@ -163,9 +164,39 @@ module Path =
       // A drained open list means the goal is genuinely unreachable, and an
       // empty path is how every caller spells that. Only a search the budget cut
       // short is allowed to hand back a partial route.
-      { Path = walkBack cameFrom width (if found then goalIndex elif expanded >= nodeBudget then closest else -1)
+      { Path = walkBack cameFrom width (if found then goalIndex elif expanded >= budget then closest else -1)
         Expanded = expanded
-        Truncated = not found && expanded >= nodeBudget }
+        Truncated = not found && expanded >= budget }
+
+  /// One search at the fast budget, and one escalated retry when the fast budget
+  /// cut it short **without** a best-effort route to hand back.
+  ///
+  /// That second case is not hypothetical: the graveyard is 112x198 and its
+  /// entrance-to-far-corner routes are longer than 1200 expansions, and a search
+  /// that wanders *away* from the goal before hitting the budget leaves `closest`
+  /// still pointing at the start tile — so the partial route is empty. Every
+  /// caller reads an empty path as "unreachable", which parked a whole Party with
+  /// `goal=(28,187) path=0` while all fourteen survivors sat reachable (measured
+  /// on seed 1: 14 651 floor tiles in the component, A* truncated at 1200).
+  ///
+  /// The retry is bounded by the tile count, which is the most any search can
+  /// expand, so a reachable goal is always found and an unreachable one always
+  /// exhausts the component. It costs one slow plan per stalled attempt, and it is
+  /// only paid when the fast search has already failed — the two outcomes worth
+  /// having are "a route" and "honestly no route", never "no route" for the first.
+  let private search
+    (heuristic: Pos -> Pos -> int)
+    (g: Grid)
+    (blocked: (Pos -> bool))
+    (start: Pos)
+    (goal: Pos)
+    : Result =
+    let quick = searchWith nodeBudget heuristic g blocked start goal
+
+    if not quick.Truncated || not (List.isEmpty quick.Path) then
+      quick
+    else
+      searchWith (g.Width * g.Height) heuristic g blocked start goal
 
   let astar (g: Grid) (blocked: (Pos -> bool)) (start: Pos) (goal: Pos) : Result =
     search octile g blocked start goal

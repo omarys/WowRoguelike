@@ -86,6 +86,10 @@ module SimTick =
           let flat = firing |> List.sumBy Aura.flatHealPerTick
           let pctBp = firing |> List.sumBy Aura.maxHealthHealBpPerTick
           let heal = flat + (e.MaxHealth * pctBp / 10000)
+          // Wound Poison cuts heals over time as well as casts; they are paid for
+          // by the same healer, so they meet the same reduction.
+          let cut = e.Auras |> List.sumBy Aura.healingReceivedReductionBp
+          let heal = heal * max 0 (10000 - cut) / 10000
 
           if heal <= 0 then
             e
@@ -97,7 +101,9 @@ module SimTick =
   /// through dealDamage so the target wakes and, if it dies, drops its orders.
   let advanceAuraDamage (w: World) =
     let perTick (e: Entity) =
-      e.Auras |> List.filter Aura.firesThisTick |> List.sumBy Aura.flatDamagePerTick
+      e.Auras
+      |> List.filter Aura.firesThisTick
+      |> List.sumBy (fun a -> Aura.flatDamagePerTick a + Aura.poisonTick a)
 
     let burning = w.Entities |> List.filter (fun e -> alive e && perTick e > 0)
 
@@ -129,31 +135,83 @@ module SimTick =
           let gain =
             match e.ResourceKind with
             | Energy -> if energyTick then 1 else 0
-            | Mana -> e.ResourceRegenPerTick
+            | Mana ->
+              // The rate comes from Spirit (see `Content.derive`). Inside the five
+              // seconds after a cast it pays a Tick less rather than a fraction,
+              // because the rate is a whole number of points — so a priest's Spirit
+              // still carries regeneration through a cast and a mage's thin Spirit
+              // does not, which is the class difference the rule exists to make.
+              let fresh =
+                e.Auras
+                |> List.exists (function
+                  | RecentlyCast _ -> true
+                  | _ -> false)
+
+              let rate = if fresh then max 0 (e.ResourceRegenPerTick - 1) else e.ResourceRegenPerTick
+
+              // Innervate multiplies what is actually there, so a target that has
+              // stopped casting gets the full five times and a target that keeps
+              // casting multiplies the trickle.
+              let boon =
+                e.Auras
+                |> List.tryPick (function
+                  | Innervated(_, bp) -> Some bp
+                  | _ -> None)
+                |> Option.defaultValue 0
+
+              rate * (10000 + boon) / 10000
             | Rage -> 0
 
-          { e with Resource = min e.MaxResource (e.Resource + gain) })
+          // Viper Sting is paid out of the pool, once a second like every other
+          // periodic aura. Regen is added first so the sting cuts what the target
+          // actually has, not what it would have had.
+          let drain =
+            e.Auras |> List.filter Aura.firesThisTick |> List.sumBy Aura.flatDrainPerTick
+
+          { e with Resource = max 0 (min e.MaxResource (e.Resource + gain) - drain) })
       w
 
-  /// Out of combat the party eats and drinks: health and resource come back at
-  /// a percentage of the pool, so a full heal is a short walk rather than a
-  /// wait. Combat regeneration is the slow, per-Tick kind above.
+  /// Out of combat the party rests. This is not a trickle: it is **five seconds of
+  /// waiting and then the whole pool back**, which is why nobody carries food and why
+  /// the Tank's between-pull stop is the only cost. The restore itself is stepped at
+  /// 10% of the pool a Tick so the health bar visibly snaps up rather than blinking,
+  /// which costs half a second and is why `RestTicks` keeps running past the mark.
+  ///
+  /// Rage is the exception, and it is what makes the class the class: it decays
+  /// (vanilla's 2 a second) instead of refilling, so a Warrior walks into the
+  /// next pull with whatever the last one left him rather than a full 100.
   let advanceOutOfCombatRegen (w: World) =
+    let rageDecay = if w.Tick % ticks 10 = ticks 0 then 1 else 0
+    let rested = w.RestTicks >= Content.outOfCombatRestTicks
+
     mapAll
       (fun e ->
         if e.Faction <> Party || not (alive e) then
           e
         else
-          { e with
-              Health =
-                min e.MaxHealth (e.Health + e.MaxHealth * Content.outOfCombatHealthBpPerTick / 10000)
-              Resource =
-                min e.MaxResource (e.Resource + e.MaxResource * Content.outOfCombatResourceBpPerTick / 10000) })
-      w
+          let health =
+            if rested then
+              min e.MaxHealth (e.Health + Content.outOfCombatHealthPerTick e.MaxHealth)
+            else
+              e.Health
 
-  /// Regeneration is the one phase that asks whose fight it is.
+          let resource =
+            match e.ResourceKind with
+            | Rage -> max 0 (e.Resource - rageDecay)
+            | _ when rested ->
+              min e.MaxResource (e.Resource + Content.outOfCombatResourcePerTick e.MaxResource)
+            | _ -> e.Resource
+
+          { e with Health = health; Resource = resource })
+      { w with RestTicks = w.RestTicks + ticks 1 }
+
+  /// Regeneration is the one phase that asks whose fight it is. Combat resets the
+  /// rest clock; everything out of combat counts down to the restore.
   let advanceRegen (w: World) =
-    if inCombat w then advanceResource w else advanceOutOfCombatRegen w
+    if inCombat w then
+      advanceResource { w with RestTicks = ticks 0 }
+    else
+      advanceOutOfCombatRegen w
 
   /// One tile of progress. A moving entity loses its cast — and a sleeping one
   /// neither moves nor keeps a goal.
@@ -187,9 +245,20 @@ module SimTick =
     // through does not. Two members may share a tile in passing, which is what lets
     // a corridor carry traffic in both directions, but nobody settles onto someone
     // who has stopped — that one keeps its route and waits the tick.
-    let settled =
+    // `held` is every tile a body will still be standing on when this tick ends:
+    // a body with no destination, or one whose step does not complete now
+    // (`MoveTicksLeft > 1` is exactly the case that only decrements). A body whose
+    // step lands this tick is vacating, so its tile can be taken.
+    //
+    // It used to be "any body with no destination", which let a mover settle onto
+    // a body that was mid-step and still three ticks from leaving. `separateStacked`
+    // cannot always undo that: in a one-tile corridor there is no free neighbour to
+    // push to, so the two stayed on the same square.
+    let held =
       w.Entities
-      |> List.filter (fun e -> alive e && e.Destination.IsNone)
+      |> List.filter (fun e ->
+        alive e
+        && (e.Destination.IsNone || e.MoveTicksLeft > ticks 1))
       |> List.map (fun e -> e.Pos)
       |> Set.ofList
 
@@ -217,7 +286,7 @@ module SimTick =
 
             if e.MoveTicksLeft > ticks 1 then
               { e with MoveTicksLeft = e.MoveTicksLeft - ticks 1 }
-            elif Set.contains dest settled then
+            elif Set.contains dest held then
               e
             else
               { e with
@@ -290,11 +359,17 @@ module SimTick =
               Path = []
               StallTicks = pathRetryBackoff }
         else
+          // Crippling Poison raises the cost of the next tile. Seeded here because
+          // this is the one place the per-tile cost is read; an existing step in
+          // progress keeps the length it started with.
+          let slow = e.Auras |> List.sumBy Aura.movementSlowBp
+          let step = e.MoveTicksPerTile * (10000 + slow) / 10000
+
           { e with
               Path = rest
               Destination = Some next
-              MoveTicksLeft = e.MoveTicksPerTile
-              MoveTicksTotal = e.MoveTicksPerTile
+              MoveTicksLeft = step
+              MoveTicksTotal = step
               StallTicks = ticks 0 }
 
   /// Stepped as a fold rather than a map, so two entities cannot claim the same
@@ -366,44 +441,90 @@ module SimTick =
       // Extra physical damage from Serpent Form lands on every swing.
       let bonus = serpentBonus e
 
-      if e.SwingTicksLeft > ticks 1 then
+      // The off-hand weapon is the fast one — vanilla's 1.5s dagger against a 2.6s
+      // main hand — so it lands more often for half the damage each time. 3/5 of the
+      // main interval is that ratio, and the clock is the world tick rather than a
+      // per-entity timer so nothing new has to be carried in the entity: the rate is
+      // what matters, and the Rogue is the only dual-wielder in the content.
+      let offHandTicks = max (ticks 2) (attack.Ticks * 3 / 5)
+
+      // Each hand keeps its own clock. The main hand is the entity's swing timer;
+      // the off-hand's is the world tick modulo its own (faster) interval, so it
+      // lands independently of the main hand instead of riding along with it.
+      let mainReady = e.SwingTicksLeft <= ticks 1
+      let offReady = e.OffHand && w.Tick % offHandTicks = ticks 0
+
+      if not mainReady && not offReady then
         mapEntity e.Id (fun x -> { x with SwingTicksLeft = x.SwingTicksLeft - ticks 1 }) w
       else
-        let w = mapEntity e.Id (fun x -> { x with SwingTicksLeft = attack.Ticks }) w
+        let w =
+          if mainReady then
+            mapEntity e.Id (fun x -> { x with SwingTicksLeft = attack.Ticks }) w
+          else
+            mapEntity e.Id (fun x -> { x with SwingTicksLeft = x.SwingTicksLeft - ticks 1 }) w
 
         match target with
         | None -> w
         | Some t ->
-          let rolled, w = rollRange attack.Min attack.Max w
-          // The auto-attack runs the same attack table every physical special
-          // does, so a mob dodges both identically.
-          let total = rolled + bonus + e.MeleeDamageBonus
-          let total, w = SimCombat.meleeStrike e t.Id total 0 w
+          // Two blades, two poisons: the main hand carries the situation's choice
+          // and the off hand the best different one. Decided once per swing so both
+          // hands meet the same situation.
+          let mainPoison, offPoison =
+            if SimCombat.carriesPoison e then
+              SimCombat.poisonPlan t (aliveHostiles w)
+            else
+              InstantPoison, InstantPoison
 
-          w
-          |> dealDamage t.Id total
-          |> fun w -> if e.Faction = Party then addThreat t.Id e total w else w
-          |> fun w ->
-            if total > 0 then logLine (sprintf "%s swings at %s for %d" e.Name t.Name total) w else w
-          // A dual-wielder's off-hand swings on the same cadence for half the
-          // damage. shortcut: the off-hand rolls the main-hand table, so it
-          // misses 5% rather than vanilla's 24% — worth about 6% of a Rogue's
-          // damage; give `meleeStrike` a miss-penalty parameter if that matters.
-          |> fun w ->
-            if not e.OffHand then
+          let w =
+            if not mainReady then
               w
             else
               let rolled, w = rollRange attack.Min attack.Max w
-              let offHand, w = SimCombat.meleeStrike e t.Id ((rolled + bonus + e.MeleeDamageBonus) / 2) 0 w
+              // The auto-attack runs the same attack table every physical special
+              // does, so a mob dodges both identically.
+              let total = rolled + bonus + e.MeleeDamageBonus
+              let total, w = SimCombat.meleeStrike e t.Id total 0 w
 
               w
-              |> dealDamage t.Id offHand
-              |> fun w -> if e.Faction = Party then addThreat t.Id e offHand w else w
+              |> dealDamage t.Id total
+              |> SimCombat.gainRage e total
+              |> fun w -> if e.Faction = Party then addThreat t.Id e total w else w
               |> fun w ->
-                if offHand > 0 then
-                  logLine (sprintf "%s's off hand hits %s for %d" e.Name t.Name offHand) w
+                if total > 0 then
+                  logLine (sprintf "%s swings at %s for %d" e.Name t.Name total) w
                 else
-                  w)
+                  w
+              |> fun w ->
+                if total > 0 && SimCombat.carriesPoison e then
+                  SimCombat.poisonHit e mainPoison t.Id w
+                else
+                  w
+
+          // Half the damage, but it gets there more often: the off-hand swings on
+          // its own faster cadence rather than riding the main hand. shortcut: it
+          // rolls the main-hand table, so it misses 5% rather than vanilla's 24% —
+          // worth about 6% of a Rogue's damage; give `meleeStrike` a miss-penalty
+          // parameter if that matters.
+          if not offReady then
+            w
+          else
+            let rolled, w = rollRange attack.Min attack.Max w
+            let offHand, w = SimCombat.meleeStrike e t.Id ((rolled + bonus + e.MeleeDamageBonus) / 2) 0 w
+
+            w
+            |> dealDamage t.Id offHand
+            |> SimCombat.gainRage e offHand
+            |> fun w -> if e.Faction = Party then addThreat t.Id e offHand w else w
+            |> fun w ->
+              if offHand > 0 then
+                logLine (sprintf "%s's off hand hits %s for %d" e.Name t.Name offHand) w
+              else
+                w
+            |> fun w ->
+              if offHand > 0 && SimCombat.carriesPoison e then
+                SimCombat.poisonHit e offPoison t.Id w
+              else
+                w)
 
   /// Recompute every Hostile's aggression target, honoring the margins and
   /// clearing a Taunt whose taunter has died.
@@ -639,6 +760,9 @@ module SimTick =
     |> retarget
     |> mobDecisions
     |> advanceGoals
+    // Last, so it sees the fight as the tick left it: the wipe that ended the pull
+    // has to have happened before the room can be told to forget it.
+    |> SimState.encounterReset
 
   /// Run `n` Ticks with no new input.
   let run (n: int) (w: World) : World = (w, [ 1..n ]) ||> List.fold (fun w _ -> step [] w)

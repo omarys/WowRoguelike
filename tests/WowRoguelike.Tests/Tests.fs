@@ -31,6 +31,7 @@ let private arena (tankThreat: int) (dpsThreat: int) (dpsPos: Pos) : World =
         Threat = Map.ofList [ EntityId 1, tankThreat; EntityId 2, dpsThreat ] }
 
   { Tick = ticks 0
+    RestTicks = ticks 0
     Grid = Grid.create 20 10
     Entities = [ tank; dps; mob ]
     Pending = []
@@ -180,6 +181,7 @@ let private casterWorld (ability: Ability) : World =
               Remaining = secTicks 2.0 } }
 
   { Tick = ticks 0
+    RestTicks = ticks 0
     Grid = Grid.create 20 10
     Entities = [ rogue; mob ]
     Pending = []
@@ -377,6 +379,41 @@ let ``no two living entities ever share a tile`` (seed: int) =
 /// Mobs alternating Healing Touch (roughly 66 HPS against 45-50 party HPS) and
 /// nothing in the model ever ran out.
 ///
+/// The five-second rule: a zeroed pool is whole again inside five seconds, which
+/// is the whole of the wait between pulls. Ten seconds would make eating and
+/// drinking worth modelling; five makes them pointless, which is the intent.
+[<Fact>]
+let ``out of combat a zeroed party is whole again in five seconds`` () =
+  let w = Content.gully 1UL
+
+  let drained =
+    { w with
+        Entities =
+          w.Entities
+          |> List.filter (fun e -> e.Faction = Party)
+          |> List.map (fun e -> { e with Health = 1; Resource = 0 }) }
+
+  Assert.False(SimState.inCombat drained)
+
+  let fourSeconds = SimTick.run 80 drained
+  let fiveSeconds = SimTick.run 100 drained
+
+  // The restore is a step, not a slope: five seconds is the *wait*, and nothing comes
+  // back during it. Half a second later the pool has snapped up at 10% a Tick.
+  let snapped = SimTick.run 110 drained
+
+  let priest (world: World) = world.Entities |> List.find (fun e -> e.Name = "Priest")
+
+  Assert.True((priest fourSeconds).Resource < (priest fourSeconds).MaxResource, "80 ticks should not fill the pool")
+  Assert.True((priest fourSeconds).Health < (priest fourSeconds).MaxHealth, "80 ticks should not heal a corpse to full")
+  Assert.True((priest fiveSeconds).Health < (priest fiveSeconds).MaxHealth, "the wait alone restores nothing")
+
+  for who in [ "Priest"; "Mage"; "Warrior" ] do
+    let e = snapped.Entities |> List.find (fun x -> x.Name = who)
+    Assert.Equal(e.MaxHealth, e.Health)
+
+  Assert.Equal((priest snapped).MaxResource, (priest snapped).Resource)
+
 /// Mobs do not regenerate resource, so their healing is finite. These are the
 /// seeds that used to run forever.
 [<Fact>]
@@ -390,6 +427,7 @@ let ``resource pools end the fights that used to stalemate`` () =
 let ``a party member ordered across the cup room walks around the wall`` () =
   let w =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = Grid.ofRows Bench.concaveMap
       Entities =
         [ Content.hero
@@ -590,6 +628,31 @@ let ``a star returns nothing when the goal is walled off`` () =
 
 /// A mob paths at a tile somebody is standing on, so the goal must stay
 /// enterable even when the blocker says otherwise.
+/// A detour that walks *away* from the goal for longer than the fast budget still
+/// has to route. This is the shape that broke the graveyard: from the Party's
+/// pocket every walkable step increased the heuristic, so `closest` stayed on the
+/// start tile, the truncated search handed back an empty path, and every caller
+/// read that as "unreachable" — a whole Party parked with `goal=(28,187) path=0`
+/// while fourteen mobs sat reachable.
+[<Fact>]
+let ``a detour longer than the fast budget still routes`` () =
+  let w, h = 700, 40
+  let g = Grid.create w h
+  let passage = w - 3
+
+  // One wall across the middle with a single gap near the far edge, so reaching
+  // the goal means walking almost the whole width away from it first.
+  for x in 1 .. w - 2 do
+    if x <> passage then g.Walls.[(h / 2) * w + x] <- true
+
+  let start = { X = 5; Y = 2 }
+  let goal = { X = 5; Y = h - 3 }
+  let r = Path.astar g allowAll start goal
+
+  Assert.False(List.isEmpty r.Path)
+  Assert.False(r.Truncated)
+  Assert.Equal<Pos>(goal, List.last r.Path)
+
 [<Fact>]
 let ``a star treats the goal tile as enterable`` () =
   let g = Grid.create 10 10
@@ -842,6 +905,7 @@ let ``a move order onto a wall never leaves the entity inside it`` () =
 
   let w =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = g
       Entities =
         [ Content.hero
@@ -961,8 +1025,8 @@ let ``block reduces a hit by the block value`` () =
   // so a miss is a legitimate zero here.
   Assert.True(amount = 75 || amount = 0, sprintf "amount %d" amount)
 
-/// A dual-wielder swings its off hand for half damage on the same cadence as
-/// the main hand.
+/// A dual-wielder swings its off hand too, and for half the damage of the main
+/// hand's blow.
 [<Fact>]
 let ``a dual wielder swings its off hand too`` () =
   let logs =
@@ -980,6 +1044,7 @@ let ``a dual wielder swings its off hand too`` () =
     [ 1UL .. 8UL ]
     |> List.map (fun seed ->
       { Tick = ticks 0
+        RestTicks = ticks 0
         Grid = Grid.create 20 10
         Entities = [ tank; mob ]
         Pending = []
@@ -995,6 +1060,45 @@ let ``a dual wielder swings its off hand too`` () =
     logs |> List.exists (List.exists (fun l -> l.Contains "off hand")),
     System.String.Join(" | ", logs |> List.concat |> List.truncate 10)
   )
+
+/// The off-hand weapon is the fast one: shorter interval, less damage per blow, so
+/// it has to land *more often* than the main hand across a fight. With a 19-tick
+/// main hand it swings every 11 ticks, which is what this counts.
+[<Fact>]
+let ``the off hand lands more often than the main hand`` () =
+  let swing (interval: int) =
+    let weapon = { Min = 30; Max = 30; Ticks = ticks interval; Range = 1 }
+
+    let tank =
+      Content.hero 1 "Tank" Tank 1000 1000 weapon 50000 [ Content.heroicStrike ] { X = 5; Y = 5 }
+      |> fun e -> { e with OffHand = true }
+
+    let mob =
+      { Content.mob 100 "Mob" CreatureType.Humanoid 21 100000 0 (Some weapon) [] None { X = 6; Y = 5 } with
+          Engaged = true
+          Target = Some(EntityId 1) }
+
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 20 10
+      Entities = [ tank; mob ]
+      Pending = []
+      Rng = Rng.streamsOf 1UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+    |> SimTick.run 220
+    |> fun w ->
+      w.Log
+      |> List.filter (fun l -> l.StartsWith "Tank")
+      |> List.countBy (fun l -> if l.Contains "off hand" then "off" else "main")
+      |> Map.ofList
+
+  let counts = swing 19
+  let main = counts |> Map.tryFind "main" |> Option.defaultValue 0
+  let off = counts |> Map.tryFind "off" |> Option.defaultValue 0
+  Assert.True(main > 0, "the main hand should swing at all")
+  Assert.True(off > main, sprintf "off hand %d should out-swing main hand %d" off main)
 
 /// The Warrior fights sword and board, and the shield's buttons are what that
 /// buys: a block chance, a block value, and the two cooldowns.
@@ -1262,6 +1366,7 @@ let ``an enemy behind a wall is not a valid damage target`` () =
 
   let w =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = Grid.ofRows [ "#####"; "#...#"; "#.#.#"; "#...#"; "#####" ]
       Entities = [ mage; mob ]
       Pending = []
@@ -1283,6 +1388,7 @@ let ``using an ability interrupts a move in progress`` () =
 
   let w =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = Grid.create 10 5
       Entities = [ warrior; mob ]
       Pending = []
@@ -1337,6 +1443,7 @@ let ``a disarmed enemy does not swing`` () =
 
   let baseWorld =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = Grid.create 20 10
       Entities = [ tank; mob ]
       Pending = []
@@ -1369,6 +1476,7 @@ let ``Charge moves the warrior beside the target`` () =
 
   let w =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = Grid.create 10 5
       Entities = [ warrior; mob ]
       Pending = []
@@ -1380,6 +1488,108 @@ let ``Charge moves the warrior beside the target`` () =
   let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.charge w
   let moved = w.Entities |> List.find (fun e -> e.Id = EntityId 1)
   Assert.True(Pos.chebyshev moved.Pos { X = 6; Y = 1 } <= 1, "the warrior should land beside the mob")
+
+[<Fact>]
+let ``Charge is refused in combat while Intercept is not`` () =
+  let slow = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
+  let warrior = Content.hero 1 "Warrior" Tank 1000 1000 slow 50000 [ Content.charge; Content.intercept ] { X = 1; Y = 1 }
+  let mob = Content.mob 100 "Mob" CreatureType.Humanoid 21 1000 0 (Some slow) [] None { X = 6; Y = 1 }
+
+  let baseWorld =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 10 5
+      // Starting the Warrior with an empty bar is the point of the first half: a
+      // Charge that pays nine rage cannot show it on a capped bar.
+      Entities = [ { warrior with Resource = 0 }; mob ]
+      Pending = []
+      Rng = Rng.streamsOf 1UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let chargeCmd = { ApplyAt = ticks 1; Kind = UseAbility(EntityId 1, "Charge", EntityId 100) }
+  let interceptCmd = { ApplyAt = ticks 1; Kind = UseAbility(EntityId 1, "Intercept", EntityId 100) }
+
+  let movedTo (w: World) =
+    (w.Entities |> List.find (fun e -> e.Id = EntityId 1)).Pos
+
+  // Out of combat Charge works, and it pays rage rather than costing it.
+  let charged = SimCombat.applyCommand chargeCmd baseWorld
+  Assert.True(Pos.chebyshev (movedTo charged) { X = 6; Y = 1 } <= 1, "Charge should close the gap out of combat")
+  let rageAfterCharge = (charged.Entities |> List.find (fun e -> e.Id = EntityId 1)).Resource
+  Assert.True(rageAfterCharge > 0, "Charge generates rage")
+
+  // A leap through a wall is refused. The Warrior cannot see the mob it would land
+  // beside, and walling the column between the two is the whole test.
+  let walled = { baseWorld with Grid = Grid.create 10 5 }
+
+  for y in 0 .. 4 do
+    walled.Grid.Walls.[y * 10 + 4] <- true
+
+  let throughWall = SimCombat.applyCommand chargeCmd walled
+  Assert.Equal(Pos.chebyshev { X = 1; Y = 1 } (movedTo throughWall), 0)
+
+  // Once something hostile is engaged, Charge is refused and Intercept is the answer.
+  // Intercept costs ten rage, so the bar is filled for that half.
+  let inCombat =
+    { baseWorld with
+        Entities =
+          baseWorld.Entities
+          |> List.map (fun e ->
+            if e.Faction = Hostile then { e with Engaged = true }
+            elif e.Id = EntityId 1 then { e with Resource = warrior.MaxResource }
+            else e) }
+
+  let refused = SimCombat.applyCommand chargeCmd inCombat
+  Assert.Equal(Pos.chebyshev { X = 1; Y = 1 } (movedTo refused), 0)
+
+  let intercepted = SimCombat.applyCommand interceptCmd inCombat
+  Assert.True(Pos.chebyshev (movedTo intercepted) { X = 6; Y = 1 } <= 1, "Intercept should close the gap in combat")
+
+[<Fact>]
+let ``one caster in mid-spell gets exactly one interrupter`` () =
+  let slow = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
+
+  let rogue =
+    { Content.hero 1 "Rogue" Dps 1000 1000 slow 50000 (AbilityDef.kitAt 24 [ Content.kick ]) { X = 2; Y = 1 } with
+        Target = Some(EntityId 100) }
+
+  let mage =
+    { Content.hero 2 "Mage" Dps 1000 1000 slow 50000 (AbilityDef.kitAt 24 [ Content.counterspellRanks ]) { X = 6; Y = 1 } with
+        Target = Some(EntityId 100) }
+
+  let caster =
+    { Content.mob 100 "Caster" CreatureType.Humanoid 21 2000 0 (Some slow) [] None { X = 3; Y = 1 } with
+        Engaged = true
+        Target = Some(EntityId 1)
+        Casting = Some { Ability = Content.lightningBolt; Target = EntityId 1; Remaining = ticks 20 } }
+
+  let world =
+    { Tick = ticks 100
+      RestTicks = ticks 0
+      Grid = Grid.create 10 5
+      Entities = [ rogue; mage; caster ]
+      Pending = []
+      Rng = Rng.streamsOf 1UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let kicksOnCaster =
+    PartyAi.decide world
+    |> List.choose (fun c ->
+      match c.Kind with
+      | UseAbility(actor, name, target) when
+        target = EntityId 100 && (name = "Kick" || name = "Counterspell")
+        ->
+        Some(actor, name)
+      | _ -> None)
+
+  // One cast, one kick: the Mage must not spend a twenty-four second Counterspell on
+  // a spell the Rogue's ten-second Kick is already covering.
+  Assert.Equal(1, kicksOnCaster.Length)
+  Assert.Equal("Kick", snd kicksOnCaster.Head)
 
 [<Fact>]
 let ``the mage's auto-attack is a ranged wand`` () =
@@ -1573,8 +1783,8 @@ let ``the paladin is built on the researched level-24 set`` () =
   // Verigan's Fist, 65-99 at 3.20 s.
   Assert.Equal((65, 99), (paladin.AutoAttack.Value.Min, paladin.AutoAttack.Value.Max))
 
-/// Gear scales with level from the level-24 set to the class's level-60 pre-raid
-/// best-in-slot outfit, which `.pi/research/levelscale/bis-60.md` tabulates piece
+/// Gear scales with level from the level-24 set to the class's level-60 Tier 1
+/// raid outfit, which `.pi/research/levelscale/raid-gear-60.md` tabulates piece
 /// by piece. The level-24 numbers are frozen (they are the calibration point this
 /// file's content is tuned at); level 60 has to land on the researched totals, and
 /// nothing in between may go backwards.
@@ -1582,17 +1792,17 @@ let ``the paladin is built on the researched level-24 set`` () =
 let ``gear grows from the level-24 set to the level-60 best in slot`` () =
   // A warrior alone, so Battle Shout's attack power is the only passive and the
   // stat totals are the dressed ones: base row at 60 is (120, 80, 110, 30, 47) and
-  // the researched outfit adds (119, 34, 280, 10, 16) — the file's own TOTALS.
+  // the Tier 1 outfit adds (161, 21, 257, 0, 0) — the file's own TOTALS.
   let warrior =
     Content.partyOf [ "Warrior" ] 60 |> List.find (fun e -> e.Name = "Warrior")
 
-  Assert.Equal(239, warrior.Stats.Strength)
-  Assert.Equal(114, warrior.Stats.Agility)
-  Assert.Equal(390, warrior.Stats.Stamina)
-  Assert.Equal(40, warrior.Stats.Intellect)
-  // 6523 from the seventeen pieces plus 228 from 114 Agility; no Devotion Aura in
+  Assert.Equal(281, warrior.Stats.Strength)
+  Assert.Equal(101, warrior.Stats.Agility)
+  Assert.Equal(367, warrior.Stats.Stamina)
+  Assert.Equal(30, warrior.Stats.Intellect)
+  // 8068 from the seventeen pieces plus 202 from 101 Agility; no Devotion Aura in
   // a warrior-only party.
-  Assert.Equal(6751, warrior.Armor)
+  Assert.Equal(8270, warrior.Armor)
 
 [<Fact>]
 let ``the weapon grows with level up to the researched level-60 pick`` () =
@@ -1721,6 +1931,7 @@ let ``a paladin heals a wounded tank`` () =
 
   let w =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = Grid.create 12 10
       Entities = [ tank; paladin; enemy ]
       Pending = []
@@ -1738,7 +1949,68 @@ let ``a paladin heals a wounded tank`` () =
 
   let log = String.concat "\n" w.Log
 
-  Assert.True(log.Contains "Paladin heals", sprintf "the paladin should have healed; log:\n%s" log)
+  Assert.True(
+    w.Log |> List.exists (fun line -> line.StartsWith "Paladin's " && line.Contains " heals "),
+    sprintf "the paladin should have healed; log:\n%s" log
+  )
+
+/// The balance rig splits a run's damage and healing by ability. That split is
+/// only usable if it adds up to the per-entity figure a class ladder reports, so
+/// the two ways `Attribution` rolls the same log up must agree — and it must have
+/// read something, since an empty ability table would sum just as well.
+[<Fact>]
+let ``per-ability attribution adds up to the per-entity totals`` () =
+  let mutable w = Content.gully 4UL
+
+  // A whole party needs no healing — out-of-combat regeneration refills it in five
+  // seconds — so a healthy run logs only mobs healing to zero and the healing half of
+  // this split would have nothing to read. Half a Tank guarantees the healer works.
+  w <-
+    { w with
+        Entities =
+          w.Entities
+          |> List.map (fun e ->
+            if e.Faction = Faction.Party && e.Name = "Warrior" then
+              { e with Health = e.MaxHealth / 2 }
+            else
+              e) }
+
+  for _ in 1 .. 1200 do
+    if SimState.continues w then
+      w <- SimTick.step (Bench.autoPilot w) w
+
+  let perEntity = Attribution.byCaster w
+
+  let rolledUp =
+    Attribution.byAbility w
+    |> Map.toList
+    |> List.fold
+      (fun totals ((caster, _), t) ->
+        let running = totals |> Map.tryFind caster |> Option.defaultValue Attribution.empty
+
+        totals
+        |> Map.add caster { Damage = running.Damage + t.Damage; Healing = running.Healing + t.Healing })
+      Map.empty
+
+  Assert.Equal<Map<string, Attribution.Totals>>(perEntity, rolledUp)
+
+  Assert.True(
+    (perEntity |> Map.toList |> List.sumBy (fun (_, t) -> t.Damage)) > 0,
+    "the run should have damaged something"
+  )
+
+  Assert.True(
+    (perEntity |> Map.toList |> List.sumBy (fun (_, t) -> t.Healing)) > 0,
+    "the run should have healed something"
+  )
+
+  // Wording drift guard: if the log stopped naming the ability, every line would
+  // fall back to Auto Attack and the sums above would still agree.
+  Assert.True(
+    Attribution.byAbility w
+    |> Map.exists (fun (_, ability) _ -> ability <> "Auto Attack"),
+    "the log should name abilities, not only swings"
+  )
 
 /// The warlock's kit is the rank-for-rank level-24 one: no Banish (28), no
 /// Hellfire (30), and Corruption a 2.0 s cast because Improved Corruption does
@@ -1827,7 +2099,8 @@ let ``the shaman's kit is the level-24 one`` () =
       "Stoneskin Totem"
       "Healing Stream Totem"
       "Nature's Swiftness"
-      "Reincarnation" ],
+      "Reincarnation"
+      "Ancestral Spirit" ],
     shaman.Abilities |> List.map (fun a -> a.Name)
   )
 
@@ -1884,6 +2157,7 @@ let ``a resto shaman's heal beats the same shaman with no talents`` () =
 
     let mutable w =
       { Tick = ticks 0
+        RestTicks = ticks 0
         Grid = Grid.create 12 10
         Entities = [ wounded; healer; enemy ]
         Pending = []
@@ -1895,7 +2169,7 @@ let ``a resto shaman's heal beats the same shaman with no talents`` () =
     let healIn (line: string) =
       let parts = line.Split ' '
 
-      if parts.[0] = "Shaman" && parts.[1] = "heals" then
+      if parts.[0] = "Shaman's" && line.Contains " heals " then
         match System.Int32.TryParse parts.[parts.Length - 1] with
         | true, n -> n
         | _ -> 0
@@ -1919,6 +2193,184 @@ let ``a resto shaman's heal beats the same shaman with no talents`` () =
     talented > plain,
     sprintf "the talented shaman should heal for more: %d vs %d" talented plain
   )
+
+/// The Druid's two changes: the Nature's Swiftness button, which the class was
+/// missing while the Shaman had it, and Improved Regrowth's crit chance, which is
+/// the talent that makes Regrowth the Druid's crit heal. Both are content, so both
+/// are asserted on the built hero rather than inferred from the sim.
+[<Fact>]
+let ``the druid carries Nature's Swiftness and a critting Regrowth`` () =
+  let druid =
+    Content.partyOf [ "Warrior"; "Druid" ] 33 |> List.find (fun e -> e.Name = "Druid")
+
+  let effectsOf name =
+    (druid.Abilities |> List.find (fun a -> a.Name = name)).Effects
+
+  Assert.Contains("Nature's Swiftness", druid.Abilities |> List.map (fun a -> a.Name))
+  Assert.Contains(CritBonus 5000, effectsOf "Regrowth")
+  // The talent raises one spell, not the caster.
+  Assert.DoesNotContain(CritBonus 5000, effectsOf "Healing Touch")
+  Assert.DoesNotContain(CritBonus 5000, effectsOf "Rejuvenation")
+
+/// A heal crit is half again the heal. It has to be, or a crit talent on a heal is
+/// a placebo: Improved Regrowth's +50% would have changed nothing at all, because
+/// the crit used to pay only Inspiration's armour and Illumination's refund.[<Fact>]
+let ``a heal that crits is worth half again`` () =
+  let party = Content.partyOf [ "Warrior"; "Priest" ] 24
+  let warrior, priest = party.[0], party.[1]
+
+  // A flat heal, so the only thing that can move the number is the crit. The
+  // Warrior casts it because the Priest's talents would add bonus healing.
+  let flat =
+    { Name = "Test Heal"
+      CastTicks = ticks 0
+      CooldownTicks = ticks 0
+      ResourceCost = 0
+      Interruptible = false
+      Range = 8
+      TargetKind = Ally
+      Effects = [ Heal(100, 100) ] }
+
+  let healedWith (critBp: int) =
+    let wounded =
+      { priest with
+          Pos = { X = 5; Y = 5 }
+          Health = 300 }
+
+    let healer =
+      { warrior with
+          Pos = { X = 5; Y = 6 }
+          CritChanceBp = critBp }
+
+    let w0 =
+      { Tick = ticks 0
+        RestTicks = ticks 0
+        Grid = Grid.create 12 10
+        Entities = [ wounded; healer ]
+        Pending = []
+        Rng = Rng.streamsOf 7UL
+        PartyBuffs = []
+        Quests = []
+        Log = [] }
+
+    let w = SimCombat.resolveAbility healer.Id wounded.Id flat w0
+    (w.Entities |> List.find (fun e -> e.Id = wounded.Id)).Health - 300
+
+  // 10000 basis points is certainty, so neither case depends on the seed.
+  Assert.Equal(100, healedWith 0)
+  Assert.Equal(150, healedWith 10000)
+
+/// The Druid's fast heal has to be spent on a wound that a cast would answer too
+/// late. Regrowth takes two seconds, so the trip point sits one cast-time above
+/// death rather than at a panic threshold — and Swiftmend is only worth its
+/// cooldown when there is a Rejuvenation to eat, because eating it is the whole
+/// effect.
+[<Fact>]
+let ``the druid spends Swiftmend one cast-time above death`` () =
+  // Real content: a healer only acts in a fight, so a hand-built pair with no
+  // hostile in the world makes `decide` return nothing and every assertion below
+  // passes on an empty list.
+  let world0 =
+    Content.dungeonAt 12 1UL
+    |> Content.withRosterAt 12 [ "Warrior"; "Priest"; "Druid"; "Mage"; "Rogue" ]
+    // In a fight, because out of one the leader now waits for the party to be whole
+    // (five seconds of regeneration) and issues no orders at all.
+    |> fun w ->
+      { w with
+          Entities =
+            w.Entities
+            |> List.map (fun e -> if e.Faction = Hostile then { e with Engaged = true } else e) }
+
+  let warrior = world0.Entities |> List.find (fun e -> e.Name = "Warrior")
+  let druid = world0.Entities |> List.find (fun e -> e.Name = "Druid")
+
+  let world (healthPct: int) (withRejuv: bool) =
+    { world0 with
+        Entities =
+          world0.Entities
+          |> List.map (fun e ->
+            if e.Id = warrior.Id then
+              { e with
+                  Health = e.MaxHealth * healthPct / 100
+                  Auras =
+                    if withRejuv then
+                      // Plenty of Ticks left, so the last-tick branch below cannot
+                      // claim this: the assertion is about the emergency path.
+                      [ Rejuvenation(ticks 240, 5, "Rejuvenation") ]
+                    else
+                      [] }
+            elif e.Id = druid.Id then
+              { e with Resource = e.MaxResource }
+            else
+              e) }
+
+  let druidCasts (w: World) =
+    PartyAi.decide w
+    |> List.choose (fun c ->
+      match c.Kind with
+      | UseAbility(actor, name, _) when actor = druid.Id -> Some name
+      | _ -> None)
+
+  Assert.Contains("Swiftmend", druidCasts (world 55 true))
+  // Above the trip the Rejuvenation is left to tick, since Swiftmend eats it.
+  Assert.DoesNotContain("Swiftmend", druidCasts (world 70 true))
+  // No HoT to consume, no Swiftmend: Nature's Swiftness is the other fast heal.
+  Assert.DoesNotContain("Swiftmend", druidCasts (world 55 false))
+  Assert.Contains("Nature's Swiftness", druidCasts (world 55 false))
+
+/// Swiftmend is spent with nobody in trouble, but only at the right moment. It pays
+/// a **fixed** 12 s of Rejuvenation (or 18 s of Regrowth) whatever is left on the
+/// buff, so the last tick is the whole play: every Tick the HoT already paid is kept
+/// and the full instant heal lands on top. Pressing at the first tick pays the same
+/// and throws the remaining Ticks away, which is why the AI waits.
+[<Fact>]
+let ``the druid waits for the last tick before Swiftmending`` () =
+  let world0 =
+    Content.dungeonAt 12 1UL
+    |> Content.withRosterAt 12 [ "Warrior"; "Priest"; "Druid"; "Mage"; "Rogue" ]
+    // In a fight, because out of one the leader now waits for the party to be whole
+    // (five seconds of regeneration) and issues no orders at all.
+    |> fun w ->
+      { w with
+          Entities =
+            w.Entities
+            |> List.map (fun e -> if e.Faction = Hostile then { e with Engaged = true } else e) }
+
+  let warrior = world0.Entities |> List.find (fun e -> e.Name = "Warrior")
+  let druid = world0.Entities |> List.find (fun e -> e.Name = "Druid")
+
+  // Second argument is the heal per second (auras fire on every twentieth Tick).
+  let world (healthPct: int) (left: int) (perSecond: int) (source: string) =
+    { world0 with
+        Entities =
+          world0.Entities
+          |> List.map (fun e ->
+            if e.Id = warrior.Id then
+              { e with
+                  Health = e.MaxHealth * healthPct / 100
+                  Auras = [ Rejuvenation(ticks left, perSecond, source) ] }
+            elif e.Id = druid.Id then
+              { e with Resource = e.MaxResource }
+            else
+              e) }
+
+  let druidCasts (w: World) =
+    PartyAi.decide w
+    |> List.choose (fun c ->
+      match c.Kind with
+      | UseAbility(actor, name, _) when actor = druid.Id -> Some name
+      | _ -> None)
+
+  // The tank sits at 85% of a 609-point bar: a 91-point hole. A 5-a-second
+  // Rejuvenation at its last tick is worth 60 instantly, so it lands whole.
+  Assert.Contains("Swiftmend", druidCasts (world 85 20 5 "Rejuvenation"))
+  // A 22-a-second Rejuvenation at the same last tick is worth 264 — that would
+  // overheal a 91-point hole, so the buff is left to tick instead.
+  Assert.DoesNotContain("Swiftmend", druidCasts (world 85 20 22 "Rejuvenation"))
+  // Fresh, with 240 Ticks to run: no press, the HoT has not paid out yet.
+  Assert.DoesNotContain("Swiftmend", druidCasts (world 85 240 5 "Rejuvenation"))
+  // Regrowth is the other buff it eats: 18 s of 4 a second is 72, which fits.
+  Assert.Contains("Swiftmend", druidCasts (world 85 20 4 "Regrowth"))
 
 /// The talent cooldowns are buttons, not passives: Divine Favor is spent on the
 /// first heal after the Tank drops under 40% and then waits out its two minutes.
@@ -1946,6 +2398,7 @@ let ``a talent cooldown fires once and then waits for its cooldown`` () =
 
   let mutable w =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = Grid.create 12 10
       Entities = [ wounded; paladin; enemy ]
       Pending = []
@@ -1999,6 +2452,7 @@ let ``a heal crit from Inspiration leaves the target's armour up`` () =
 
     let w =
       { Tick = ticks 0
+        RestTicks = ticks 0
         Grid = Grid.create 12 10
         Entities = [ tank; healer ]
         Pending = []
@@ -2035,6 +2489,7 @@ let ``Illumination returns a crit heal's mana`` () =
 
     let w =
       { Tick = ticks 0
+        RestTicks = ticks 0
         Grid = Grid.create 12 10
         Entities = [ tank; healer ]
         Pending = []
@@ -2080,6 +2535,7 @@ let ``a healing stream totem heals the party until it expires`` () =
 
   let mutable w =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = Grid.create 12 10
       Entities = [ tank; totem; enemy ]
       Pending = []
@@ -2130,6 +2586,7 @@ let ``a live totem does not answer for a dead party`` () =
 
   let w =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = Grid.create 12 10
       Entities = [ dead; totem; enemy ]
       Pending = []
@@ -2176,7 +2633,38 @@ let ``the hunter's kit is the level-24 one`` () =
   Assert.Equal<Effect list>([ DamageOverTime(secTicks 15.0, 5) ], effectsOf "Serpent Sting")
   // Raptor Strike rank 4: the next swing lands +34.
   Assert.Equal<Effect list>([ WeaponDamage(10000, 34) ], effectsOf "Raptor Strike")
-  Assert.Equal(3, List.length hunter.Abilities)
+
+  // Aimed Shot's researched rank 1 (level 20) is the highest this ladder has:
+  // 75 mana, a 3 s cast, +70 on the weapon hit.
+  let aimed = hunter.Abilities |> List.find (fun a -> a.Name = "Aimed Shot")
+  Assert.Equal(secTicks 3.0, aimed.CastTicks)
+  Assert.True(aimed.Interruptible, "a cast is what an interrupt has to catch")
+  Assert.Equal<Effect list>([ WeaponDamage(10000, 70) ], aimed.Effects)
+
+  // Scatter Shot is the kit's interrupt, and its silence is what makes it more
+  // than one: `Interrupt` alone would let the next spell go off on the next Tick.
+  Assert.Equal<Effect list>([ Interrupt; Silence(secTicks 3.0) ], effectsOf "Scatter Shot")
+
+  match effectsOf "Summon Pet" with
+  | [ Summon spec ] ->
+    Assert.Equal(900, spec.Health)
+    Assert.Equal(Some(38, 62, secTicks 2.0), spec.Swing)
+    Assert.True(spec.Lifetime.IsNone, "a pet is for the run, not for a duration")
+    Assert.True(spec.Totem.IsNone, "a pet is not a totem")
+  | other -> failwithf "expected a single Summon, got %A" other
+
+  // Mend Pet rank 2 is 38 a second for five seconds — 190 total, a fifth of the
+  // 900 a level-24 pet carries.
+  Assert.Equal<Effect list>([ HealOverTime(secTicks 5.0, 38) ], effectsOf "Mend Pet")
+
+  // Multi-Shot rank 1 (level 18): three targets, weapon damage each, no flat bonus.
+  Assert.Equal<Effect list>([ MultiShot 3 ], effectsOf "Multi-Shot")
+
+  // Viper Sting drains mana: 15 a second for 8 s. Vanilla trains it at 36, so this
+  // is out of band and its amounts are this file's — see the Content comment.
+  Assert.Equal<Effect list>([ DrainResource(secTicks 8.0, 15) ], effectsOf "Viper Sting")
+
+  Assert.Equal(9, List.length hunter.Abilities)
 
 /// A hunter's auto-attack is its bow, so it stands at range like the casters do:
 /// 21-39 bow plus Sharp Arrow plus 302 ranged attack power, 66-84 a shot.
@@ -2192,6 +2680,344 @@ let ``the hunter shoots from range`` () =
 [<Fact>]
 let ``a hunter adds no party passive`` () =
   Assert.Equal<PartyBuffKind list>([ BattleShout ], Content.partyBuffsFor [ "Warrior"; "Hunter" ])
+
+/// Scatter Shot has to do two things an interrupt alone does not: stop the cast in
+/// progress, and keep the next one from starting — including an instant, which the
+/// engine's `canCast` gate does not cover because it is only consulted for a spell
+/// with a cast time.
+[<Fact>]
+let ``scatter shot interrupts a cast and silences what comes next`` () =
+  let hunter = Content.partyOf [ "Hunter" ] 24 |> List.head
+
+  // A mob shock with no cast time, so "instant is blocked too" is a real
+  // assertion and not a test of the cast-time gate.
+  let shock =
+    { Content.lightningBolt with
+        Name = "Shock"
+        CastTicks = ticks 0
+        CooldownTicks = ticks 0 }
+
+  let mob =
+    Content.mob 100 "Caster" CreatureType.Humanoid 24 5000 1000 None [ Content.lightningBolt; shock ] None { X = 6; Y = 5 }
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 12 10
+      Entities = [ hunter; mob ]
+      Pending = []
+      Rng = Rng.streamsOf 3UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let hunterHealth (w: World) =
+    (w.Entities |> List.find (fun e -> e.Id = hunter.Id)).Health
+
+  let mobNow (w: World) = w.Entities |> List.find (fun e -> e.Id = EntityId 100)
+
+  // The real path a command takes: `resolveAbility` applies effects and knows
+  // nothing of the silence gate, so a test that called it directly would pass
+  // whatever `applyCommand` did.
+  let useAbility (actor: EntityId) (name: string) (target: EntityId) (w: World) =
+    SimCombat.applyCommand { ApplyAt = ticks 0; Kind = UseAbility(actor, name, target) } w
+
+  // Control: unsilenced, the mob starts the cast and the instant lands.
+  let casting = useAbility (EntityId 100) "Lightning Bolt" hunter.Id w
+  Assert.True((mobNow casting).Casting.IsSome, "the control cast should start")
+
+  let shocked = useAbility (EntityId 100) "Shock" hunter.Id w
+  Assert.True(hunterHealth shocked < hunter.Health, "the control instant should land")
+
+  // Scatter Shot: the cast in progress is cancelled and the silence is on.
+  let silenced = useAbility hunter.Id "Scatter Shot" (EntityId 100) casting
+  Assert.True((mobNow silenced).Casting.IsNone, "the cast in progress should be interrupted")
+
+  Assert.True(
+    (mobNow silenced).Auras |> List.exists Aura.isSilenced,
+    "the silence should be on the mob"
+  )
+
+  Assert.True(
+    silenced.Log |> List.exists (fun line -> line.Contains "silences"),
+    "the log should say what happened"
+  )
+
+  // Neither the cast nor the instant can start while it lasts.
+  let recast = useAbility (EntityId 100) "Lightning Bolt" hunter.Id silenced
+  Assert.True((mobNow recast).Casting.IsNone, "a silenced caster cannot start a cast")
+
+  let reShock = useAbility (EntityId 100) "Shock" hunter.Id silenced
+  Assert.Equal(hunterHealth silenced, hunterHealth reShock)
+
+  // And it ages off, so the silence is a window and not a death sentence.
+  let age (n: int) (aura: Aura) =
+    [ 1..n ] |> List.fold (fun a _ -> a |> Option.bind Aura.advance) (Some aura)
+
+  Assert.True((age 59 (Silenced(secTicks 3.0))).IsSome, "still silenced at 2.95 s")
+  Assert.True((age 60 (Silenced(secTicks 3.0))).IsNone, "free again at 3 s")
+
+/// The Warrior's crossbow: in the kit, one flat point of damage, and — the part
+/// that matters — the shot pulls. Two things had to be true for a ranged opener to
+/// be a pull at all: an ability that reaches, and a mob that reacts to being hit.
+/// Only proximity inside `aggroRadius` used to wake anything, so a Fireball or an
+/// Arcane Shot landed on a mob that went on standing there.
+[<Fact>]
+let ``a warrior carries a crossbow that pulls for one point`` () =
+  let warrior = Content.partyOf [ "Warrior" ] 24 |> List.head
+
+  Assert.Contains(warrior.Abilities, fun a -> a.Name = "Shoot")
+
+  let crossbow = warrior.Abilities |> List.find (fun a -> a.Name = "Shoot")
+  Assert.True(crossbow.Range >= 6, "a pull has to reach further than a sword")
+
+  let mob =
+    Content.mob 100 "Grunt" CreatureType.Humanoid 24 5000 1000 None [] None
+      { X = warrior.Pos.X + 4; Y = warrior.Pos.Y }
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 24 24
+      Entities = [ warrior; mob ]
+      Pending = []
+      Rng = Rng.streamsOf 3UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  Assert.False(mob.Engaged, "the mob starts unaware of the party")
+
+  let after =
+    SimCombat.applyCommand { ApplyAt = ticks 0; Kind = UseAbility(warrior.Id, "Shoot", mob.Id) } w
+
+  let hit = after.Entities |> List.find (fun e -> e.Id = mob.Id)
+
+  // One point: the crossbow announces the pull, it does not do the work.
+  Assert.Equal(4999, hit.Health)
+  Assert.True(hit.Engaged, "being hit is a pull, not a free shot")
+
+/// The pet is a real body: the hunter calls it before the first pull, and the AI
+/// mends it once it is hurt. Both orders come out of `PartyAi.decide`, because a
+/// summon the AI never issues is a pet that never exists.
+[<Fact>]
+let ``the hunter calls a pet before the first pull and mends it`` () =
+  let w =
+    Content.dungeonAt 24 1UL
+    |> Content.withRosterAt 24 [ "Warrior"; "Priest"; "Hunter"; "Mage"; "Rogue" ]
+
+  let hunter = w.Entities |> List.find (fun e -> e.Name = "Hunter")
+
+  let ordersOn (w: World) =
+    PartyAi.decide w
+    |> List.choose (fun c ->
+      match c.Kind with
+      | UseAbility(a, n, t) -> Some(a, n, t)
+      | _ -> None)
+
+  // Fifty ticks is 2.5 s: enough for the summon order to be issued and resolved.
+  let rec run (n: int) (w: World) =
+    if n = 0 then w else run (n - 1) (SimTick.step (Bench.autoPilot w) w)
+
+  let w = run 50 w
+
+  let pet =
+    w.Entities
+    |> List.filter (fun e -> e.Owner = Some hunter.Id)
+    |> List.tryHead
+
+  Assert.True(pet.IsSome, "the hunter should have called its pet before the first pull")
+  let pet = pet.Value
+
+  // Mend Pet trains at 20, so this test runs a level-24 party: at 12 the Hunter has
+  // no mend at all and the summon assertions below would be the only ones it could
+  // meet. A level-24 pet is 900.
+  Assert.Equal(900, pet.MaxHealth)
+  Assert.Equal(Party, pet.Faction)
+  Assert.True(pet.AutoAttack.IsSome, "a pet with no swing is scenery")
+  Assert.Equal(Some hunter.Id, pet.Owner)
+
+  // Hurt it, and the AI should reach for Mend Pet rather than keep shooting. The
+  // damage is a fraction of the pet's pool: a flat 600 would simply kill a
+  // level-12 pet, and a corpse is not something Mend Pet answers.
+  let hurt = SimCombat.dealDamage pet.Id (pet.MaxHealth / 2) w
+
+  Assert.Contains(
+    ordersOn hurt,
+    fun (a, n, t) -> a = hunter.Id && n = "Mend Pet" && t = pet.Id
+  )
+
+  // And Mend Pet is a heal-over-time that actually lands on the pet.
+  let mended = SimCombat.resolveAbility hunter.Id pet.Id (hunter.Abilities |> List.find (fun a -> a.Name = "Mend Pet")) hurt
+
+  Assert.True(
+    (mended.Entities |> List.find (fun e -> e.Id = pet.Id)).Auras
+    |> List.exists (fun a -> Aura.flatHealPerTick a > 0),
+    "Mend Pet should leave a heal-over-time on the pet"
+  )
+
+  // A dead pet is not replaced while its body is still on the grid.
+  let dead = SimCombat.dealDamage pet.Id pet.MaxHealth hurt
+
+  Assert.DoesNotContain(ordersOn dead, fun (_, n, _) -> n = "Summon Pet")
+
+  Assert.Equal(
+    1,
+    dead.Entities |> List.filter (fun e -> e.Owner = Some hunter.Id) |> List.length
+  )
+
+/// Multi-Shot's whole point is the second and third body: one aim, three rolls.
+[<Fact>]
+let ``multi-shot hits the target and the two nearest bodies, and no more`` () =
+  let hunter =
+    match Content.partyOf [ "Hunter" ] 24 with
+    | h :: _ -> { h with Pos = { X = 1; Y = 5 } }
+    | [] -> failwith "no hunter"
+
+  let rat (i: int) (x: int) =
+    Content.mob
+      (200 + i)
+      "Rat"
+      CreatureType.Beast
+      20
+      500
+      0
+      (Some { Min = 5; Max = 5; Ticks = secTicks 2.0; Range = 1 })
+      []
+      None
+      { X = x; Y = 5 }
+
+  // Two beside the target, one far enough away to be missed.
+  let aimed, nearA, nearB, far = EntityId 200, EntityId 201, EntityId 203, EntityId 202
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 20 12
+      Entities = [ hunter; rat 0 5; rat 1 5; rat 2 14; rat 3 6 ]
+      Pending = []
+      Rng = Rng.streamsOf 5UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  // Marshal the layout: 202 is the far one, so put it there.
+  let w =
+    { w with
+        Entities =
+          w.Entities
+          |> List.map (fun e ->
+            if e.Id = EntityId 202 then { e with Pos = { X = 14; Y = 5 } } else e) }
+
+  let healthOf (id: EntityId) (w: World) =
+    (w.Entities |> List.find (fun e -> e.Id = id)).Health
+
+  let after =
+    SimCombat.applyCommand
+      { ApplyAt = ticks 0
+        Kind = UseAbility(hunter.Id, "Multi-Shot", aimed) }
+      w
+
+  Assert.True(healthOf aimed after < 500, "the target should be hit")
+  Assert.True(healthOf nearA after < 500, "the first body beside it should be hit")
+  Assert.True(healthOf nearB after < 500, "the second body beside it should be hit")
+  Assert.Equal(500, healthOf far after)
+
+  // Four bodies is all this test has, so assert the cap directly: a kit that
+  // fired at everything would have hit `far` too.
+  Assert.Equal<Effect list>([ MultiShot 3 ], hunter.Abilities |> List.find (fun a -> a.Name = "Multi-Shot") |> fun a -> a.Effects)
+
+/// Viper Sting is paid out of the target's pool, once a second, and a pool that
+/// cannot pay for a cast is a caster the party stops hearing from.
+[<Fact>]
+let ``viper sting drains mana once a second and an empty pool refuses a cast`` () =
+  let hunter =
+    match Content.partyOf [ "Hunter" ] 24 with
+    | h :: _ -> { h with Pos = { X = 1; Y = 5 } }
+    | [] -> failwith "no hunter"
+
+  let caster =
+    Content.mob
+      300
+      "Caster"
+      CreatureType.Humanoid
+      20
+      1000
+      400
+      None
+      [ Content.lightningBolt ]
+      None
+      { X = 6; Y = 5 }
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 14 10
+      Entities = [ hunter; caster ]
+      Pending = []
+      Rng = Rng.streamsOf 7UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let manaOf (w: World) =
+    (w.Entities |> List.find (fun e -> e.Id = EntityId 300)).Resource
+
+  let stung =
+    SimCombat.applyCommand
+      { ApplyAt = ticks 0
+        Kind = UseAbility(hunter.Id, "Viper Sting", EntityId 300) }
+      w
+
+  Assert.Equal(400, manaOf stung)
+
+  Assert.True(
+    (stung.Entities |> List.find (fun e -> e.Id = EntityId 300)).Auras
+    |> List.exists (function Drained _ -> true | _ -> false),
+    "the sting should leave a drain on the target"
+  )
+
+  // It fires on the Ticks that land on a second, so one tick of resource
+  // accounting costs 15 and the next one nothing.
+  let drained = SimTick.advanceResource stung
+  Assert.Equal(385, manaOf drained)
+
+  let nextTick =
+    SimTick.advanceResource
+      { drained with
+          Entities =
+            drained.Entities
+            |> List.map (fun e ->
+              { e with Auras = e.Auras |> List.choose Aura.advance }) }
+
+  Assert.Equal(385, manaOf nextTick)
+
+  // And a pool that cannot pay the bill is a cast that never starts. Lightning
+  // Bolt is 60 mana, so 50 left in the pool is a caster with nothing to spend.
+  let broke =
+    stung
+    |> fun w ->
+      { w with
+          Entities =
+            w.Entities
+            |> List.map (fun e ->
+              if e.Id = EntityId 300 then { e with Resource = 50 } else e) }
+
+  let refused =
+    SimCombat.applyCommand
+      { ApplyAt = ticks 0
+        Kind = UseAbility(EntityId 300, "Lightning Bolt", hunter.Id) }
+      broke
+
+  Assert.True(
+    refused.Log |> List.exists (fun line -> line.Contains "not enough resource"),
+    "a drained caster should be refused"
+  )
+
+  Assert.True(
+    (refused.Entities |> List.find (fun e -> e.Id = EntityId 300)).Casting.IsNone,
+    "and the cast must not start"
+  )
 
 // ===========================================================================
 // The scripted party (PartyAi)
@@ -2215,6 +3041,7 @@ let private partyWorld (tankTarget: EntityId option) (auras: Aura list) (tankHea
   let tank = { tank with Health = tankHealth; Auras = auras }
 
   { Tick = ticks 0
+    RestTicks = ticks 0
     Grid = Grid.create 12 10
     Entities = [ tank; priest; near; far ]
     Pending = []
@@ -2261,6 +3088,7 @@ let private reincarnationWorld (cooldowns: Map<string, int<tick>>) : World =
         Target = Some(EntityId 1) }
 
   { Tick = ticks 0
+    RestTicks = ticks 0
     Grid = Grid.create 12 10
     Entities = [ warrior; shaman; near ]
     Pending = []
@@ -2280,8 +3108,10 @@ let ``reincarnation stands a dead shaman back up`` () =
   let after = SimTick.step (PartyAi.decide w) w
   let shaman = after.Entities |> List.find (fun e -> e.Name = "Shaman")
 
-  Assert.Equal(40, shaman.Health * 100 / shaman.MaxHealth)
-  Assert.Equal(40, shaman.Resource * 100 / shaman.MaxResource)
+  // Rounding-sensitive: the resurrect grants a share of the pool by integer
+  // division, and the same tick may or may not pay a point of regeneration.
+  Assert.InRange(shaman.Health * 100 / shaman.MaxHealth, 39, 41)
+  Assert.InRange(shaman.Resource * 100 / shaman.MaxResource, 39, 41)
   Assert.Equal(Running, SimState.outcome after)
 
 /// The cooldown is the whole balance of the button: a Shaman who already used it
@@ -2295,6 +3125,27 @@ let ``reincarnation on cooldown leaves the shaman dead`` () =
   Assert.Equal(0, shaman.Health)
   Assert.Equal(PartyWiped, SimState.outcome after)
   Assert.False(SimState.continues after)
+
+/// A wipe nobody can undo has to end. The Shaman's *other* resurrection is
+/// Corpse-target, and a corpse cannot cast one — nor afford it, at 0 mana — so
+/// counting it as pending would keep the run alive forever on nothing.
+[<Fact>]
+let ``a wipe with no affordable self resurrection ends the run`` () =
+  let w = reincarnationWorld (Map.ofList [ "Reincarnation", secTicks 1500.0 ])
+
+  let w =
+    SimState.mapEntity
+      (EntityId 2)
+      (fun e -> { e with Abilities = e.Abilities @ [ Content.ancestralSpirit ] })
+      w
+
+  Assert.True(SimState.outcome w = PartyWiped, "the fixture is a wipe")
+  Assert.False(SimState.resurrectionPending w)
+  Assert.False(SimState.continues w)
+
+  let after = SimTick.step (PartyAi.decide w) w
+  let shaman = after.Entities |> List.find (fun e -> e.Name = "Shaman")
+  Assert.Equal(0, shaman.Health)
 
 /// A living healer, a dead ally, and a fight still in progress — the one state
 /// Rebirth is for. A wipe would have no living Druid in it to cast.
@@ -2326,6 +3177,7 @@ let private rebirthWorld () : World =
         Target = Some(EntityId 1) }
 
   { Tick = ticks 0
+    RestTicks = ticks 0
     Grid = Grid.create 12 10
     Entities = [ { warrior with Target = Some(EntityId 100) }; druid; shaman; near ]
     Pending = []
@@ -2354,7 +3206,7 @@ let ``rebirth raises a dead ally and the healers can target them again`` () =
   let mutable w = w
   let mutable raised = 0
 
-  for _ in 1 .. 25 do
+  for _ in 1 .. 60 do
     w <- SimTick.step (PartyAi.decide w) w
     let s = w.Entities |> List.find (fun e -> e.Id = shaman)
     if raised = 0 && SimState.alive s then raised <- s.Health
@@ -2370,6 +3222,205 @@ let ``rebirth raises a dead ally and the healers can target them again`` () =
     |> fun w -> w.Entities |> List.find (fun e -> e.Id = shaman)
 
   Assert.True(healed.Health > raised, "the healers should be healing the revived member")
+
+/// A wiped party with a Shaman's Reincarnation still owed and one mob standing over
+/// the bodies: the state the wipe reset and the death spot exist for. The grid is all
+/// floor, so only distance decides what the room can see once it goes home.
+let private wipedRoom (shamanPos: Pos) : World =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  let warrior =
+    { Content.hero 1 "Warrior" Tank 1000 1000 tap 50000 [ Content.sunderArmor ] { X = 4; Y = 5 } with
+        Health = 0 }
+
+  let shaman =
+    { Content.hero
+        2
+        "Shaman"
+        Healer
+        1000
+        1666
+        tap
+        10000
+        [ Content.shamanHealingWave; Content.reincarnation; Content.ancestralSpirit ]
+        shamanPos with
+        Health = 0 }
+
+  // Stood at (5, 8) when nothing had stirred it: `Content.mob` anchors `Home` there.
+  let near =
+    { Content.mob 100 "Near" CreatureType.Humanoid 21 1000 1000 (Some tap) [] None { X = 5; Y = 8 } with
+        Engaged = true
+        Target = Some(EntityId 1) }
+
+  { Tick = ticks 0
+    RestTicks = ticks 0
+    Grid = Grid.create 12 10
+    Entities = [ warrior; shaman; near ]
+    Pending = []
+    Rng = Rng.streamsOf 3UL
+    PartyBuffs = []
+    Quests = []
+    Log = [] }
+
+/// The pull is lost, so the room leaves: home, whole, and no longer fighting. Without
+/// this the mob stands over the bodies and kills the Shaman again the moment it stands.
+[<Fact>]
+let ``reset sends hostiles home and clears the fight`` () =
+  let w = wipedRoom { X = 5; Y = 5 }
+
+  // Displaced, wounded and engaged: a mob that had chased the party down the room.
+  let displaced =
+    { w with
+        Entities =
+          w.Entities
+          |> List.map (fun e ->
+            if e.Faction = Hostile then
+              { e with Pos = { X = 1; Y = 1 }; Health = 100 }
+            else
+              e) }
+
+  let after = SimTick.step [] displaced
+  let mob = after.Entities |> List.find (fun e -> e.Faction = Hostile)
+
+  Assert.Equal({ X = 5; Y = 8 }, mob.Pos)
+  Assert.Equal(mob.MaxHealth, mob.Health)
+  Assert.False(mob.Engaged)
+  Assert.False(SimState.inCombat after)
+
+/// Corpses stay where they fell — they are the run's stake, and the spot the Shaman
+/// died in is the one the reset must not tidy up.
+[<Fact>]
+let ``reset leaves the corpses where they fell`` () =
+  let after = SimTick.step [] (wipedRoom { X = 5; Y = 5 })
+  let warrior = after.Entities |> List.find (fun e -> e.Id = EntityId 1)
+
+  Assert.Equal(0, warrior.Health)
+  Assert.Equal({ X = 4; Y = 5 }, warrior.Pos)
+  Assert.Equal(PartyWiped, SimState.outcome after)
+
+/// The margin the death spot buys: one tile past `aggroRadius`, the room that just
+/// lost the pull cannot see the body standing up in it.
+[<Fact>]
+let ``a shaman three tiles from home is not noticed when it reincarnates`` () =
+  // The wipe tick has already sent the room home; this is the tick the corpse stands up in.
+  let w = SimState.encounterReset (wipedRoom { X = 5; Y = 5 })
+  let after = SimTick.step (PartyAi.decide w) w
+  let shaman = after.Entities |> List.find (fun e -> e.Name = "Shaman")
+  let mob = after.Entities |> List.find (fun e -> e.Faction = Hostile)
+
+  Assert.True(SimState.alive shaman, "the shaman should be back on its feet")
+  Assert.False(mob.Engaged)
+
+/// Two tiles is inside it, and this is what the Shaman dies to avoid: a body the room
+/// still sees is a wipe with no way out of it.
+[<Fact>]
+let ``a shaman two tiles from home is pulled again`` () =
+  let w = SimState.encounterReset (wipedRoom { X = 5; Y = 6 })
+  let after = SimTick.step (PartyAi.decide w) w
+  let mob = after.Entities |> List.find (fun e -> e.Faction = Hostile)
+
+  Assert.True(mob.Engaged)
+
+let private lastShamanWorld (shamanPos: Pos) : World =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  let warrior =
+    { Content.hero 1 "Warrior" Tank 1000 1000 tap 50000 [ Content.sunderArmor ] { X = 4; Y = 5 } with
+        Health = 0 }
+
+  let shaman =
+    Content.hero
+      2
+      "Shaman"
+      Healer
+      1000
+      1666
+      tap
+      10000
+      [ Content.shamanHealingWave; Content.reincarnation; Content.ancestralSpirit ]
+      shamanPos
+
+  let near =
+    { Content.mob 100 "Near" CreatureType.Humanoid 21 1000 1000 (Some tap) [] None { X = 5; Y = 8 } with
+        Engaged = true
+        Target = Some(EntityId 2) }
+
+  { Tick = ticks 0
+    RestTicks = ticks 0
+    Grid = Grid.create 12 10
+    Entities = [ warrior; shaman; near ]
+    Pending = []
+    Rng = Rng.streamsOf 3UL
+    PartyBuffs = []
+    Quests = []
+    Log = [] }
+
+let private shamanOrders (w: World) =
+  PartyAi.decide w
+  |> List.filter (fun c ->
+    match c.Kind with
+    | UseAbility(a, _, _) -> a = EntityId 2
+    | MoveTo(a, _) -> a = EntityId 2
+    | Stop a -> a = EntityId 2)
+
+/// The behaviour the owner asked for: with the party down and Reincarnation ready, the
+/// last Shaman stops fighting and walks out of the room's reach, so it dies somewhere
+/// the reset can be survived from.
+[<Fact>]
+let ``the last living shaman walks away instead of fighting`` () =
+  let orders = shamanOrders (lastShamanWorld { X = 5; Y = 7 })
+
+  let casts =
+    orders
+    |> List.filter (fun c ->
+      match c.Kind with
+      | UseAbility _ -> true
+      | _ -> false)
+
+  Assert.True(List.isEmpty casts, "the last shaman should not be fighting")
+
+  let steps =
+    orders
+    |> List.choose (fun c ->
+      match c.Kind with
+      | MoveTo(_, p) -> Some p
+      | _ -> None)
+
+  Assert.Equal(1, List.length steps)
+
+  Assert.True(
+    Pos.chebyshev { X = 5; Y = 8 } steps.Head >= 3,
+    sprintf "walked to %A, still inside the room's reach" steps.Head
+  )
+
+/// Already out of reach: it stops where it stands and waits, which is the whole of the
+/// plan once the tile is right.
+[<Fact>]
+let ``a shaman already out of range holds its ground`` () =
+  let orders = shamanOrders (lastShamanWorld { X = 5; Y = 3 })
+  Assert.True(List.isEmpty orders, sprintf "expected no orders, got %A" orders)
+
+/// The other half of the plan: the body left behind is within Ancestral Spirit's reach,
+/// so the Shaman that stood up can raise the party and start again.
+[<Fact>]
+let ``ancestral spirit raises the party after the reset`` () =
+  let mutable w = wipedRoom { X = 5; Y = 5 }
+  let mutable raised = 0
+
+  for _ in 1 .. 200 do
+    w <- SimTick.step (PartyAi.decide w) w
+    let warrior = w.Entities |> List.find (fun e -> e.Id = EntityId 1)
+    if raised = 0 && SimState.alive warrior then raised <- warrior.Health
+
+  let warrior = w.Entities |> List.find (fun e -> e.Id = EntityId 1)
+  Assert.True(raised > 0, "the shaman should raise the Warrior with Ancestral Spirit")
+  Assert.InRange(raised * 100 / warrior.MaxHealth, 39, 41)
+
+[<Fact>]
+let ``ancestral spirit is in the shaman kit`` () =
+  let shaman = Content.partyOf [ "Shaman" ] 24 |> List.find (fun e -> e.Name = "Shaman")
+
+  Assert.Contains("Ancestral Spirit", shaman.Abilities |> List.map (fun a -> a.Name))
 
 /// With the Tank down, the survivors lead themselves to the nearest mob (cca018b) —
 /// and the corpse the Tank left behind must not be what the walk is measured from,
@@ -2392,6 +3443,7 @@ let ``the walking lead is never a corpse`` () =
 
   let w =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = Grid.create 12 10
       Entities = [ tank; priest; near ]
       Pending = []
@@ -2502,6 +3554,7 @@ let ``the shaman interrupts with Earth Shock`` () =
 
   let w =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = Grid.create 12 10
       Entities = [ tank; shaman; caster ]
       Pending = []
@@ -2583,6 +3636,7 @@ let ``the mage counterspells a caster out of melee reach`` () =
 
   let w =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = Grid.create 12 10
       Entities = [ tank; mage; healer ]
       Pending = []
@@ -2665,6 +3719,65 @@ let ``a manually controlled member gets no AI orders`` () =
   Assert.True(tankOrders Set.empty > 0, "the script should be driving the Tank")
   Assert.Equal(0, tankOrders (Set.singleton (EntityId 1)))
 
+/// A pull waits for the Party. The Tank that leaves the moment the last mob dies
+/// opens the next pack with the healer still down the corridor, or still empty —
+/// and out-of-combat regeneration is 15% of the pool a second, so the wait costs
+/// a couple of seconds and buys the whole pull.
+[<Fact>]
+let ``the tank waits for the party before pulling the next pack`` () =
+  // One pack nobody has noticed, six tiles off, so reaching it is a walk. The
+  // grid is widened only so a straggler can stand further out than the leash.
+  let w =
+    let basew = partyWorld None [] 1000
+
+    { basew with
+        Grid = Grid.create 20 20
+        Entities =
+          basew.Entities
+          |> List.filter (fun e -> e.Name <> "Far")
+          |> List.map (fun e ->
+            if e.Name = "Near" then
+              { e with
+                  Pos = { X = 11; Y = 5 }
+                  Engaged = false
+                  Target = None }
+            else
+              e) }
+
+  let tankMoves (w: World) =
+    PartyAi.decide w
+    |> List.exists (fun c ->
+      match c.Kind with
+      | MoveTo(a, _) when a = EntityId 1 -> true
+      | _ -> false)
+
+  let tankStops (w: World) =
+    PartyAi.decide w
+    |> List.exists (fun c ->
+      match c.Kind with
+      | Stop a -> a = EntityId 1
+      | _ -> false)
+
+  // Everyone up and stocked: the Tank leads.
+  Assert.True(tankMoves w, "a ready Party should be led to the pack")
+
+  // A healer on empty is not a ready Party, however close it stands.
+  let dry =
+    { w with
+        Entities = w.Entities |> List.map (fun e -> if e.Id = EntityId 2 then { e with Resource = 0 } else e) }
+
+  Assert.False(tankMoves dry, "the Tank should not open a pack with the healer on empty")
+  Assert.True(tankStops dry, "and it should clear the route it was already walking")
+
+  // Nor is a Party strung out beyond the leash, even on full pools.
+  let straggler =
+    { w with
+        Entities =
+          w.Entities
+          |> List.map (fun e -> if e.Id = EntityId 2 then { e with Pos = { X = 18; Y = 18 } } else e) }
+
+  Assert.False(tankMoves straggler, "the Tank should wait for a member outside the leash")
+
 /// Every rule that walks the Party hangs off the Tank: the follow leash, the
 /// step-aside shuffle, the lead to the next mob. With the Tank dead they all went
 /// quiet at once and survivors stood on cleared floor for the rest of the run —
@@ -2740,7 +3853,7 @@ let ``aura labels show a readable name, side and clock`` () =
   Assert.Equal(2, Aura.remainingSeconds (SerpentForm(ticks 21, 4)))
 
 [<Fact>]
-let ``out of combat the party recovers fast, and the mobs do not`` () =
+let ``out of combat the party waits five seconds then snaps to full, and mobs never heal`` () =
   let w = Content.gully 1UL
 
   // A cleared room: the party alone, so nothing can re-engage mid-measurement.
@@ -2757,20 +3870,35 @@ let ``out of combat the party recovers fast, and the mobs do not`` () =
   let warrior0 = idle.Entities |> List.find (fun e -> e.Name = "Warrior")
   let warrior1 = after.Entities |> List.find (fun e -> e.Name = "Warrior")
 
-  // One second of out-of-combat regeneration is 10% of the health pool and
-  // just over 7% of the resource pool, per Tick so the leftovers are truncated.
-  Assert.Equal(
-    warrior0.Health + 20 * (warrior0.MaxHealth * Content.outOfCombatHealthBpPerTick / 10000),
-    warrior1.Health)
+  // Restoring is a step, not a slope: a second of rest changes nothing, because the
+  // party has to wait five before anything comes back.
+  Assert.Equal(warrior0.Health, warrior1.Health)
 
-  // The Warrior's pool is capped at 100, so the resource numbers are read off
-  // the Priest, whose mana is the one that actually gates a pull.
   let priest0 = idle.Entities |> List.find (fun e -> e.Name = "Priest")
   let priest1 = after.Entities |> List.find (fun e -> e.Name = "Priest")
+  Assert.Equal(priest0.Resource, priest1.Resource)
 
-  Assert.Equal(
-    priest0.Resource + 20 * (priest0.MaxResource * Content.outOfCombatResourceBpPerTick / 10000),
-    priest1.Resource)
+  // Five seconds of rest plus half a second of the snap, and every pool is clean.
+  let restored = SimTick.run 110 idle
+  let warrior2 = restored.Entities |> List.find (fun e -> e.Name = "Warrior")
+  Assert.Equal(warrior2.MaxHealth, warrior2.Health)
+  let priest2 = restored.Entities |> List.find (fun e -> e.Name = "Priest")
+  Assert.Equal(priest2.MaxResource, priest2.Resource)
+
+  // Mobs are not on that clock at all: a wounded one is still wounded however long the
+  // party rests beside it. Asked of the phase directly, because through `run` the
+  // autopilot would be shooting it and the hit points would move for other reasons.
+  let wounded =
+    { w with
+        RestTicks = ticks 500
+        Entities =
+          w.Entities
+          |> List.map (fun e -> if e.Faction = Hostile then { e with Health = 1 } else e) }
+
+  let rested = SimTick.advanceOutOfCombatRegen wounded
+
+  for e in rested.Entities |> List.filter (fun e -> e.Faction = Hostile) do
+    Assert.Equal(1, e.Health)
 
   // A mob left behind stays exactly as hurt as it was: the phase is party-only.
   let mob = w.Entities |> List.find (fun e -> e.Faction = Hostile)
@@ -2797,7 +3925,9 @@ let ``out of combat the party recovers fast, and the mobs do not`` () =
 
   let fighting = SimTick.run 20 fight
   let priest2 = fighting.Entities |> List.find (fun e -> e.Name = "Priest")
-  Assert.Equal(priest0.Resource + 20, priest2.Resource)
+  // Twenty ticks of the per-Tick trickle, whatever the rate is this character's
+  // Spirit buys — the assertion is that combat pays the trickle and not the pool.
+  Assert.Equal(priest0.Resource + 20 * priest0.ResourceRegenPerTick, priest2.Resource)
 
 /// Lesser Heal restores less but wastes less: a small hole gets the cheap heal
 /// and a big one still gets the 205-mana heal that can actually cover it.
@@ -3036,7 +4166,16 @@ let ``eviscerate cashes in the combo points for its five-point damage`` () =
 /// puts a rogue who spent everything back at 20.
 [<Fact>]
 let ``a rogue's energy comes back twenty per two seconds`` () =
-  let w = Content.gully 1UL |> SimState.mapEntity (EntityId 3) (fun e -> { e with Resource = 0 })
+  // Energy refills on its own clock, but only during a fight — with nothing
+  // engaged nothing regenerates at all — so the rate is measured with a mob
+  // awake. The pull radius is two tiles and `gully`'s nearest mob stands further
+  // than that, so the engagement is stated rather than waited for.
+  let w =
+    Content.gully 1UL
+    |> fun w ->
+      let mob = w.Entities |> List.find (fun e -> e.Faction = Hostile)
+      SimState.mapEntity mob.Id (fun e -> { e with Engaged = true }) w
+    |> SimState.mapEntity (EntityId 3) (fun e -> { e with Resource = 0 })
 
   let after n =
     [ 1..n ] |> List.fold (fun (w: World) _ -> SimTick.step [] w) w |> entBy 3 |> fun e -> e.Resource
@@ -3085,6 +4224,7 @@ let ``the rogue cashes in four combo points and strikes below that`` () =
 /// state that stands in for a stealthed Rogue.
 let private calmWorld (rogue: Entity) (mobs: Entity list) : World =
   { Tick = ticks 0
+    RestTicks = ticks 0
     Grid = Grid.create 12 10
     Entities = rogue :: mobs
     Pending = []
@@ -3262,6 +4402,7 @@ let private backedWorld (rows: string list) (mobAt: Pos) (tankAt: Pos) (rogueAt:
         Target = Some(EntityId 1) }
 
   { Tick = ticks 0
+    RestTicks = ticks 0
     Grid = Grid.ofRows rows
     Entities = [ tank; rogue; mob ]
     Pending = []
@@ -3357,6 +4498,7 @@ let ``no ally steps aside onto a tile a body already holds`` () =
 
   let w =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid =
         Grid.ofRows
           [ "#########"
@@ -3415,6 +4557,7 @@ let ``a tank sealed in a tube drains the queue from the back`` () =
 
   let w =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid =
         Grid.ofRows
           [ "###########"
@@ -3595,6 +4738,7 @@ let private bossWorld (abilities: Ability list) (cooldowns: (string * int<tick>)
         Cooldowns = Map.ofList cooldowns }
 
   { Tick = ticks 0
+    RestTicks = ticks 0
     Grid = Grid.create 20 10
     Entities = [ rogue 3 { X = 5; Y = 5 }; rogue 4 { X = 7; Y = 5 }; mob ]
     Pending = []
@@ -3644,6 +4788,7 @@ let ``a stationary ally no longer severs the route behind it`` () =
 
   let w =
     { Tick = ticks 0
+      RestTicks = ticks 0
       Grid = grid
       Entities = [ blocker; mover ]
       Pending = []
@@ -3839,3 +4984,371 @@ let ``a wing starts the party on floor tiles at its entrance`` () =
           e.Level = Content.levelOf difficulty wing,
           sprintf "%s: %s is level %d" wing.Name e.Name e.Level
         )
+
+/// Innervate multiplies regeneration rather than handing mana over, so the test is
+/// that the aura lands and that one Tick of regeneration pays five times what it
+/// would have — which is why the target is told to stop casting.
+[<Fact>]
+let ``innervate multiplies the target's regeneration`` () =
+  let world =
+    Content.dungeonAt 12 1UL
+    |> Content.withRosterAt 12 [ "Warrior"; "Priest"; "Druid"; "Mage"; "Rogue" ]
+
+  // In combat, or out-of-combat regeneration (a share of the pool, and no
+  // Innervate term) would drown the measurement.
+  let engaged =
+    { world with
+        Entities =
+          world.Entities
+          |> List.map (fun e -> if e.Faction = Hostile then { e with Engaged = true } else e) }
+
+  let druid = engaged.Entities |> List.find (fun e -> e.Name = "Druid")
+  let priest = engaged.Entities |> List.find (fun e -> e.Name = "Priest")
+
+  let spent =
+    { engaged with
+        Entities =
+          engaged.Entities
+          |> List.map (fun e -> if e.Id = priest.Id then { e with Resource = e.MaxResource / 2 } else e) }
+
+  let after =
+    SimCombat.applyCommand
+      { ApplyAt = ticks 0
+        Kind = UseAbility(druid.Id, "Innervate", priest.Id) }
+      spent
+
+  let priestNow = after.Entities |> List.find (fun e -> e.Id = priest.Id)
+
+  Assert.True(
+    priestNow.Auras
+    |> List.exists (function
+      | Innervated _ -> true
+      | _ -> false),
+    "Innervate should leave an aura on the target, not a lump of mana"
+  )
+
+  let ticked (w: World) =
+    (SimTick.step [] w).Entities |> List.find (fun e -> e.Id = priest.Id) |> fun e -> e.Resource
+
+  let without = ticked spent - priest.Resource / 1
+  let with' = ticked after - priestNow.Resource
+
+  Assert.True(with' > without, sprintf "innervated regen %d should beat plain %d" with' without)
+
+/// Vanilla's five-second rule: a caster that has just spent a spell regenerates
+/// the trickle, one that has stopped gets the rate. That is the mechanic the DPS
+/// and Innervate rules are both built on.
+[<Fact>]
+let ``a caster that just cast regenerates less than one that stopped`` () =
+  let world =
+    Content.dungeonAt 12 1UL
+    |> Content.withRosterAt 12 [ "Warrior"; "Priest"; "Druid"; "Mage"; "Rogue" ]
+
+  let engaged =
+    { world with
+        Entities =
+          world.Entities
+          |> List.map (fun e -> if e.Faction = Hostile then { e with Engaged = true } else e) }
+
+  let mage = engaged.Entities |> List.find (fun e -> e.Name = "Mage")
+
+  let halfWith (recent: bool) =
+    { engaged with
+        Entities =
+          engaged.Entities
+          |> List.map (fun e ->
+            if e.Id <> mage.Id then e
+            else
+              { e with
+                  Resource = e.MaxResource / 2
+                  Auras =
+                    if recent then Aura.refresh (RecentlyCast(Content.fiveSecondRule)) e.Auras
+                    else e.Auras }) }
+
+  let gain (w: World) =
+    let before = w.Entities |> List.find (fun e -> e.Id = mage.Id) |> fun e -> e.Resource
+    (SimTick.step [] w).Entities |> List.find (fun e -> e.Id = mage.Id) |> fun e -> e.Resource - before
+
+  Assert.True(gain (halfWith false) > gain (halfWith true), "casting should cost regeneration")
+
+/// The AI gives Innervate to a healer first — the party's mana is the healer's
+/// mana — and only falls back on a damage caster when no healer is dry.
+[<Fact>]
+let ``the druid innervates the driest healer before a drier mage`` () =
+  let world =
+    Content.dungeonAt 12 1UL
+    |> Content.withRosterAt 12 [ "Warrior"; "Priest"; "Druid"; "Mage"; "Rogue" ]
+
+  let druid = world.Entities |> List.find (fun e -> e.Name = "Druid")
+  let priest = world.Entities |> List.find (fun e -> e.Name = "Priest")
+  let mage = world.Entities |> List.find (fun e -> e.Name = "Mage")
+
+  let withMana (priestPct: int) (magePct: int) =
+    { world with
+        Entities =
+          world.Entities
+          |> List.map (fun e ->
+            if e.Name = "Mage" then { e with Resource = e.MaxResource * magePct / 100; Engaged = true }
+            elif e.Name = "Priest" then { e with Resource = e.MaxResource * priestPct / 100 }
+            elif e.Faction = Hostile then { e with Engaged = true }
+            else e) }
+
+  let targets (w: World) =
+    PartyAi.decide w
+    |> List.choose (fun c ->
+      match c.Kind with
+      | UseAbility(a, n, t) when a = druid.Id && n = "Innervate" -> Some t
+      | _ -> None)
+
+  // The Mage is emptier, but the Priest is a healer and dry: the healer wins.
+  Assert.Contains(targets (withMana 20 0), fun t -> t = priest.Id)
+
+  // With every healer comfortable the Druid still spends it on the driest bar.
+  Assert.Contains(targets (withMana 100 0), fun t -> t = mage.Id)
+
+/// A totem slot holds one totem. Mana Tide is the party's reserve and Mana Spring
+/// is the standing trickle, so dropping the tide must *replace* the spring — that
+/// is what lets the AI hold the tide for a hard pull without losing the trickle it
+/// already paid for.
+[<Fact>]
+let ``mana tide replaces the mana spring in the same slot`` () =
+  // Both water totems are trained above the dungeon band — Mana Spring at 26 and
+  // Mana Tide at 40 — so this is a 60 Shaman in a bare world, which is the only
+  // place the rule can be observed at all.
+  let shaman = Content.partyOf [ "Shaman" ] 60 |> List.head
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 12 10
+      Entities = [ shaman ]
+      Pending = []
+      Rng = Rng.streamsOf 3UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let cast name w =
+    SimCombat.applyCommand
+      { ApplyAt = ticks 0
+        Kind = UseAbility(shaman.Id, name, shaman.Id) }
+      w
+
+  let spring = cast "Mana Spring Totem" w
+
+  let standing (w: World) =
+    w.Entities
+    |> List.filter (fun e -> e.Owner = Some shaman.Id && e.Totem.IsSome)
+
+  Assert.Equal(1, (standing spring).Length)
+
+  let tide = cast "Mana Tide Totem" spring
+  let water = standing tide
+
+  Assert.Equal(1, water.Length)
+  Assert.Equal("Mana Tide Totem", water.Head.Name)
+
+/// The leader's job between pulls is to let the whole party drink: the Tank holds
+/// and nobody shuffles, because a shuffle beside the first pack wakes it and the
+/// pull opens with the healer dry. Rage and Energy are deliberately not waited on
+/// — a Warrior's bar is empty by design out of combat, and waiting on it would
+/// park the party forever.
+[<Fact>]
+let ``the leader waits for every mana user to drink, not only the healers`` () =
+  let baseWorld =
+    Content.dungeonAt 12 1UL
+    |> Content.withRosterAt 12 [ "Warrior"; "Priest"; "Druid"; "Mage"; "Rogue" ]
+
+  let tank = baseWorld.Entities |> List.find (fun e -> e.Name = "Warrior")
+  let mage = baseWorld.Entities |> List.find (fun e -> e.Name = "Mage")
+
+  let withMageMana (pct: int) (w: World) =
+    { w with
+        Entities =
+          w.Entities
+          |> List.map (fun e ->
+            if e.Id = mage.Id then { e with Resource = e.MaxResource * pct / 100 } else e) }
+
+  let decisions (w: World) =
+    PartyAi.decide w
+    |> List.map (fun c -> c.Kind)
+
+  let tankMoves (kinds: CommandKind list) =
+    kinds
+    |> List.filter (fun k ->
+      match k with
+      | MoveTo(e, _) | Stop e -> e = tank.Id
+      | _ -> false)
+
+  // Followers may close up on the Tank — they are gathering to drink — but no
+  // order may send anybody away from it, which is what walking into the next pack
+  // at a quarter bar looks like.
+  let onlyTowardsTank (kinds: CommandKind list) =
+    kinds
+    |> List.choose (fun k ->
+      match k with
+      | MoveTo(_, p) -> Some p
+      | _ -> None)
+    |> List.forall (fun p -> Pos.chebyshev p tank.Pos <= 3)
+
+  // Dry Mage, no healers dry: the old gate only looked at healers, so this is the
+  // case that used to walk the party into the next pack.
+  let dry = withMageMana 25 baseWorld
+  Assert.False(SimState.inCombat dry, "the wait only applies out of combat")
+
+  let held = decisions dry
+
+  Assert.Contains(held, fun k -> k = Stop tank.Id)
+
+  Assert.True(onlyTowardsTank held, "nobody should walk away from the Tank while the party drinks")
+
+  // Topped up, the Tank is free to go: the gate is the mana, not a permanent stop.
+  let wet = withMageMana 100 baseWorld
+
+  Assert.DoesNotContain(decisions wet, fun k -> k = Stop tank.Id)
+
+// ===========================================================================
+// Rogue: poisons and the stealth opener
+// ===========================================================================
+
+/// The five poisons are not a rotation decision, they are a situational one: the
+/// choice is re-made on every landing swing from what the target is doing rather
+/// than picked once per dungeon. A healer is worth cutting, a caster worth
+/// slowing, a runner worth snaring, and anything else worth plain damage.
+[<Fact>]
+let ``the rogue's poison matches the situation`` () =
+  let world =
+    Content.dungeonAt 24 1UL
+    |> Content.withRosterAt 24 [ "Warrior"; "Priest"; "Druid"; "Mage"; "Rogue" ]
+
+  let hostiles = world.Entities |> List.filter (fun e -> e.Faction = Hostile)
+
+  let healer =
+    hostiles
+    |> List.tryFind (fun h ->
+      h.Abilities
+      |> List.exists (fun a ->
+        a.Effects |> List.exists (function Heal _ | HealOverTime _ -> true | _ -> false)))
+
+  Assert.True(healer.IsSome, "the content has a healing hostile to test Wound Poison against")
+  Assert.Equal(SimCombat.WoundPoison, fst (SimCombat.poisonPlan healer.Value hostiles))
+
+  // With no other hostile in the list nothing is near a healer, so the main hand
+  // defaults to plain damage: the poison that costs the target no debuff slot.
+  let isHealer (h: Entity) =
+    h.Abilities
+    |> List.exists (fun a ->
+      a.Effects |> List.exists (function Heal _ | HealOverTime _ -> true | _ -> false))
+
+  let plain = hostiles |> List.find (fun h -> h.Casting.IsNone && not (isHealer h))
+  Assert.Equal(SimCombat.InstantPoison, fst (SimCombat.poisonPlan plain []))
+  Assert.Equal(SimCombat.DeadlyPoison, snd (SimCombat.poisonPlan plain []))
+
+  let running = { plain with Health = plain.MaxHealth / 5 }
+  Assert.Equal(SimCombat.CripplingPoison, fst (SimCombat.poisonPlan running []))
+
+/// Two weapons, two poison slots. Coating both blades with the same vial throws a
+/// slot away, so the plan must always name two different poisons — the situation's
+/// first, and for the off hand the best one the main hand is not already using.
+[<Fact>]
+let ``the rogue coats both blades and never with the same poison`` () =
+  let world =
+    Content.dungeonAt 24 1UL
+    |> Content.withRosterAt 24 [ "Warrior"; "Priest"; "Druid"; "Mage"; "Rogue" ]
+
+  let hostiles = world.Entities |> List.filter (fun e -> e.Faction = Hostile)
+
+  for victim in hostiles do
+    let main, off = SimCombat.poisonPlan victim hostiles
+    Assert.NotEqual<SimCombat.Poison>(main, off)
+
+  // The Rogue is the one carrying them, and it swings both hands.
+  let rogue = world.Entities |> List.find (fun e -> e.Faction = Party && e.ResourceKind = Energy)
+  Assert.True(SimCombat.carriesPoison rogue)
+  Assert.True(rogue.OffHand, "the Rogue needs an off-hand for the second poison to be worth anything")
+
+/// Wound Poison is the only thing in the model that makes healing itself weaker
+/// rather than cheaper, so it has to bite in `healEntity` — every heal in the game
+/// routes through there, from a Flash Heal to a potion to a resurrection.
+[<Fact>]
+let ``wound poison cuts the healing a target receives`` () =
+  let world =
+    Content.dungeonAt 24 1UL |> Content.withRosterAt 24 [ "Warrior"; "Priest"; "Druid"; "Mage"; "Rogue" ]
+
+  let victim = world.Entities |> List.find (fun e -> e.Faction = Hostile)
+
+  // Five stacks at 15% each: a 1000 point heal lands as 250.
+  let wounded =
+    { victim with
+        Health = 0
+        MaxHealth = 10000
+        Auras = [ Wounded(ticks 200, 1500, 5) ] }
+
+  let world =
+    { world with
+        Entities =
+          world.Entities |> List.map (fun e -> if e.Id = wounded.Id then wounded else e) }
+
+  let healed = SimState.healEntity wounded.Id 1000 world
+
+  Assert.Equal(
+    250,
+    (healed.Entities |> List.find (fun e -> e.Id = wounded.Id)).Health
+  )
+
+/// Stealth is not a state in this model: an untouched enemy is the one the Rogue
+/// met from behind. Ambush is the first blow of a pull and nothing else, which is
+/// why it is excluded from the strike rotation — left in, its 250% would win every
+/// damage comparison and be spent as though stealth were free.
+[<Fact>]
+let ``the rogue opens a pull with Ambush and only then`` () =
+  let world0 =
+    Content.dungeonAt 24 1UL
+    |> Content.withRosterAt 24 [ "Warrior"; "Priest"; "Druid"; "Mage"; "Rogue" ]
+
+  let rogue = world0.Entities |> List.find (fun e -> e.Name = "Rogue")
+  let warrior = world0.Entities |> List.find (fun e -> e.Name = "Warrior")
+
+  Assert.Contains("Ambush", rogue.Abilities |> List.map (fun a -> a.Name))
+
+  // The opener picks the healthiest untouched enemy in reach, so the mob to stand
+  // next to is the healthiest hostile in the wing.
+  let mob =
+    world0.Entities
+    |> List.filter (fun e -> e.Faction = Hostile)
+    |> List.sortByDescending (fun e -> e.MaxHealth)
+    |> List.head
+
+  // `touched` wounds every hostile: once nothing in the wing is fresh, the window
+  // for an opener is shut for the whole pull, not just for one mob.
+  let world (touched: bool) =
+    { world0 with
+        Entities =
+          world0.Entities
+          |> List.map (fun e ->
+            if e.Id = rogue.Id then
+              { e with
+                  Pos = { X = mob.Pos.X + 1; Y = mob.Pos.Y }
+                  Resource = e.MaxResource }
+            elif e.Id = warrior.Id then
+              // The Party assists the Tank, so the Tank is what puts a mob on
+              // everyone's target list.
+              { e with Target = Some mob.Id }
+            elif e.Faction = Hostile then
+              { e with
+                  Engaged = true
+                  Target = Some warrior.Id
+                  Health = if touched then e.MaxHealth / 2 else e.MaxHealth
+                  Auras = if touched then [ Sundered(ticks 200, 3) ] else [] }
+            else
+              e) }
+
+  let rogueOpens (w: World) =
+    PartyAi.decide w
+    |> List.exists (fun c ->
+      match c.Kind with
+      | UseAbility(actor, name, _) -> actor = rogue.Id && name = "Ambush"
+      | _ -> false)
+
+  Assert.True(rogueOpens (world false), "an untouched enemy is a stealth opener")
+  Assert.False(rogueOpens (world true), "once the pull is under way there is no opener")
