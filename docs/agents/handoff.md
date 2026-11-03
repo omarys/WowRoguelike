@@ -50,8 +50,9 @@ only.
 | Reincarnation — no mana cost, 30 min cooldown less Improved Reincarnation, 40% pools | verified already correct, needed no change |
 | Per-ability attribution — `sim attrib`, nine-band table | shipped, `Attribution.fs` (new) |
 | Composition ladder — 36 cells, one healer per class | measured, `domain.md` §9 item 0 |
+| Corridor parks — a Tank whose next step is held by a settled ally now counts as stuck | fixed, 5 of 6 park seeds clear; one shuffle left, below |
 
-## Open bug 1 — the parks (this is the live one)
+## Open bug 1 — the parks (5 of 6 cleared, one shuffle left)
 
 A "park" is a wing run that ends `Running` at the tick cap with the party alive
 and hostiles alive: `unresolved` in the ladder table.
@@ -127,18 +128,66 @@ with `path=30`, so it never trips. A body that stands still claims its tile fore
 is stable. That is the livelock: the party walls itself in behind two members with
 nothing to do.
 
-### Direction
+### The gate: `stuckWithGoal` was too narrow
 
-Start with a red test built from exactly that state — a fixture that shows a stalled
-`path=0` before the change and movement after. `comps 2` is 8m23s, so drive this
-with a unit test, not a sweep.
+The aside shuffle was reachable all along — `movement`, which holds it, is defined
+outside `match target with` and its comment says so ("Walking orders apply in and
+out of a fight", `PartyAi.fs:1152`). What was wrong is when it looks: the aside
+only considers allies within `reach` of the Tank, and `reach` is 1 unless the Tank
+counts as stuck (`stuckWithGoal`, `PartyAi.fs:1302`). `stuckWithGoal` was
+`t.Goal.IsSome && t.Path.IsEmpty && t.Destination.IsNone`, so the Tank above — full
+`Path`, `Destination` set — read as *walking* and got `reach = 1`. The only ally
+within one tile was the Druid, and the Druid has no free neighbour. Nothing else
+was ever asked to move.
 
-1. **An idle body yields.** When a mover's first step is a goal-less teammate, order
-   that teammate a one-tile sidestep for a few ticks. Small; may just relocate the
-   stall to the next idle body.
-2. **One direction per corridor.** Queue the party on the heading of the member that
-   is actually moving, and make a body whose goal lies behind it fall in behind
-   rather than push through. Larger; removes the class.
+### The fix, and what it actually fixed
+
+A `Destination` whose tile is held by a settled body now counts as stuck
+(`heldStep`, `PartyAi.fs`), so `reach` becomes 6 and the queue is asked to drain
+from its free end. Covered by `a tank held by a settled ally drains the queue from
+the back` in `tests/WowRoguelike.Tests/Tests.fs` — red at `Some (4,4)` (the leash,
+re-aiming the Priest back through the file) before, green at `Some (10,4)` after.
+219/219 tests green.
+
+Re-measured with the fix in the binary, six seeds at `Maximum`, 40000-tick cap:
+
+| wing | seed | before | after |
+|---|---|---|---|
+| library | 1 | 40000, 15 mobs | **clears t=10100** |
+| library | 2 | 40000, 15 mobs | **clears t=11176** |
+| library | 4 | 40000, 15 mobs | **clears t=10156** |
+| library | 5 | 40000, 15 mobs | **clears t=10718** |
+| graveyard | 8 | 40000, 9 mobs | **clears t=11690** |
+| graveyard | 5 | 40000, 12 mobs | still 40000, 12 mobs — different bug, below |
+
+### The stale-DLL trap that nearly buried this
+
+`src/WowRoguelike.Harness/bin/Release/net10.0/WowRoguelike.Core.dll` is only
+refreshed by a build that includes the Harness. `dotnet test` writes
+`tests/WowRoguelike.Tests/bin/.../WowRoguelike.Core.dll` instead. So an `fsi` probe
+that `#r`s the Harness copy silently measures whatever was last built *there* — the
+first reading of this fix said "still parked, no change" from a pre-fix DLL. Check
+before believing a probe: the two copies must have the same sha256, and it must be
+the one you just built.
+
+### What is left: graveyard seed 5 is a shuffle, not a freeze
+
+Every member is moving (`stall=0`, no held `Destination`s), and `PartyAi.decide`
+issues 1 command. The party sits in a 2×3 pocket around `(37,174)` and drifts about
+one tile per ten ticks without closing on anything; the nearest mob is 9–12 tiles
+away and none of the 12 is targeting the party. Goals point at each other's tiles —
+`Priest`'s goal is the Warrior's own tile, and the Warrior and Mage share `(36,175)`
+— so the file orbits itself instead of translating.
+
+That is a different failure from the one just fixed (there, nothing moved; here,
+everything moves and nothing progresses), and it needs its own red test before it
+is touched: sample the occupied-square set over ten ticks and assert it changes
+*and* the party closes distance.
+
+Ruled out for this one: "an idle body yields". The blocker's claim-aware search on
+the frozen shape returned `len=0 expanded=8465`, i.e. no floor route avoiding the
+file exists at all — a body with no free neighbour cannot sidestep. It would only
+help in rooms with width.
 
 Note the trap: `Path.astar`'s predicate argument is `blocked` (true = impassable),
 not `passable`, while `Path.neighbours` takes `passable`. A probe with it inverted

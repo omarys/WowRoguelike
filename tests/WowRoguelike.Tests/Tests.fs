@@ -4591,6 +4591,68 @@ let ``a tank sealed in a tube drains the queue from the back`` () =
   Assert.Equal(None, moveFor 3)
   Assert.Equal(None, moveFor 4)
 
+/// A Tank mid-file whose next step is held by a settled ally. `stepToward` returns
+/// early whenever `Destination` is set, so this Tank never re-plans and never
+/// reports a stall: it looks like it is walking — full `Path`, `Destination` set —
+/// while it waits on a body that has no orders at all. Library seed 1 parked exactly
+/// here (`Warrior 15,125 dest=(16,125) goal=(32,106)`, 30 steps still on file, the
+/// Druid on `16,125` itself blocked by a goal-less Mage), and no aside fired,
+/// because a Tank with a `Path` and a `Destination` is not "stuck" by the old test.
+/// The queue has to drain from its free end.
+[<Fact>]
+let ``a tank held by a settled ally drains the queue from the back`` () =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  let tank =
+    { Content.hero 1 "Warrior" Tank 1000 1000 tap 50000 [ Content.sunderArmor ] { X = 5; Y = 4 } with
+        Goal = Some { X = 11; Y = 4 }
+        Path = [ { X = 6; Y = 4 } ]
+        Destination = Some { X = 6; Y = 4 } }
+
+  let file =
+    [ (6, 4), "Druid"; (7, 4), "Mage"; (8, 4), "Rogue"; (9, 4), "Priest" ]
+    |> List.mapi (fun i ((x, y), name) ->
+      let r = if name = "Priest" then Healer else Dps
+      Content.hero (2 + i) name r 1000 1000 tap 10000 [ Content.fireball ] { X = x; Y = y })
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid =
+        Grid.ofRows
+          [ "##############"
+            "##############"
+            "##############"
+            "##############"
+            "##.........###"
+            "##############"
+            "##############" ]
+      Entities = tank :: file
+      Pending = []
+      Rng = Rng.streamsOf 3UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let moveFor id =
+    PartyAi.decide w
+    |> List.tryPick (fun c ->
+      match c.Kind with
+      | MoveTo(a, p) when a = EntityId id -> Some p
+      | _ -> None)
+
+  // The Priest is the only member with floor behind it, so it backs into `10,4`
+  // and the file can then shift one tile per tick.
+  Assert.Equal(Some { X = 10; Y = 4 }, moveFor 5)
+
+  // The three between it and the Tank have nowhere to go and must not thrash.
+  Assert.Equal(None, moveFor 2)
+  Assert.Equal(None, moveFor 3)
+  Assert.Equal(None, moveFor 4)
+
+  // The Tank takes no aside order of its own; the file moves out of its way.
+  Assert.Equal(None, moveFor 1)
+
 /// Wedged in a dead end, every tile the Tank could stand on leaves the mob's back
 /// against a wall and the casters' line broken. The mob has to move, and it moves
 /// by following: the Tank steps away and the mob takes the tile it just left.

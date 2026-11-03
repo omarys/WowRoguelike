@@ -1298,7 +1298,24 @@ module PartyAi =
           // route existing over free floor and not over claimed floor, with three
           // allies stacked behind the Tank. Nothing was engaged, so the whole queue
           // may step away from it and the tube empties from the back.
-          let stuckWithGoal = t.Goal.IsSome && t.Path.IsEmpty && t.Destination.IsNone
+          // A Tank whose next step is a settled body is stuck just as surely as one
+          // with no route at all. `stepToward` returns early while `Destination` is
+          // set — it never re-plans, so it never reports a stall — and a Tank
+          // waiting on a body that has no orders can wait forever. Library seed 1
+          // parked exactly like that: `dest=(16,125)` onto a Druid that was itself
+          // blocked by a goal-less Mage, `path` 30 steps long, so this test called it
+          // walking and no aside ever fired. Count a held `Destination` as stuck.
+          let heldStep =
+            match t.Destination with
+            | Some d ->
+              w.Entities
+              |> List.exists (fun o ->
+                o.Id <> t.Id && SimState.alive o && o.Pos = d && o.Destination.IsNone)
+            | None -> false
+
+          let stuckWithGoal =
+            t.Goal.IsSome && (heldStep || (t.Path.IsEmpty && t.Destination.IsNone))
+
           let reach = if stuckWithGoal then 6 else 1
 
           // Stepping aside is for unsealing a Tank that is walking. While the

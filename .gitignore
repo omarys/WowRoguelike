@@ -10,3 +10,6 @@ images/
 
 # Python bytecode from the research scripts under scripts/
 __pycache__/
+
+# unipi tooling scratch
+.unipi/
