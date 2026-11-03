@@ -151,6 +151,20 @@ now clears at tick 7121. `bench-30` was refreshed deliberately (seed 3: 1133 →
 ticks, party hp 4958 → 4771, same `EncounterCleared`, mobs untouched), because traffic
 through a corridor is not the same route once bodies trade places.
 
+**Re-measured, because one lucky run is not a result.** The ladder was run twice more
+and both came back identical: 36/36 cells clean, 0 parked, 0 wipes. And the seeds
+that used to park were re-run at a **60000-tick** cap, three times their harness
+budget, precisely because "clears at 24000" cannot tell a fix from a seed that is
+merely slow: Druid 6337/7232, Paladin 6592/8451, Priest+Mage+Rogue+Hunter
+6450/6775, Priest+Mage+Warlock+Hunter 7200/8183, Priest+Mage+Hunter+Warlock
+8475/7616, Shaman control 6956/6560 — all `EncounterCleared`, 5–6 alive, under a
+third of the budget. Nothing is hiding at the cap.
+
+`SummonSpec.Lifetime` was left in place on purpose. Nothing sets it to `Some` any
+more (totems and the pet both pass `None`), so it looks like dead config — but it is
+the field the "a totem has no clock" test asserts on, and deleting it would leave
+that requirement pinned by nothing at all.
+
 ## Bug 1 as it stood — the parks (CLOSED above: one dead totem)
 
 A "park" is a wing run that ends `Running` at the tick cap with the party alive
