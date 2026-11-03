@@ -1,10 +1,10 @@
 # Handoff — WowRoguelike
 
-Written at commit `aba0722`, with this session's work on top as one WIP commit (see
-below).
+Written at commit `aba0722`, with that session's work on top as one WIP commit
+`40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**218/218 tests green**, Release build clean — re-verified on this tree with
+**219/219 tests green**, Release build clean — re-verified on this tree with
 `dotnet test tests/WowRoguelike.Tests -c Release`.
 
 Everything settled — the brief, the architecture rules, the run table, and every
@@ -12,7 +12,7 @@ decision with its reason — is in `docs/agents/domain.md`. Read that first, the
 (open work). Do not re-derive what it records; the reasoning in there is easy to
 undo by accident. This file only covers where the work stands and what is next.
 
-## The session's work is one unsplit commit
+## The session's work is two unsplit commits
 
 14 modified files and three new ones, green but committed as a checkpoint rather
 than as reviewable history:
@@ -49,8 +49,8 @@ only.
 | Out-of-combat recovery — 5 s wait, then 100% back at 10%/tick, `World.RestTicks` | implemented, tested, `domain.md:1436-1466` |
 | Reincarnation — no mana cost, 30 min cooldown less Improved Reincarnation, 40% pools | verified already correct, needed no change |
 | Per-ability attribution — `sim attrib`, nine-band table | shipped, `Attribution.fs` (new) |
-| Composition ladder — 36 cells, one healer per class | measured, `domain.md` §9 item 0 |
-| Corridor parks — a Tank whose next step is held by a settled ally now counts as stuck | fixed, 5 of 6 park seeds clear; one shuffle left, below |
+| Composition ladder — 36 cells, one healer per class | re-measured after the fix: 29 cells clean, 7 cells with 1–2 seeds parked, 0 wipes |
+| Corridor parks — a Tank whose next step is held by a settled ally now counts as stuck | fixed: 5 of 6 park seeds clear; graveyard 5 shuffles instead, below |
 
 ## Open bug 1 — the parks (5 of 6 cleared, one shuffle left)
 
@@ -193,24 +193,72 @@ Note the trap: `Path.astar`'s predicate argument is `blocked` (true = impassable
 not `passable`, while `Path.neighbours` takes `passable`. A probe with it inverted
 reports every mob on the map as unreachable — that mistake was made twice here.
 
-## Open bug 2 — the level-60 graveyard stall (older, still open)
+## Open bug 2 — cells that stall 3 tiles from a pack, both sides inert
 
-Separate from the parks, and still unexplained: graveyard at L60 runs to the
-24000-tick cap with `alive=5.0`, no kill, hostile count frozen. Previously
-attributed to `advanceMovement` holding a mover whose destination is a settled
-body's tile, with `MoveTo` rewriting `Goal`/`Path` but never `Destination`
-(`SimCombat.fs:1058`; `SimTick.stepToward` at `SimTick.fs:304`). Clearing `Destination` on that branch was tried and
-**reverted** — it unfreezes the pair and then the Tank shuttles between `(9,178)`
-and `(11,177)` with 36 mobs alive. Do not redo it. The best-standing idea was to
-give the destination up only after it has been blocked for *N* ticks, with *N* from
-a replay probe rather than a guess.
+The ladder was re-run on the fixed tree (`sim comps 2 --level 60`, 7m52s): **36
+cells, 29 clean, 0 wipes, 7 cells with 1–2 of their 2 seeds parked at the cap** —
+10 parked seeds in total, all of them in graveyard L33 or library L36, never armory
+L39:
 
-Still live, not a stale note: `sim comps 2 --level 60` on the current tree reports
-graveyard `unresolved=1` of 2 seeds for both rosters (`median-ticks=24000`,
-`alive=6.0`), and library `unresolved=1` for one of them. The blocking chain in
-Open bug 1 is the better candidate for the same signature; check whether the L60
-stall is that livelock before working on it — and note that clearing `Destination`
-was already tried and reverted.
+| roster | wing | level | unresolved | median-ticks |
+|---|---|---|---|---|
+| Warrior/Shaman/Mage/Rogue/Warlock | graveyard | 33 | 2 | 24000 |
+| Warrior/Shaman/Mage/Rogue/Warlock | library | 36 | 2 | 32000 |
+| Warrior/Priest/Shaman/Mage/Warlock | graveyard | 33 | 2 | 24000 |
+| Warrior/Paladin/Mage/Rogue/Warlock | graveyard | 33 | 1 | 24000 |
+| Warrior/Priest/Shaman/Mage/Warlock | library | 36 | 1 | 32000 |
+| Warrior/Priest/Mage/Warlock/Hunter | library | 36 | 1 | 32000 |
+| Warrior/Priest/Mage/Rogue/Hunter | graveyard | 33 | 1 | 24000 |
+
+All seven are five-member rosters, and the four with no second healer are the worst.
+Every parked seed has `alive=5.0` or `6.0`, so nothing is dying — the fight simply
+never starts.
+
+### What the parked cell actually looks like
+
+Reproduced outside the harness with `Content.withRosterAt 60 roster` on
+`Content.scarletMonasteryAt "library" Content.Median 1UL`, then stepped to the cap:
+
+- **The pack is 3 tiles away, on open floor, in the Tank's row.** Row `y=125`,
+  `x=8..22` reads `...MMM..PP.....` — mobs at 11–13, party at 16–17.
+- `Path.lineOfSight w.Grid tank.Pos mob.Pos` is **true** for all three nearest mobs.
+- Every one of the 18 mobs is reachable: a flood from the Tank's tile (via
+  `Path.neighbours` over `Grid.isFloor`) covers **8508** tiles and contains them all.
+- And yet `PartyAi.decide` leaves the Tank with `Goal=None`, while every mob has
+  `Target=None`. Nobody on either side is engaged.
+
+So this is not geometry, not pathing, not reachability, and not the corridor parks
+(in those, the Tank held a goal). It is **target acquisition**: the party does not
+pick a pack it is standing next to, and the pack does not notice the party.
+
+### It predates the park fix
+
+Built `40cd7f4` in a worktree and ran the same cell against that DLL: `tick=32000`,
+`mobs=18`, Tank at `(16,125)`, `goal=None` — identical to the fixed tree. The same
+cell parks at the map's own level too (`withRosterAt 36`: 32000 ticks, 15 mobs,
+`goal=None`), so it is not specific to the level-60 seating either.
+
+That also means the ladder's older `unresolved=6` and this run's 10 parked seeds
+are not comparable — different trees and no per-seed list on the old run. Quote
+this table, not that number.
+
+### Where to look next
+
+`strikeTarget` is handed `hostiles` already filtered to "within `leash` of the
+Tank or targeting it" (`PartyAi.fs:1055-1067`), and LoS was thought to gate that
+filter. It does not — the nearest mob passes `lineOfSight` and is still not
+selected. Read that filter as it is written before theorising further; the next
+cheap probe is to print its inputs (`hostiles` length, each mob's distance, whether
+it targets the party, its `Awake`/dormancy state) for this exact cell.
+
+Older note, still worth keeping: a graveyard L60 run to the 24000-tick cap with the
+hostile count frozen was previously attributed to `advanceMovement` holding a mover
+whose destination is a settled body's tile, `MoveTo` rewriting `Goal`/`Path` but
+never `Destination` (`SimCombat.fs:1058`; `SimTick.stepToward` at `SimTick.fs:304`).
+Clearing `Destination` on that branch was tried and **reverted** — it unfreezes the
+pair and then the Tank shuttles between `(9,178)` and `(11,177)` with 36 mobs alive.
+Do not redo it. The `Destination`-as-stuck predicate in Open bug 1 covers the same
+shape without that regression.
 
 ## How to measure without lying to yourself
 
