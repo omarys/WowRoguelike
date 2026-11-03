@@ -4,7 +4,7 @@ Written at commit `aba0722`, with that session's work on top as one WIP commit
 `40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**219/219 tests green**, Release build clean — re-verified on this tree with
+**221/221 tests green**, Release build clean — re-verified on this tree with
 `dotnet test tests/WowRoguelike.Tests -c Release`.
 
 Everything settled — the brief, the architecture rules, the run table, and every
@@ -49,10 +49,82 @@ only.
 | Out-of-combat recovery — 5 s wait, then 100% back at 10%/tick, `World.RestTicks` | implemented, tested, `domain.md:1436-1466` |
 | Reincarnation — no mana cost, 30 min cooldown less Improved Reincarnation, 40% pools | verified already correct, needed no change |
 | Per-ability attribution — `sim attrib`, nine-band table | shipped, `Attribution.fs` (new) |
-| Composition ladder — 36 cells, one healer per class | re-measured after the fix: 29 cells clean, 7 cells with 1–2 seeds parked, 0 wipes |
+| Composition ladder — 36 cells, one healer per class | re-measured after the totem fix: 32 cells clean, 4 cells with one seed parked, 0 wipes |
 | Corridor parks — a Tank whose next step is held by a settled ally now counts as stuck | fixed: 5 of 6 park seeds clear; graveyard 5 shuffles instead, below |
 
-## Open bug 1 — the parks (5 of 6 cleared, one shuffle left)
+## CLOSED — both open bugs below were one dead totem
+
+The two bugs written up under this heading were re-diagnosed by measurement on
+this tree. They were not movement bugs. Both are closed by one three-line change.
+
+Measured with `dotnet run --project src/WowRoguelike.Harness -c Release --no-build
+-- comps 2 --level 60`, 36 cells:
+
+| | before | after |
+|---|---|---|
+| cells fully clean | 29 | 32 |
+| cells with a parked seed | 7 | 4 |
+| parked seeds | 10 | 4 |
+| wipes | 0 | 0 |
+
+**Root cause.** `PartyAi.decide` built its resurrection candidate list as
+"`Faction = Party` and not alive". A Shaman's totem is `Faction = Party` too — a
+`Summon` with `Totem = Some …`, five health, immobile — so the moment a Stoneskin
+or Grace of Air totem died, that totem was the first corpse by X order and the
+Shaman cast **Ancestral Spirit at it, every tick, forever**, because a dead totem
+can never come back. Casting clears `Destination` in `SimTick.advanceMovement`, so
+each cast threw away the walk that had just been planned, and the healer never
+moved.
+
+That one loop produced both symptoms:
+
+- **Bug 2 (the 3-tile freeze).** The healer stuck in place was past `leash` of the
+  Tank, so `waiting` stayed true, so `hostiles` was emptied and the Tank was given
+  `Stop` and no goal, so nothing ever aggroed and `inCombat` stayed false. Library
+  L36 sat like that for the full 32000-tick cap. The frozen cell's own numbers say
+  it: the Shaman at 23,125 with `Destination = Some (22,125)`, `MoveTicksLeft`
+  8 → 7 → re-issued → 8, and a dead Stoneskin Totem standing on (22,125). The
+  sim was issuing `UseAbility (EntityId 2, "Ancestral Spirit", EntityId 48)` every
+  tick, and 48 was that totem.
+- **Bug 1 (graveyard seed 5).** Same loop with no totem in reach of a pull: the
+  party orbited in the 2×3 pocket while the healer re-cast, which is what the
+  mutual-goal-overlap read of the log looked like from outside. It now clears at
+  tick 11830.
+
+**The fix** (`src/WowRoguelike.Core/PartyAi.fs`): `&& e.Totem.IsNone` on both
+places that scan party corpses — the resurrection list and the `fleeing` plan's
+`corpses`, which decided which safe tile raises somebody. A summon is not a fallen
+member. No new state, no new pass, no change to movement.
+
+**Two smaller holes closed on the way there**, both in `PartyAi.decide`, both now
+carrying a unit test:
+
+- `waiting` gated on *every* member being inside `leash`. A Dps nine tiles back in
+a one-wide corridor held the party still, and the members in front of it had no
+order at all, so the file could never close. Only the healers gate it now — the
+wait exists so a pull does not start with the healer out of triage range.
+- `waiting` used to Stop the Tank and issue *nothing* to the stragglers, which
+means the wait had no exit even in principle. It is a regroup march now: anyone
+past the leash with no plan walks in to the Tank. This is what surfaced the totem
+bug — the walk was issued and thrown away every tick.
+
+Regression cover: `a healer inside the leash does not hold the pull for a trailing
+Dps` and `a member past the leash walks in to the tank while the party waits` in
+`tests/WowRoguelike.Tests/Tests.fs`, plus the whole 221-test suite, the
+`bench-30` snapshot unchanged, and the 36-cell ladder at 0 wipes.
+
+**What is left (4 seeds, 4 cells).** Every remaining cell clears its other seeds,
+so these are one-off seeds, not whole cells: graveyard L33 with the Druid, Paladin
+and Hunter rosters, and library L36 with Priest+Mage+Warlock+Hunter.
+
+They are **not** the freeze. The party is alive, the Tank holds a goal and mobs are
+left 11–20 tiles away: it walks and does not close. Library L36
+Priest+Mage+Warlock+Hunter **seed 2** still has 15 mobs and six healthy members at
+tick 60000, which is double the harness cap, so raising the budget will not answer
+it — that one is a real remaining stall and the next thing to measure. The three
+graveyard seeds have not been re-run at a longer cap yet.
+
+## Bug 1 as it stood — the parks (CLOSED above: one dead totem)
 
 A "park" is a wing run that ends `Running` at the tick cap with the party alive
 and hostiles alive: `unresolved` in the ladder table.
@@ -193,7 +265,7 @@ Note the trap: `Path.astar`'s predicate argument is `blocked` (true = impassable
 not `passable`, while `Path.neighbours` takes `passable`. A probe with it inverted
 reports every mob on the map as unreachable — that mistake was made twice here.
 
-## Open bug 2 — cells that stall 3 tiles from a pack, both sides inert
+## Bug 2 as it stood — cells that stall 3 tiles from a pack (CLOSED above)
 
 The ladder was re-run on the fixed tree (`sim comps 2 --level 60`, 7m52s): **36
 cells, 29 clean, 0 wipes, 7 cells with 1–2 of their 2 seeds parked at the cap** —

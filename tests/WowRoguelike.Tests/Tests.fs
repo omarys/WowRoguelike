@@ -4591,6 +4591,121 @@ let ``a tank sealed in a tube drains the queue from the back`` () =
   Assert.Equal(None, moveFor 3)
   Assert.Equal(None, moveFor 4)
 
+/// A party that is out of combat does not pull while any member is past `leash` of
+/// the Tank — that is the rule that keeps a pull from starting with the healer
+/// twelve tiles back. But the rule reads *every* member, and in a one-wide corridor
+/// a trailing Dps at distance 9 freezes a party that is otherwise in position: the
+/// idle in-leash member in front of it never gets an order, so the file cannot
+/// close, so the trailing member never comes inside the leash. Library L36 parked
+/// exactly here for 32000 ticks — Tank 16,125, idle Shaman 23,125 (7 tiles, inside
+/// the leash, so no order), Mage 24,125 and Warlock 25,125 (9 tiles) both stalled on
+/// the Shaman, three mobs 3 tiles from the Tank and `lineOfSight` clear.
+[<Fact>]
+let ``a healer inside the leash does not hold the pull for a trailing Dps`` () =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  // One-wide tube: mobs west, Tank, then the file east of it. The healer is 7 tiles
+  // back (inside the leash of 8) and the Dps 9 (outside it).
+  let tank =
+    Content.hero 1 "Warrior" Tank 1000 1000 tap 50000 [ Content.sunderArmor ] { X = 4; Y = 4 }
+
+  let healer =
+    Content.hero 2 "Priest" Healer 1000 1000 tap 10000 [ Content.fireball ] { X = 11; Y = 4 }
+
+  let lagging =
+    Content.hero 3 "Mage" Dps 1000 1000 tap 10000 [ Content.fireball ] { X = 13; Y = 4 }
+
+  let mob =
+    { Content.hero 100 "Scarlet Adept" Dps 300 0 tap 40 [ Content.fireball ] { X = 1; Y = 4 } with
+        Faction = Hostile
+        Role = None
+        Engaged = false }
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid =
+        Grid.ofRows
+          [ "################"
+            "################"
+            "################"
+            "################"
+            "#..............#"
+            "################"
+            "################"
+            "################" ]
+      Entities = [ tank; healer; lagging; mob ]
+      Pending = []
+      Rng = Rng.streamsOf 3UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  // The fixture has to have the shape the bug needs, or it proves nothing.
+  Assert.True(Pos.chebyshev healer.Pos tank.Pos <= 8, "the healer is not inside the leash")
+  Assert.True(Pos.chebyshev lagging.Pos tank.Pos > 8, "the Dps is not past the leash")
+  Assert.False(SimState.inCombat w, "the fixture starts in combat")
+
+  let commands = PartyAi.decide w
+
+  let movedWest id =
+    commands
+    |> List.exists (fun c ->
+      match c.Kind with
+      | MoveTo(a, p) when a = EntityId id -> p.X < 4
+      | _ -> false)
+
+  Assert.True(movedWest 1, "the Tank stood still instead of pulling the pack 3 tiles away")
+
+/// The other half of the same freeze: `waiting` Stops the Tank and used to issue
+/// nothing at all for the members past the leash, so the wait could never end — the
+/// straggler was never told to move. Nothing here is in combat and no hostile is
+/// near, which is exactly the state library L36 sat in for 32000 ticks.
+[<Fact>]
+let ``a member past the leash walks in to the tank while the party waits`` () =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  let tank =
+    Content.hero 1 "Warrior" Tank 1000 1000 tap 50000 [ Content.sunderArmor ] { X = 4; Y = 4 }
+
+  let healer =
+    Content.hero 2 "Priest" Healer 1000 1000 tap 10000 [ Content.fireball ] { X = 13; Y = 4 }
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid =
+        Grid.ofRows
+          [ "################"
+            "################"
+            "################"
+            "################"
+            "#..............#"
+            "################"
+            "################"
+            "################" ]
+      Entities = [ tank; healer ]
+      Pending = []
+      Rng = Rng.streamsOf 3UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  // Past the leash, or the regroup march is not the rule under test.
+  Assert.True(Pos.chebyshev healer.Pos tank.Pos > 8, "the healer is not past the leash")
+  Assert.False(SimState.inCombat w, "the fixture starts in combat")
+
+  let moves =
+    PartyAi.decide w
+    |> List.choose (fun c ->
+      match c.Kind with
+      | MoveTo(a, p) -> Some(a, p)
+      | _ -> None)
+
+  match moves |> List.tryFind (fun (a, _) -> a = EntityId 2) with
+  | None -> failwith "the straggler was given no walk, so the wait can never end"
+  | Some(_, p) -> Assert.Equal({ X = 5; Y = 4 }, p)
+
 /// A Tank mid-file whose next step is held by a settled ally. `stepToward` returns
 /// early whenever `Destination` is set, so this Tank never re-plans and never
 /// reports a stall: it looks like it is walking — full `Path`, `Destination` set —

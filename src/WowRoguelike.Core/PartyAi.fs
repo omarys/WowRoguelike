@@ -1041,12 +1041,21 @@ module PartyAi =
 
     let drinking = toppedUp
 
+    // The wait exists so a pull does not start with the healer twelve tiles back
+    // and out of triage range, so only the healers gate it. Reading every member
+    // froze the Party outright: in a one-wide corridor a Dps 9 tiles back (one past
+    // `leash`) held `waiting` forever while the member in front of it stood idle at
+    // 7 tiles with no order at all, so the file could never close and nothing could
+    // ever aggro. Library L36 parked that way for 32000 ticks, three mobs three
+    // tiles away with line of sight clear.
     let waiting =
       not (SimState.inCombat w)
       && (drinking
           || match tank with
              | None -> false
-             | Some t -> party |> List.exists (fun m -> Pos.chebyshev m.Pos t.Pos > leash))
+             | Some t ->
+               party
+               |> List.exists (fun m -> m.Role = Some Healer && Pos.chebyshev m.Pos t.Pos > leash))
 
     // Only fight what the Tank can reach from where it stands. Beyond the leash
     // the Party walks to the fight together instead. Everything downstream reads
@@ -1400,13 +1409,58 @@ module PartyAi =
               | Some p when p <> e.Pos -> cmd at (MoveTo(e.Id, p))
               | _ -> [])
 
+    // Waiting for a straggler used to be an order to stand still. `waiting` Stops the
+    // Tank and issues nothing else, so a member that fell past the leash was never
+    // given a walk and could never come inside it — the wait had no exit. Library L36
+    // and graveyard L33 parked there for the whole tick cap: five healthy members,
+    // nobody drinking, the healer 11 tiles back and the Tank idle. So the wait is a
+    // regroup march: whoever is past the leash walks in to the Tank.
+    //
+    // This cannot collide with the step-aside shuffle: that reaches 6 tiles at most
+    // and this only fires past the leash of 8, so no actor gets two walks in a tick.
+    let regroup =
+      match tank with
+      | Some t when waiting && not drinking ->
+        party
+        |> List.collect (fun m ->
+          if
+            m.Id = t.Id
+            || Pos.chebyshev m.Pos t.Pos <= leash
+            || m.Destination.IsSome
+            || not m.Path.IsEmpty
+          then
+            // Only someone with no plan at all: a whole-map search every tick is the
+            // expensive way to take three steps, and a walker keeps its route until
+            // it runs out.
+            []
+          else
+            let taken p =
+              w.Entities |> List.exists (fun o -> o.Id <> m.Id && SimState.alive o && o.Pos = p)
+
+            Path.neighbours (fun p -> Grid.isFloor w.Grid p && not (taken p)) t.Pos
+            |> List.sortBy (fun p -> Pos.chebyshev p m.Pos, p.X, p.Y)
+            |> List.tryHead
+            |> Option.map (fun p -> cmd at (MoveTo(m.Id, p)))
+            |> Option.defaultValue [])
+      | _ -> []
+
     // The floor. A resurrection cannot be decided in `healerOrders`: that only ever
     // sees the living, and Reincarnation is cast *by* the Shaman's own corpse. So
     // it is decided here, where the dead are still part of the world, and it is
     // decided only while a hostile is left — a corpse is not worth standing up to
     // an empty room, and a wipe is not a moment to spend a thirty-minute cooldown.
     let dead =
-      w.Entities |> List.filter (fun e -> e.Faction = Party && not (SimState.alive e))
+      w.Entities
+      |> List.filter (fun e ->
+        e.Faction = Party
+        && not (SimState.alive e)
+        // A summon is not a fallen member. A dead totem is `Faction = Party` too, so
+        // without this the Shaman picks it ahead of any real corpse — totems die at
+        // x=22 and the wounded stand to their right — and casts Ancestral Spirit at
+        // a five-health stub that can never come back. The cast cancels its walk, so
+        // the healer stayed where it was, `waiting` never cleared, the Tank never
+        // pulled, and library L36 parked for the whole tick cap that way.
+        && e.Totem.IsNone)
 
     let resurrections =
       if SimState.aliveHostiles w |> List.isEmpty then
@@ -1493,7 +1547,7 @@ module PartyAi =
             SimState.aliveHostiles w |> List.map (fun h -> defaultArg h.Home h.Pos)
 
           let corpses =
-            w.Entities |> List.filter (fun e -> e.Faction = Party && not (SimState.alive e))
+            w.Entities |> List.filter (fun e -> e.Faction = Party && not (SimState.alive e) && e.Totem.IsNone)
 
           // Ancestral Spirit reaches 8 tiles (`Content.ancestralSpirit.Range`).
           let raiseRange = 8
@@ -1522,6 +1576,7 @@ module PartyAi =
     petOrders w party at
     @ prePull
     @ movement
+    @ regroup
     @ fleeing
     @ leaderless
     @ resurrections
