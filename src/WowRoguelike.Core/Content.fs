@@ -3650,6 +3650,13 @@ module Content =
   /// Wall go with it.
   ///
   /// Mail, not plate: a Warrior does not train plate until 40.
+  ///
+  /// The ladder is one-handed all the way up, because this Warrior only ever
+  /// tanks and a tank does not give up the shield: the 28, 33 and 38 rungs used to
+  /// be 4.00 s and 3.50 s two-handers — levelling choices, unreachable by every
+  /// test here — which would have made a sword-and-shield tank a polearm user for
+  /// twelve silent levels. Each rung keeps the damage per second it had, so the
+  /// only thing that moved is the swing timer.
   let private warrior (buffs: PartyBuffKind list) (level: int) (id: int) =
     let sheet =
       { Base = humanWarriorBase
@@ -3691,9 +3698,9 @@ module Content =
       traits
       sheet
       [ (1, { Min = 29; Max = 55; Ticks = secTicks 2.7; Range = 1 })
-        (28, { Min = 104; Max = 156; Ticks = secTicks 4.0; Range = 1 })
-        (33, { Min = 104; Max = 157; Ticks = secTicks 3.5; Range = 1 })
-        (38, { Min = 104; Max = 157; Ticks = secTicks 3.5; Range = 1 })
+        (28, { Min = 70; Max = 105; Ticks = secTicks 2.7; Range = 1 })
+        (33, { Min = 80; Max = 121; Ticks = secTicks 2.7; Range = 1 })
+        (38, { Min = 80; Max = 121; Ticks = secTicks 2.7; Range = 1 })
         (40, { Min = 87; Max = 131; Ticks = secTicks 2.8; Range = 1 })
         (60, { Min = 53; Max = 100; Ticks = secTicks 1.6; Range = 1 })
         ]
