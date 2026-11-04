@@ -1164,6 +1164,20 @@ seed out of three, and a single-cell difference is not a ranking.
    Measured on the eight-seed freeze probe (24000 ticks): 8/8 frozen before, 0/8
    after, including the two seeds where the Tank lived and blocked the door.
 
+   **Forms are a stance, and a stance can be a requirement.** Tree of Life is the
+   Druid healer's default, but the operator's rule is "not exclusively": Tree of
+   Life forbids Healing Touch, so the healer shifts to human for it and returns to
+   the form afterwards. The movement penalty is deliberately not modelled. The
+   requirement lives on the `Ability`, not on the AI — one guard where abilities
+   resolve refuses an ability whose form the actor is not in, so Tree of Life
+   forbids Healing Touch as a rule rather than as a convention the AI happens to
+   keep. Shifting out needs a `Human Form` ability, because "no form" is a stance
+   the entity can be in and nothing in the kit could produce it. This changed the
+   benchmark (Druid party, all seeds still clear, ~30 ticks faster) and did **not**
+   change either failing cell on the scaled ladder — the healer's behaviour was the
+   first hypothesis for those and it is now refuted, so the open question is
+   recorded in the handoff rather than answered here.
+
    Measured at 12000 ticks, seed 1, frozen → moving: graveyard min froze at tick 8000
    with 27 mobs left and 5/5 alive at full health, and now reaches 37 left with 1
    alive; graveyard max 26 → 30 left; library max 16 left with 4 alive at 74% → 15

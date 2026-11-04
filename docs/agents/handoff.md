@@ -677,11 +677,14 @@ change below. At the level-scaled axis:
 | Warrior/Priest/Druid/Mage/Warlock | graveyard 33 | **1 of 2 unresolved** at the 24000 cap |
 
 Both are Druid cells, and the Druid is the one class whose sheet was rewritten after the
-last green scaled-axis measurement (the four-spec work), so the likely cause is per-spec
-gear or the Tree healer's now-conditional talents rather than anything in this session's
-changes. **Unmeasured, and the reason it is a TODO rather than a fix:** nothing here
-distinguishes a healing shortfall from a positioning wipe, and the library wipe takes the
-whole party (0 alive, ~7960 ticks), which is a shape no single gear line produces.
+last green scaled-axis measurement (the four-spec work). **The first hypothesis for this
+— that the Druid's healing behaviour was at fault — has been measured and refuted:** after
+the Tree of Life work (`77c184b`) gave the healer a form to heal from and a rule for
+leaving it, both cells are unchanged, cell for cell. So it is not the healer's stance, and
+not obviously its gear. The library wipe takes the whole party (0 alive, ~7960 ticks),
+which is a shape no single gear line produces. Still **unmeasured**: nothing here
+distinguishes a healing shortfall from a positioning failure, and the next step is the log
+of one library run rather than another theory.
 
 Until this is closed, "the ladder is green" means the level-60 axis and should be written
 that way.
