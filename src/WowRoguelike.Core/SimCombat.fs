@@ -653,6 +653,19 @@ module SimCombat =
 
         | Shapeshift(Humanoid, _, _) -> w
 
+        | TakeStance form ->
+          // One form at a time: the old one is dropped rather than layered. What a
+          // form is worth lives in the abilities it unlocks and the casting it
+          // forbids, not in a hidden multiplier here — so this case changes the
+          // `Shaped` aura and nothing else.
+          w
+          |> mapEntity actorId (fun e ->
+            { e with
+                Auras =
+                  Shaped form
+                  :: (e.Auras |> List.filter (fun a -> (Aura.stanceOf a).IsNone)) })
+          |> logLine (sprintf "%s shifts into %s form" actor.Name (Stances.name form))
+
         | Taunt ->
           // A shout: every hostile in range is forced, not just the one clicked.
           // Distance only — a taunt carries around a corner where a bolt would not.

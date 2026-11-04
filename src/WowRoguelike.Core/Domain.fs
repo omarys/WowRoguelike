@@ -169,12 +169,43 @@ module Empower =
       FreeMana = false
       SureCrit = false }
 
+/// A Warrior stance or a Druid form. An ability that requires one cannot be used
+/// outside it, which is what makes Overpower a Battle Stance decision rather
+/// than a button. Declared above `Aura` because an aura carries one.
+type Stance =
+  | BattleStance
+  | DefensiveStance
+  | BerserkerStance
+  | BearForm
+  | CatForm
+  | TravelForm
+  | TreeForm
+  | MoonkinForm
+
+/// The name a form is drawn and labelled with.
+module Stances =
+  let name =
+    function
+    | BattleStance -> "battle"
+    | DefensiveStance -> "defensive"
+    | BerserkerStance -> "berserker"
+    | BearForm -> "bear"
+    | CatForm -> "cat"
+    | TravelForm -> "travel"
+    | TreeForm -> "tree"
+    | MoonkinForm -> "moonkin"
+
 /// A timed state on an Entity.
 type Aura =
   /// Druid's Slumber. Any hostile action wakes the target.
   | Sleeping of remaining: int<tick>
   /// Serpent Form: extra physical damage, and no casting while shifted.
   | SerpentForm of remaining: int<tick> * bonusDamage: int
+  /// A Druid form or a Warrior stance. Unlike every other aura this one has no
+  /// clock: it lasts until another form replaces it, because a form is a stance
+  /// you hold rather than a buff you refresh. Bear and Cat also stop the holder
+  /// casting (see `preventsCasting`), which is what makes shifting a decision.
+  | Shaped of form: Stance
   /// Cheap Shot / Kidney Shot. Cannot act, but unlike Sleep it is not broken by
   /// damage.
   | Stunned of remaining: int<tick>
@@ -256,6 +287,7 @@ module Aura =
     function
     | Sleeping r when r > ticks 1 -> Some(Sleeping(r - ticks 1))
     | SerpentForm(r, b) when r > ticks 1 -> Some(SerpentForm(r - ticks 1, b))
+    | Shaped _ as s -> Some s
     | Stunned r when r > ticks 1 -> Some(Stunned(r - ticks 1))
     | Rooted r when r > ticks 1 -> Some(Rooted(r - ticks 1))
     | Polymorphed r when r > ticks 1 -> Some(Polymorphed(r - ticks 1))
@@ -279,10 +311,14 @@ module Aura =
     | Innervated(r, bp) when r > ticks 1 -> Some(Innervated(r - ticks 1, bp))
     | _ -> None
 
+  /// The name a form is drawn and labelled with. Declared before `describe`
+  /// because F# binds in file order and both of them want it.
+
   let describe =
     function
     | Sleeping r -> sprintf "sleep(%d)" r
     | SerpentForm(r, b) -> sprintf "serpent(%d,+%d)" r b
+    | Shaped f -> sprintf "shaped(%s)" (Stances.name f)
     | Stunned r -> sprintf "stun(%d)" r
     | Rooted r -> sprintf "root(%d)" r
     | Polymorphed r -> sprintf "poly(%d)" r
@@ -311,6 +347,7 @@ module Aura =
     function
     | Sleeping _ -> "SLEEP"
     | SerpentForm _ -> "SERPENT"
+    | Shaped f -> (Stances.name f).ToUpperInvariant()
     | Stunned _ -> "STUN"
     | Rooted _ -> "ROOTED"
     | Polymorphed _ -> "POLYMORPH"
@@ -423,6 +460,13 @@ module Aura =
     | SerpentForm _ -> true
     | _ -> false
 
+  /// The form this aura puts its holder in, if any. Forms replace each other, so
+  /// this is the whole of the current-form query — there is never a list of them.
+  let stanceOf =
+    function
+    | Shaped f -> Some f
+    | _ -> None
+
   let isSilenced =
     function
     | Silenced _ -> true
@@ -438,6 +482,7 @@ module Aura =
   let preventsCasting =
     function
     | Sleeping _ | SerpentForm _ | Stunned _ | Polymorphed _ | Silenced _ -> true
+    | Shaped(BearForm | CatForm) -> true
     | _ -> false
 
   /// True when this aura stops its holder moving.
@@ -555,6 +600,7 @@ module Aura =
     function
     | Sleeping _ -> 0
     | SerpentForm _ -> 1
+    | Shaped _ -> 22
     | Stunned _ -> 2
     | Rooted _ -> 3
     | Polymorphed _ -> 4
@@ -774,6 +820,10 @@ type Effect =
   | Silence of duration: int<tick>
   | Sleep of duration: int<tick>
   | Shapeshift of form: Form * duration: int<tick> * bonusDamage: int
+  /// Enter a form and stay in it: no clock, no stack, and it replaces whatever
+  /// form the caster was in. The state lives as a `Shaped` aura so that one
+  /// place (`Aura.advance`) still owns every aura's lifetime.
+  | TakeStance of stance: Stance
   | Taunt
   /// Spell damage to every hostile within `radius` tiles of the caster. No
   /// friendly fire, and not mitigated by armour.
@@ -926,17 +976,8 @@ type ResourceKind =
   | Rage
   | Energy
 
-/// A Warrior stance or a Druid form. An ability that requires one cannot be used
-/// outside it, which is what makes Overpower a Battle Stance decision rather
-/// than a button.
-type Stance =
-  | BattleStance
-  | DefensiveStance
-  | BerserkerStance
-  | BearForm
-  | CatForm
-  | TravelForm
-
+/// A Warrior stance or a Druid form. Moved above `Aura`, which carries one.
+///
 /// One rank of an ability: the numbers a character gets when they train it.
 /// Cast time, cooldown and range live here too, because they genuinely differ
 /// between ranks (Healing Touch grows from 2.5 s to 3.5 s as it ranks up).

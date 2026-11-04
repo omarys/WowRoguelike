@@ -444,8 +444,21 @@ type RoguelikeGame(?browse: int * uint64) as this =
         | _ -> "sprites/totem_water"
       | None -> ""
 
+    // A Druid in a form is drawn as that form: the sheet carries cat, bear, tree
+    // and moonkin. Travel Form has no art yet, so it stays in its own shape
+    // rather than borrowing another form's body.
+    let formKey =
+      match SimState.stance e with
+      | Some BearForm -> "sprites/bear_form"
+      | Some CatForm -> "sprites/cat_form"
+      | Some TreeForm -> "sprites/tree_form"
+      | Some MoonkinForm -> "sprites/moonkin_form"
+      | _ -> ""
+
     if SimState.isShifted e then
       "sprites/serpent"
+    elif formKey <> "" then
+      formKey
     elif totemKey <> "" then
       totemKey
     elif named <> "" then

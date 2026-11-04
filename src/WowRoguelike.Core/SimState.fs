@@ -172,6 +172,10 @@ module SimState =
 
   let isShifted (e: Entity) = e.Auras |> List.exists Aura.isSerpentForm
 
+  /// The form a body is in: Bear, Cat, Travel, Tree or Moonkin. None is a body
+  /// in its own shape, which is why this is an option rather than a default.
+  let stance (e: Entity) = e.Auras |> List.tryPick Aura.stanceOf
+
   let isSilenced (e: Entity) = e.Auras |> List.exists Aura.isSilenced
 
   let serpentBonus (e: Entity) = e.Auras |> List.sumBy Aura.bonusDamage

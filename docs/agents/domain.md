@@ -1625,12 +1625,16 @@ delegate-runs/<runId>/activity.jsonl`) and verify the file on disk (a clean
   tree/moonkin). A totem is drawn by its slot rather than its name —
   `TotemSlot.ofPulse` — so `totem_earth`/`air`/`water` follow the AI's own rule
   and a renamed totem keeps its art; `totem_fire` is sliced with nothing mapping
-  to it, because no fire pulse exists. The pet is `Name = "Pet"`. The four Druid
-  forms are sliced and loaded but **nothing draws them**: `Stance` (BearForm,
-  CatForm, TravelForm) is an `AbilityDef` requirement that never appears in
-  `SimCombat`, `SimState`, `PartyAi` or `SimTick`, so no entity carries a current
-  form for `spriteKey` to read. Wiring the art needs a form state in the sim
-  first, which is a gameplay change, not an art one.
+  to it, because no fire pulse exists. The pet is `Name = "Pet"`. Of the four
+  Druid forms, **Bear, Cat, Tree and Moonkin are drawn**: `TakeStance` sets a
+  `Shaped` aura (`Aura.stanceOf`, `SimState.stance`) and `spriteKey` reads it.
+  Travel Form is still un-drawn and has no art sliced, so a travelling body
+  stays in its own shape rather than borrowing another form's. What is *not*
+  built yet is the gameplay that picks a form: nothing in `PartyAi` or `Content`
+  hands a Druid a form button, because the Druid is still a Healer only and Cat
+  and Moonkin need a Dps/caster Druid to inhabit. Bear and Cat do forbid casting
+  (`Aura.preventsCasting`), so the mechanic is enforced the moment something
+  shifts.
 - **Maps for five further dungeons** (Ragefire Chasm, Razorfen Kraul, Shadowfang
   Keep, The Deadmines, The Stockade) are extracted into `images/Maps/`, and
   Blackfathom Deeps exists only as sliced tiles/sprites in `Assets/`. Per-map

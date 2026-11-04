@@ -5672,3 +5672,67 @@ let ``the rogue opens a pull with Ambush and only then`` () =
 
   Assert.True(rogueOpens (world false), "an untouched enemy is a stealth opener")
   Assert.False(rogueOpens (world true), "once the pull is under way there is no opener")
+
+/// A Druid form is a stance, not a buff: it carries no clock and one replaces
+/// the next, so the aura layer is where both facts have to hold.
+[<Fact>]
+let ``a Druid form has no clock and one form replaces another`` () =
+  let bear = Shaped BearForm
+  let cat = Shaped CatForm
+
+  // No clock: ageing it a thousand times leaves it exactly where it was.
+  let aged =
+    List.fold (fun a _ -> Aura.advance a |> Option.defaultValue (Shaped MoonkinForm)) bear [ 1 .. 1000 ]
+  Assert.Equal<Stance option>(Some BearForm, Aura.stanceOf aged)
+
+  // One at a time is what `kind` is for: a new form refreshes the same slot.
+  Assert.Equal(Aura.kind bear, Aura.kind cat)
+  Assert.Equal(Aura.kind bear, Aura.kind (Shaped TreeForm))
+
+  // Bear and Cat are the feral forms, and the point of them is that a body in
+  // one cannot cast. Tree and Moonkin are caster forms and must not be silenced.
+  Assert.True(Aura.preventsCasting (Shaped BearForm))
+  Assert.True(Aura.preventsCasting (Shaped CatForm))
+  Assert.False(Aura.preventsCasting (Shaped TreeForm))
+  Assert.False(Aura.preventsCasting (Shaped MoonkinForm))
+
+[<Fact>]
+let ``shifting into Cat Form holds, and Bear Form locks the caster out`` () =
+  let w = Content.gully 1UL
+  let druid = w.Entities |> List.find (fun e -> e.Name = "Druid")
+
+  // The forms are content but not yet in a kit: the AI policy that picks one is
+  // a later step, so the test hands the Druid the buttons itself.
+  let w =
+    SimState.mapEntity druid.Id (fun e ->
+      { e with
+          Abilities =
+            [ Content.catForm; Content.bearForm; Content.treeOfLife ] @ e.Abilities }) w
+
+  let shift name =
+    SimCombat.applyCommand { ApplyAt = ticks 1; Kind = UseAbility(druid.Id, name, druid.Id) } w
+
+  let stanceAfter (world: World) =
+    world.Entities |> List.find (fun e -> e.Id = druid.Id) |> SimState.stance
+
+  Assert.Equal<Stance option>(None, stanceAfter w)
+  Assert.True((w.Entities |> List.find (fun e -> e.Id = druid.Id) |> SimState.canCast), "a body in its own shape casts")
+
+  let w = shift "Cat Form"
+  Assert.Equal<Stance option>(Some CatForm, stanceAfter w)
+
+  // Still a cat a long time later: nothing ages a form away.
+  let later = SimTick.run 400 w
+  Assert.Equal<Stance option>(Some CatForm, stanceAfter later)
+
+  let w = shift "Bear Form"
+  Assert.Equal<Stance option>(Some BearForm, stanceAfter w)
+
+  // One form, not two: the cat was dropped, not stacked under the bear.
+  let bear = w.Entities |> List.find (fun e -> e.Id = druid.Id)
+  Assert.Equal(1, bear.Auras |> List.filter (Aura.stanceOf >> Option.isSome) |> List.length)
+  Assert.False(SimState.canCast bear, "a bear cannot cast")
+
+  // And a caster form gives the spellbook back.
+  let tree = shift "Tree of Life"
+  Assert.True(SimState.canCast (tree.Entities |> List.find (fun e -> e.Id = druid.Id)))

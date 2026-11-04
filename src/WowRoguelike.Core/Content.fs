@@ -3494,6 +3494,26 @@ module Content =
   let private naturesSwiftness =
     nextSpell "Nature's Swiftness" (secTicks 180.0) 0 { Empower.none with Instant = true }
 
+  /// A Druid form. Instant, free, no cooldown: what a form costs is the casting
+  /// it forbids (`Aura.preventsCasting` for Bear and Cat), so charging mana for
+  /// entering one would charge for it twice. A single `Ability` rather than a
+  /// `AbilityDef`, because a form has no ranks — it does not scale, it just is.
+  let private form (stance: Stance) (name: string) =
+    { Name = name
+      CastTicks = ticks 0
+      CooldownTicks = ticks 0
+      ResourceCost = 0
+      Interruptible = false
+      Range = 0
+      TargetKind = Self
+      Effects = [ TakeStance stance ] }
+
+  let bearForm = form BearForm "Bear Form"
+  let catForm = form CatForm "Cat Form"
+  let travelForm = form TravelForm "Travel Form"
+  let treeOfLife = form TreeForm "Tree of Life"
+  let moonkinForm = form MoonkinForm "Moonkin Form"
+
   /// Divine Favor: the next healing spell is a guaranteed crit.
   let private divineFavor =
     nextSpell "Divine Favor" (secTicks 120.0) 21 { Empower.none with SureCrit = true }
