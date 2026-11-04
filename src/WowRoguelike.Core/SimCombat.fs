@@ -364,6 +364,10 @@ module SimCombat =
           | None -> 0, w
 
         let swing = rolled + actor.MeleeDamageBonus
+        // The tree's share of a weapon strike, on the same principle as the heal
+        // share in the heal path: one multiply, and a character with no talents
+        // multiplies by 10000.
+        let swing = swing * Talents.damageBp ability.Name actor.Talents / 10000
         let critBonus = if ability.Name = "Backstab" then actor.BackstabCritBonusBp else 0
         let amount, w = meleeStrike actor victim (swing * multiplierBp / 10000 + bonus) critBonus w
         let w = dealDamage victim amount w
@@ -376,6 +380,7 @@ module SimCombat =
         match effect with
         | Damage(lo, hi) ->
           let rolled, w = rollRange lo hi w
+          let rolled = rolled * Talents.damageBp ability.Name actor.Talents / 10000
           let critBonus = if ability.Name = "Backstab" then actor.BackstabCritBonusBp else 0
           let amount, w = meleeStrike actor targetId rolled critBonus w
           let w = dealDamage targetId amount w
@@ -437,6 +442,7 @@ module SimCombat =
 
         | SpellDamage(lo, hi) ->
           let rolled, w = rollRange lo hi w
+          let rolled = rolled * Talents.damageBp ability.Name actor.Talents / 10000
           let amount, w = spellHit ability.Name actor targetId rolled w
           let amount, w = rollCrit actor.CritChanceBp amount w
           let w = dealDamage targetId amount w

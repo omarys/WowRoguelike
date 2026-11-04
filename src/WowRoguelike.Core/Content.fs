@@ -3351,6 +3351,7 @@ module Content =
         { Spell = name
           CostBp = 2500
           HealBp = 0
+          DamageBp = 0
           CritBp = 0
           CastTicksOff = ticks 0 } ]
 
@@ -3378,6 +3379,7 @@ module Content =
           { Spell = "Healing Wave"
             CostBp = 0
             HealBp = 0
+            DamageBp = 0
             CritBp = 0
             CastTicksOff = secTicks 0.5 }
           :: totemDiscount }
@@ -3394,6 +3396,7 @@ module Content =
           [ { Spell = "Flash of Light"
               CostBp = 0
               HealBp = 1200
+              DamageBp = 0
               CritBp = 0
               CastTicksOff = ticks 0 } ] }
 
@@ -3419,16 +3422,19 @@ module Content =
           [ { Spell = "Healing Touch"
               CostBp = 1000
               HealBp = 0
+              DamageBp = 0
               CritBp = 0
               CastTicksOff = ticks 0 }
             { Spell = "Rejuvenation"
               CostBp = 0
               HealBp = 1500
+              DamageBp = 0
               CritBp = 0
               CastTicksOff = ticks 0 }
             { Spell = "Regrowth"
               CostBp = 0
               HealBp = 0
+              DamageBp = 0
               CritBp = 5000
               CastTicksOff = ticks 0 } ] }
 
@@ -3452,6 +3458,7 @@ module Content =
               { Spell = name
                 CostBp = 1500
                 HealBp = 0
+                DamageBp = 0
                 CritBp = 0
                 CastTicksOff = ticks 0 } ] }
 

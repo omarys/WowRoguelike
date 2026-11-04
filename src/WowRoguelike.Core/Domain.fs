@@ -1112,6 +1112,10 @@ type SpellTalent =
     CostBp: int
     /// Percent added to this spell's heal, in basis points.
     HealBp: int
+    /// Percent added to this spell's damage, in basis points (Fire Power on
+    /// Fireball). The damage half of `HealBp`, and the reason a build can put
+    /// more into one nuke than another.
+    DamageBp: int
     /// Percent added to this spell's crit chance, in basis points.
     CritBp: int
     /// Ticks taken off this spell's cast time.
@@ -1129,8 +1133,16 @@ type Talents =
   { /// Percent added to every heal this character lands (Purification, Gift of
     /// Nature, Spiritual Healing), in basis points.
     HealDoneBp: int
+    /// Percent added to every point of damage this character deals, melee or
+    /// spell (Arcane Instability, Piercing Howl's opposite, Force of Will). The
+    /// damage half of `HealDoneBp`: a talent that raises damage by ten percent
+    /// is the same shape as one that raises healing.
+    DamageDoneBp: int
     /// Percent off the mana cost of every healing spell (Tidal Focus), bp.
     HealCostBp: int
+    /// Percent off the mana cost of every damaging spell (Frost Channeling,
+    /// improved Fireball's cheaper sibling), bp.
+    SpellCostBp: int
     /// Percent added to Intellect before the pools are derived (Ancestral
     /// Knowledge, Divine Intellect), bp.
     IntellectBp: int
@@ -1161,7 +1173,9 @@ module Talents =
 
   let none =
     { HealDoneBp = 0
+      DamageDoneBp = 0
       HealCostBp = 0
+      SpellCostBp = 0
       IntellectBp = 0
       RegenBp = 0
       ManaRefundOnCritBp = 0
@@ -1181,10 +1195,23 @@ module Talents =
     + t.HealDoneBp
     + (spell name t |> Option.map (fun s -> s.HealBp) |> Option.defaultValue 0)
 
+  /// Percent this character adds to one spell's damage, in basis points: the
+  /// tree's own bonus plus the spell's own line. The damage twin of `healBp`.
+  ///
+  /// shortcut: periodic damage is not covered. A `DamageOverTime` track carries no
+  /// ability name by the time it ticks, so a talent that only raises a DoT (Improved
+  /// Moonfire's initial hit is direct, its burn is not) has to wait for the aura to
+  /// carry its source. Direct hits, weapon strikes and Multi-Shot all take it.
+  let damageBp (name: string) (t: Talents) =
+    10000
+    + t.DamageDoneBp
+    + (spell name t |> Option.map (fun s -> s.DamageBp) |> Option.defaultValue 0)
+
   /// Percent off one spell's mana cost, in basis points. `healing` picks up the
-  /// tree-wide healing discount as well as the spell's own line.
+  /// tree-wide healing discount as well as the spell's own line, and everything
+  /// else picks up the spell-damage discount.
   let costBp (name: string) (healing: bool) (t: Talents) =
-    (if healing then t.HealCostBp else 0)
+    (if healing then t.HealCostBp else t.SpellCostBp)
     + (spell name t |> Option.map (fun s -> s.CostBp) |> Option.defaultValue 0)
 
   /// Ticks off one spell's cast time.

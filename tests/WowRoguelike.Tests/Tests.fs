@@ -2194,6 +2194,80 @@ let ``a resto shaman's heal beats the same shaman with no talents`` () =
     sprintf "the talented shaman should heal for more: %d vs %d" talented plain
   )
 
+/// The damage half of the tree, held to the same promise as the healing half:
+/// a talent that raises damage raises the number that lands, on a weapon strike
+/// and on a nuke alike, and a build with no points multiplies by exactly 10000.
+/// The same seed gives the same rolls, so the only difference between the two
+/// runs is the talent.
+[<Fact>]
+let ``a damage talent raises a weapon strike and a nuke alike`` () =
+  let party = Content.partyOf [ "Warrior"; "Rogue"; "Mage" ] 24
+  let warrior = party.[0]
+  let rogue = party.[1]
+  let mage = party.[2]
+
+  let dealtBy (hero: Entity) (ability: string) =
+    let tank = { warrior with Pos = { X = 5; Y = 5 } }
+
+    // Enough health that nothing dies mid-measurement. Same level as the party:
+    // a level-60 dummy makes every swing miss, which measures the hit table
+    // rather than the talent.
+    let dummy =
+      { Content.mob 100 "Dummy" CreatureType.Humanoid 24 400000 400000 None [] None { X = 6; Y = 5 } with
+          Engaged = true
+          Target = Some tank.Id }
+
+    let hero = { hero with Pos = { X = 5; Y = 6 } }
+
+    let mutable w =
+      { Tick = ticks 0
+        RestTicks = ticks 0
+        Grid = Grid.create 12 10
+        Entities = [ tank; hero; dummy ]
+        Pending = []
+        Rng = Rng.streamsOf 11UL
+        PartyBuffs = []
+        Quests = []
+        Log = [] }
+
+    let damageIn (line: string) =
+      let parts = line.Split ' '
+
+      if parts.[0] = hero.Name + "'s" && line.Contains(" " + ability + " hits ") then
+        match System.Int32.TryParse parts.[parts.Length - 1] with
+        | true, n -> n
+        | _ -> 0
+      else
+        0
+
+    let mutable dealt = 0
+
+    // Twenty seconds: the mage's first nuke lands well after the rogue's first
+    // Backstab, and the comparison is worthless if one of them never fires.
+    for _ in 1..400 do
+      w <- SimTick.step (Bench.autoPilot w) w
+      dealt <- dealt + (w.Log |> List.sumBy damageIn)
+
+    dealt
+
+  let talented = { Talents.none with DamageDoneBp = 1000 }
+
+  for hero, ability in [ rogue, "Backstab"; mage, "Arcane Missiles" ] do
+    let plain = dealtBy hero ability
+    let boosted = dealtBy { hero with Talents = talented } ability
+
+    Assert.True(plain > 0, sprintf "expected %s to land a %s at all, dealt %d" hero.Name ability plain)
+
+    Assert.True(
+      boosted > plain,
+      sprintf
+        "a 10%% damage talent should raise %s's %s: %d vs %d"
+        hero.Name
+        ability
+        boosted
+        plain
+    )
+
 /// The Druid's two changes: the Nature's Swiftness button, which the class was
 /// missing while the Shaman had it, and Improved Regrowth's crit chance, which is
 /// the talent that makes Regrowth the Druid's crit heal. Both are content, so both
