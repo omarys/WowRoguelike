@@ -29,6 +29,27 @@ module PartyAi =
   /// how a scripted Party wipes to one boss room.
   let private leash = 8
 
+  /// The ability that puts the holder in `s`, if the kit carries one. A shift is
+  /// one action of the same kind as any other, so this is all a shape change is.
+  let private shiftTo (e: Entity) (s: Stance) =
+    e.Abilities
+    |> List.tryFind (fun a ->
+      a.Effects
+      |> List.exists (function
+        | TakeStance f -> f = s
+        | _ -> false))
+
+  /// The form a body goes back to when it has no reason to be in another: the
+  /// first form the kit offers, because a kit lists its own shape before the
+  /// shift back out of it (`Content`'s Druid kits end `[ treeOfLife; humanForm ]`).
+  let private homeForm (e: Entity) =
+    e.Abilities
+    |> List.tryPick (fun a ->
+      a.Effects
+      |> List.tryPick (function
+        | TakeStance f -> Some f
+        | _ -> None))
+
   let private cmd (at: int<tick>) (kind: CommandKind) = [ { ApplyAt = at; Kind = kind } ]
 
   let private interrupts =
@@ -520,12 +541,36 @@ module PartyAi =
       |> List.sortBy (fun p -> Pos.chebyshev h.Pos p)
       |> List.tryHead
 
+    /// The shift back to the shape the class lives in, when it is in the wrong one.
+    let home =
+      homeForm h
+      |> Option.bind (fun s -> if SimState.inStance h s then None else shiftTo h s)
+      |> Option.map (fun f -> cmd at (UseAbility(h.Id, f.Name, h.Id)))
+
+    /// The shift that makes a cast legal, when the spell names a shape. One action
+    /// per Tick like any other order: a Tree Druid that wants Healing Touch shifts
+    /// out first, casts next Tick, and is given the form back after.
+    let shapeFor (a: Ability) =
+      match a.Stance with
+      | Some s when not (SimState.inStance h s) ->
+        shiftTo h s |> Option.map (fun f -> cmd at (UseAbility(h.Id, f.Name, h.Id)))
+      | _ -> None
+
     // Into range, or not worth it: the reach rule is SimState's, never restated.
     let order (choice: Ability option) (t: Entity) =
       match choice with
-      | Some a when SimState.canReach a.Range h t w -> cmd at (UseAbility(h.Id, a.Name, t.Id))
-      | Some a ->
-        cmd at (MoveTo(h.Id, healingSpot t a |> Option.defaultValue t.Pos))
+      | Some a when SimState.canReach a.Range h t w ->
+        (match shapeFor a with
+         | Some shift -> shift
+         // Nothing here makes staying human cost anything, but the form is the point
+         // of the spec: once the hole is not a hole, the tree is where the healer
+         // belongs. A calm target can spare the Tick; a dying one cannot.
+         | None when not (needsFastHeal t) ->
+           (match home with
+            | Some back -> back
+            | None -> cmd at (UseAbility(h.Id, a.Name, t.Id)))
+         | None -> cmd at (UseAbility(h.Id, a.Name, t.Id)))
+      | Some a -> cmd at (MoveTo(h.Id, healingSpot t a |> Option.defaultValue t.Pos))
       | None -> []
 
     /// Into a direct heal: the cooldown first when it is up and the target is in
@@ -661,8 +706,8 @@ module PartyAi =
 
         match directFor deficit with
         | Some a when healsOf a / 2 <= deficit -> order (Some a) t
-        | _ -> []
-      | _ -> []
+        | _ -> Option.defaultValue [] home
+      | _ -> Option.defaultValue [] home
 
   /// A Shaman keeps one totem of each element up, the way the class plays them:
   /// earth, air, then water, each dropped at his feet to stand for two minutes.

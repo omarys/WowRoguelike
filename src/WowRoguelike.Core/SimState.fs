@@ -176,6 +176,13 @@ module SimState =
   /// in its own shape, which is why this is an option rather than a default.
   let stance (e: Entity) = e.Auras |> List.tryPick Aura.stanceOf
 
+  /// Standing in `s`. A body in its own shape is human, and carries no form aura
+  /// to match, so `None` is the human case rather than "no answer".
+  let inStance (e: Entity) (s: Stance) =
+    match stance e with
+    | None -> s = HumanForm
+    | Some f -> f = s
+
   let isSilenced (e: Entity) = e.Auras |> List.exists Aura.isSilenced
 
   let serpentBonus (e: Entity) = e.Auras |> List.sumBy Aura.bonusDamage

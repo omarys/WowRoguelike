@@ -905,6 +905,9 @@ type Ability =
     CastTicks: int<tick>
     CooldownTicks: int<tick>
     ResourceCost: int
+    /// The stance or form the ability requires, if any. Carried down from the
+    /// `AbilityDef` because combat only ever sees the resolved `Ability`.
+    Stance: Stance option
     Interruptible: bool
     /// In tiles. 1 is melee; a mob at range 1 is "within melee range" for the
     /// threat margins.
@@ -1020,6 +1023,7 @@ module AbilityDef =
         CastTicks = r.CastTicks
         CooldownTicks = r.CooldownTicks
         ResourceCost = r.Cost
+        Stance = d.Stance
         Interruptible = d.Interruptible
         Range = r.Range
         TargetKind = d.TargetKind

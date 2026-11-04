@@ -2131,23 +2131,32 @@ let ``the shaman is built on the researched level-24 set`` () =
   Assert.Equal((47, 71), (shaman.AutoAttack.Value.Min, shaman.AutoAttack.Value.Max))
 
 /// The healing talents are worth real healing and not just a number on a sheet:
-/// one Healing Wave from the talented shaman lands a strictly larger heal than
-/// the same shaman with every point taken out, on the same seed and the same
-/// wound. Purification's 10% alone would overlap the rank's roll; Spiritual
-/// Guidance's share of Spirit is what puts the two apart for certain.
+/// one Healing Touch from the talented Druid lands a strictly larger heal than the
+/// same Druid with every point taken out, on the same seed and the same wound.
+/// Gift of Nature's 10% is well clear of the rank's roll.
+///
+/// This test has moved twice, and both moves were forced by measurement rather
+/// than convenience. It started on the Shaman, where Purification's 10% made the
+/// two apart — but OctoWoW deleted Purification, so a level-24 shaman now heals
+/// exactly what an untalented one heals (both 449 at the first Healing Wave). It
+/// then tried the Paladin, where Healing Light only touches Flash of Light while
+/// the AI casts Holy Light. The Druid is the healer whose tree carries a flat
+/// bonus on every heal it has, so the property is testable there and nowhere else.
+/// The wound is 50 of a full bar on purpose: healing a nearly-full tank caps both
+/// numbers at "topped up" and the talent becomes invisible.
 [<Fact>]
-let ``a resto shaman's heal beats the same shaman with no talents`` () =
-  let party = Content.partyOf [ "Warrior"; "Shaman" ] 24
+let ``a talented druid's heal beats the same druid with no talents`` () =
+  let party = Content.partyOf [ "Warrior"; "Druid" ] 24
   let tank = party.[0]
-  let shaman = { party.[1] with BonusHealing = 0 }
+  let druid = party.[1]
 
-  let oneHeal (shaman: Entity) =
+  let firstHeal (healer0: Entity) =
     let wounded =
       { tank with
           Pos = { X = 5; Y = 5 }
-          Health = 300 }
+          Health = 50 }
 
-    let healer = { shaman with Pos = { X = 5; Y = 6 } }
+    let healer = { healer0 with Pos = { X = 5; Y = 6 } }
     let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
 
     let enemy =
@@ -2166,32 +2175,29 @@ let ``a resto shaman's heal beats the same shaman with no talents`` () =
         Quests = []
         Log = [] }
 
-    let healIn (line: string) =
-      let parts = line.Split ' '
+    let mutable amount = 0
 
-      if parts.[0] = "Shaman's" && line.Contains " heals " then
-        match System.Int32.TryParse parts.[parts.Length - 1] with
-        | true, n -> n
-        | _ -> 0
-      else
-        0
-
-    let mutable healed = 0
-
-    // A 2.5-3.0 s cast, so a hundred Ticks is one cast with room to spare.
-    for _ in 1..100 do
-      if healed = 0 then
+    for _ in 1..300 do
+      if amount = 0 then
         w <- SimTick.step (Bench.autoPilot w) w
-        healed <- w.Log |> List.sumBy healIn
 
-    healed
+        match w.Log |> List.tryFind (fun l -> l.StartsWith "Druid's " && l.Contains " heals Warrior for ") with
+        | Some l ->
+          match System.Int32.TryParse (l.Split ' ' |> Array.last) with
+          | true, n -> amount <- n
+          | _ -> ()
+        | None -> ()
 
-  let talented = oneHeal shaman
-  let plain = oneHeal { shaman with Talents = Talents.none }
+    amount
+
+  let talented = firstHeal druid
+  let plain = firstHeal { druid with Talents = Talents.none }
+
+  Assert.True(talented > 0, "the talented druid should land a heal at all")
 
   Assert.True(
     talented > plain,
-    sprintf "the talented shaman should heal for more: %d vs %d" talented plain
+    sprintf "the talented druid should heal for more: %d vs %d" talented plain
   )
 
 /// The damage half of the tree, held to the same promise as the healing half:
@@ -2300,6 +2306,7 @@ let ``a heal that crits is worth half again`` () =
       CastTicks = ticks 0
       CooldownTicks = ticks 0
       ResourceCost = 0
+      Stance = None
       Interruptible = false
       Range = 8
       TargetKind = Ally
@@ -5969,11 +5976,6 @@ let ``every Druid spawns in a form its spec may take`` () =
 
 [<Fact>]
 let ``shifting to humanoid leaves no form behind`` () =
-  let humanForm =
-    { Content.bearForm with
-        Name = "Humanoid Form"
-        Effects = [ TakeStance HumanForm ] }
-
   let w =
     Content.scarletMonasteryAt "graveyard" Content.Median 1UL
     |> Content.withRosterAt 24 [ "Warrior"; "Druid (Bear)"; "Mage"; "Rogue"; "Warlock" ]
@@ -5981,6 +5983,134 @@ let ``shifting to humanoid leaves no form behind`` () =
   let bear = SimState.aliveParty w |> List.find (fun e -> e.Name = "Druid")
   Assert.Equal<Stance option>(Some BearForm, SimState.stance bear)
 
-  let w = SimCombat.resolveAbility bear.Id bear.Id humanForm w
+  let w = SimCombat.resolveAbility bear.Id bear.Id Content.humanForm w
   let after = SimState.aliveParty w |> List.find (fun e -> e.Id = bear.Id)
   Assert.Equal<Stance option>(None, SimState.stance after)
+
+/// Vanilla's one form restriction this model honours: Tree of Life forbids
+/// Healing Touch, so the spell is a shape decision and not a button.
+[<Fact>]
+let ``Healing Touch is refused in the tree and starts from the human form`` () =
+  let w =
+    Content.scarletMonasteryAt "graveyard" Content.Median 1UL
+    |> Content.withRosterAt 24 [ "Warrior"; "Druid"; "Mage"; "Rogue"; "Warlock" ]
+
+  let druid = SimState.aliveParty w |> List.find (fun e -> e.Name = "Druid")
+  let tank = SimState.aliveParty w |> List.find (fun e -> e.Name = "Warrior")
+  Assert.Equal<Stance option>(Some TreeForm, SimState.stance druid)
+
+  let heal (w: World) =
+    SimCombat.applyCommand { ApplyAt = ticks 1; Kind = UseAbility(druid.Id, "Healing Touch", tank.Id) } w
+
+  let caster (w: World) =
+    w.Entities |> List.find (fun e -> e.Id = druid.Id)
+
+  // The tree refuses it: no cast starts, so nothing was ever on its way.
+  let refused = heal w
+  Assert.True((caster refused).Casting.IsNone, "a tree cannot start Healing Touch")
+
+  // Out of the form, the same button starts the same cast.
+  let w = SimCombat.resolveAbility druid.Id druid.Id Content.humanForm w
+  Assert.Equal<Stance option>(None, SimState.stance (caster w))
+  let started = heal w
+
+  match (caster started).Casting with
+  | Some cast -> Assert.Equal("Healing Touch", cast.Ability.Name)
+  | None -> failwith "Healing Touch did not start in human form"
+
+/// The behaviour the operator asked for: a healer that lives in the tree, leaves
+/// it for the one spell the tree forbids, and gives the form back afterwards.
+/// Asserted on `SimState.stance` rather than on the log, so the shape at each
+/// moment is the fact being checked.
+[<Fact>]
+let ``the Tree Druid shifts out for Healing Touch and back into the tree`` () =
+  let party = Content.partyOf [ "Warrior"; "Druid" ] 24
+  let tank = { party.[0] with Pos = { X = 5; Y = 5 }; Health = party.[0].MaxHealth * 2 / 5 }
+  let druid = { party.[1] with Pos = { X = 5; Y = 5 } }
+  // Engaged but barely scratching: the script only heals once there is a fight
+  // on, and nothing here should outrun the sequence it is being watched for.
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  let enemy =
+    { Content.mob 100 "Near" CreatureType.Humanoid 21 4000 2000 (Some tap) [] None { X = 6; Y = 5 } with
+        Engaged = true
+        Target = Some tank.Id }
+
+  let w0 =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 12 10
+      Entities = [ tank; druid; enemy ]
+      Pending = []
+      Rng = Rng.streamsOf 7UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  /// The Druid's shape, its cast, and what the script asked it to press.
+  let rec play (w: World) n acc =
+    if n <= 0 then
+      w, List.rev acc
+    else
+      let cmds = Bench.autoPilot w
+
+      let asked =
+        cmds
+        |> List.choose (fun c ->
+          match c.Kind with
+          | UseAbility(src, name, target) when src = druid.Id -> Some(name, target)
+          | _ -> None)
+
+      let w = SimTick.step cmds w
+      let d = w.Entities |> List.find (fun e -> e.Id = druid.Id)
+      let casting = d.Casting |> Option.map (fun c -> c.Ability.Name)
+      play w (n - 1) ((SimState.stance d, casting, asked) :: acc)
+
+  let played, seen = play w0 120 []
+
+  let describe (ticks: (Stance option * string option * (string * EntityId) list) list) =
+    ticks
+    |> List.indexed
+    |> List.filter (fun (_, (_, casting, asked)) -> casting.IsSome || not asked.IsEmpty)
+    |> List.truncate 20
+    |> sprintf "%A"
+
+  // Out of the tree first: the form is what the heal has to be paid with.
+  let shifted =
+    seen
+    |> List.indexed
+    |> List.tryFind (fun (_, (stance, _, asked)) -> stance = None && asked |> List.exists (fun (n, _) -> n = "Human Form"))
+
+  Assert.True(shifted.IsSome, "the Druid never shifted out of the tree: " + describe seen)
+
+  // Healing Touch, asked for from the human shape — the tree refuses it.
+  let healedFromHuman =
+    seen
+    |> List.indexed
+    |> List.tryFind (fun (i, (stance, _, asked)) ->
+      i > fst shifted.Value
+      && stance = None
+      && asked |> List.exists (fun (name, target) -> name = "Healing Touch" && target = tank.Id))
+
+  Assert.True(healedFromHuman.IsSome, "Healing Touch was never cast from the human form: " + describe seen)
+
+  // And it landed: the Tank's real health is the proof, not a log line.
+  let tankAfterHeal = played.Entities |> List.find (fun e -> e.Id = tank.Id)
+  Assert.True(tankAfterHeal.Health > tank.MaxHealth * 2 / 5, "the Tank was never healed")
+
+  // Nothing left to heal: the form is given back, one action as it was taken.
+  let calm = SimState.mapEntity tank.Id (fun e -> { e with Health = e.MaxHealth }) played
+  let _, after = play calm 60 []
+
+  let arc = seen @ after
+  let sinceHeal = arc |> List.skip (fst healedFromHuman.Value + 1)
+
+  Assert.True(
+    sinceHeal |> List.exists (fun (_, _, asked) -> asked |> List.exists (fun (n, _) -> n = "Tree of Life")),
+    "the Druid never asked to shift back into the tree: " + describe arc
+  )
+
+  Assert.True(
+    sinceHeal |> List.exists (fun (stance, _, _) -> stance = Some TreeForm),
+    "the Druid never got back into the tree: " + describe arc
+  )

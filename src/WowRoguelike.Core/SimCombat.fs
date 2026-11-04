@@ -1150,6 +1150,11 @@ module SimCombat =
             // (it is only consulted for a cast with a cast time). No log line: the
             // AI re-asks every Tick and would bury the log in refusals.
             w
+          elif ability.Stance |> Option.exists (SimState.inStance actor >> not) then
+            // The one place a required form is enforced, so an ability that names
+            // one can never be cast out of it: Tree of Life forbids Healing Touch,
+            // and the shift is the cost of the heal rather than a formality.
+            w |> logLine (sprintf "%s is in the wrong form for %s" actor.Name ability.Name)
           elif ability.CastTicks > ticks 0 && not (canCast actor) then
             // Already casting is not a failure worth logging: it is the caller's
             // ordering policy, and a one-deep queue is a scheduling concern.
