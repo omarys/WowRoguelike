@@ -465,6 +465,145 @@ pages and not ten:
 - <https://octowow.st/warlock>
 - <https://octowow.st/warrior>
 
+### Builds received
+
+The operator's builds, decoded with the verified codec (3 bits per talent, 28 slots
+per tree, three `-`-separated base64 chunks). These are arithmetic, not research:
+every one lands on exactly 51 of 51, and the tree *names* follow the page order for
+that class — the note for each class confirms the names against the payload:
+
+| class (role the sim runs) | `?points=` | split |
+|---|---|---|
+| Warrior (tank) | `Y--VYFoKQSopQQYB` | Arms 3 / Fury 0 / Protection 48 |
+| Paladin (healer) | `AoaAYQdQpAYoB--FYQAAI` | Holy 40 / Protection 0 / Retribution 11 |
+| Priest (healer) | `AoFAB-aoFAAYToRYAoB-` | Discipline 11 / Holy 40 / Shadow 0 |
+| Rogue (melee dps) | `aoYDI-FAroIAQoRCCAB-` | Assassination 17 / Combat 34 / Subtlety 0 |
+| Hunter (dps + pet) | `-FoFoBDAoJQQoB-dQ` | Beast Mastery 0 / Marksmanship 41 / Survival 10 |
+| Mage (caster dps) | `TAFoLISYZKAoB--FADD` | Arcane 40 / Fire 0 / Frost 11 |
+| Warlock (caster dps) | `FoASaASABBFAB--FAVYAo` | Affliction 31 / Demonology 0 / Destruction 20 |
+| Shaman (healer + totems) | `-F-FoDoaLFYQKFAB` | Elemental 0 / Enhancement 5 / Restoration 46 |
+| Druid (caster dps) | `oCaYYKFYJLDAB--FAAoAC` | Balance 39 / Feral 0 / Restoration 12 |
+| Druid (tank **and** melee dps, one build) | `BiAYAI-FoaYRaDQIIFIB-` | Balance 11 / Feral 40 / Restoration 0 |
+
+Notes the builds imply, before any research is read:
+
+- **Nothing is spread thin.** Every build goes 39–48 points deep in one tree. The sim
+  currently folds talents in as flat traits, so a port that only reads the deep tree
+  gets most of the value; a port that ignores the 10–12 point dips gets less.
+- **The Warrior build is a full tank** (Protection 48, with only 3 points in Arms),
+  which matches the ladder's Warrior tank — and the sim currently spends no points at
+  all.
+- **The Druid has two builds, not four.** Balance 39 for the caster, and Feral 40 for
+  both the tank and the melee dps. The operator's stated intent:
+
+  > "Druid tank and dps can share the same talent build … This will allow the Druid
+  > to act as off-tank if too many enemies are engagad and pressuring the Warrior."
+
+  That is a **role-switch requirement**, and it is the one thing the current bear kit
+  cannot do: it holds Maul + Growl and has no area ability (a `shortcut:` in
+  `Content.fs` says Swipe was left out because the Warrior kit had nothing to copy).
+  An off-tank that cannot pick up several enemies cannot relieve a pressured Warrior,
+  so the feral note is asked explicitly whether OctoWoW changes Swipe or threat.
+
+### What the ten notes found
+
+Every note lives in `.pi/research/octowow/`: `warrior`, `paladin`, `priest`, `rogue`,
+`hunter`, `mage`, `warlock`, `shaman`, `druid-feral`, `druid-moonkin`. Counts are over
+the talents each build actually takes, not over the tree:
+
+| class (role the sim runs) | expressible today | needs a new axis | collapses a kit row |
+|---|---|---|---|
+| Shaman (healer + totems) | 7 of 16 | 7 | 2 |
+| Priest (healer) | 8 of 16 | 7 | 1 (+3 named outside the build) |
+| Rogue (melee dps) | 6 of 18 | 9 | 3 |
+| Paladin (healer) | 7 of 17 | 9 | 1 |
+| Warlock (caster dps) | 8 of 17 | 9 | 0 |
+| Hunter (dps + pet) | 5 of 16 | 10 | 1 |
+| Druid (caster dps) | 5 of 19 | 14 | 0 |
+| Druid (tank + melee dps) | 6 of 21 | 15 | 0 |
+| Mage (caster dps) | 4 of 19 | 15 | 0 |
+| Warrior (tank) | — (prose only) | — | Master of Arms merges four specs |
+
+**56 of 159 talent spends are data edits; 95 need a model change.** That ratio is the
+headline: this is not a content port, it is a vocabulary change with a content port
+attached.
+
+### The four blockers that decide the order
+
+1. **There is no resistance model at all.** `Domain.fs` carries only
+   `PushbackResistanceBp`, which is spell pushback and not spell-school resistance.
+   This single gap blocks a large share of Mage's 15: several talents differ only in
+   which school they penetrate.
+2. **`Talents` (`Domain.fs:1128`) speaks only healing.** Every field is
+   `HealDoneBp`, `HealCostBp`, `CritArmorBp`, `SpiritToHealingBp`…; a talent that raises
+   *damage* by 10% has no field to write to. This blocks Warlock, Mage, Hunter and Rogue
+   alike, so it is one change that unblocks four classes — the highest-leverage edit in
+   the whole port.
+3. **A melee area ability already exists, and a comment says it does not.**
+   `Content.fs:3941-3943` justifies leaving Swipe out of the bear kit: "the only Cleave and
+   Whirlwind in this file are mob abilities". That is now false — `Effect.MultiShot of
+   maxTargets` (`Domain.fs:807`) is implemented at `SimCombat.fs:406-427` and resolves
+   "weapon damage to the target and up to `maxTargets - 1` other hostiles within 8 tiles".
+   **This is the off-tank the operator asked for**, and it is data, not a new axis.
+4. **There is no proc or stacking axis.** Eclipse (the Moonkin capstone), Omen of
+   Clarity, Shadow Weaving and several Hunter talents all assume one. Nothing today
+   models a state that accumulates and is consumed.
+
+### The off-tank question, answered
+
+`druid-feral.md` §6 puts it in three parts, and the third is the interesting one:
+
+1. The bear needs a multi-target melee button — expressible **today** as `MultiShot`-shaped
+   data, per blocker 3 above.
+2. Swipe's threat must route through `Entity.ThreatMultiplierBp` so Feral Instinct's +15%
+   reaches it, rather than arriving as a fixed number.
+3. The bear has two buttons and little Rage to spend on a third: `gainRage` gives
+   `2.5 * damage / level` (`docs/agents/domain.md:584-586`), which is why Ferocity's −5
+   Rage matters far more here than its single rank suggests. **An off-tank that cannot
+   afford its own area ability is the failure mode to watch.**
+
+### Two premises of this session's briefs that turned out wrong
+
+- I told the Rogue agent that combo points were not modelled. They are, and well:
+  `Effect.ComboPoint` (`Domain.fs:882`), accumulation capped at 5 (`SimCombat.fs:793`),
+  finisher scaling (`PartyAi.fs:733`), reset on spend (`SimCombat.fs:807`), and the AI
+  gating finishers on `ComboPoints >= 4` (`PartyAi.fs:775`). The note corrected me; the
+  ordering is load-bearing (a `ComboPoint` appended before `Finisher` is zeroed by it).
+- I briefed the Warlock note as "no demons, so pet talents are blocked". The build takes
+  almost no pet talents, so that blocker barely matters — the class is blocked by
+  blocker 2 instead.
+
+### Obsolete rationale the notes turned up
+
+Each is a comment or `shortcut:` in `Content.fs` that OctoWoW makes untrue, and each will
+mislead the next reader if left alone:
+
+- `Content.fs:3441` — "shortcut: Power Infusion is not modelled". OctoWoW **deletes**
+  Power Infusion, so the shortcut describes a hole that no longer needs filling.
+- `Content.fs:3435` — `priestTalents` claims "Holy Specialization 5/5 (+5% crit)" for a
+  bonus the record never carried. §4 of `priest.md` shows Holy Specialization is replaced
+  by Divinity anyway.
+- `Content.fs:3941-3943` — the Swipe rationale, disproved above by `Effect.MultiShot`.
+
+The project already has the right convention for the rest: `Domain.fs:1126` — *"A talent
+the vocabulary cannot express … is named in a comment beside its build and left out rather
+than half-modelled."* Follow it. Do not build a general talent engine.
+
+### Suggested order of work
+
+1. **`Talents` gains a damage half** (blocker 2). One record change; unblocks four classes.
+2. **Shaman, then Priest.** Cheapest per talent, and both already have their mechanics
+   (totems, heals). Shaman's totem talents write to `TotemBoon`-adjacent data that exists.
+3. **Druid feral as the off-tank** (blocker 3) — `MultiShot`-shaped Swipe, threat via
+   `ThreatMultiplierBp`, then measure whether the Rage economy can pay for it. This is the
+   operator's stated goal and it needs the least new vocabulary of any role change.
+4. **Rogue, Paladin, Warlock, Hunter.** Rogue's premise surprise (combo points already
+   modelled) makes it cheaper than its 9-axis count suggests.
+5. **Resistance model** (blocker 1), then **Mage**: last, because it is the most blocked
+   class in the set and the least rewarding to do first.
+6. **Proc/stacking axis** (blocker 4) only when Eclipse or Omen of Clarity becomes worth
+   modelling on its own — not speculatively.
+
 What the research has to answer, per class, before any code moves:
 
 1. **Which abilities change, and into what** — new ranks, renamed or merged
