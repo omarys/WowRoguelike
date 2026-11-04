@@ -421,6 +421,7 @@ type RoguelikeGame(?browse: int * uint64) as this =
       | "Hunter" -> "sprites/classes/hunter"
       | "Warlock" -> "sprites/classes/warlock"
       | "Shaman" -> "sprites/classes/shaman"
+      | "Pet" -> "sprites/pet"
       | "Raptor" -> (let (EntityId i) = e.Id in if i % 2 = 0 then "sprites/raptor0" else "sprites/raptor1")
       | "Druid of the Fang" -> "sprites/fang_druid"
       | "Lady Anacondra" -> "sprites/anacondra"
@@ -431,8 +432,22 @@ type RoguelikeGame(?browse: int * uint64) as this =
       | n when n.Contains "Turtle" -> "sprites/deviate_turtle"
       | _ -> ""
 
+    // A totem is drawn by its slot, not its name: the slot is what the Shaman's AI
+    // reads to decide which totem overrides which, so a renamed totem keeps its
+    // art. No fire pulse exists yet, so nothing maps to `totem_fire`.
+    let totemKey =
+      match e.Totem with
+      | Some t ->
+        match TotemSlot.ofPulse t.Pulse with
+        | 0 -> "sprites/totem_earth"
+        | 1 -> "sprites/totem_air"
+        | _ -> "sprites/totem_water"
+      | None -> ""
+
     if SimState.isShifted e then
       "sprites/serpent"
+    elif totemKey <> "" then
+      totemKey
     elif named <> "" then
       named
     else

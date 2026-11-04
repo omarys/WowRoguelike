@@ -3,17 +3,21 @@
 # requires-python = ">=3.10"
 # dependencies = ["pillow"]
 # ///
-"""Slice the generated tileset into the PNGs the Game loads at runtime.
+"""Slice the generated tilesets into the PNGs the Game loads at runtime.
 
-    uv run tools/slice_tileset.py [tileset.jpg]
+    uv run tools/slice_tileset.py [sheet|tileset.jpg]
 
 Writes src/WowRoguelike.Game/Assets/{tiles,sprites}/*.png. Tiles are cut from
 the inside of a cell (away from the painted rims) and scaled to TILE px.
 Sprites have their flat background flood-filled to transparent from the crop
 edge, are trimmed, then fitted bottom-centred into a SPRITE px square.
 
-The source boxes below are pixel coordinates in the 2400x1792 sheet: terrain
-cells sit on a 300 px grid, the hero row is five uneven cells.
+Sheets are named: `wailing` (the default, terrain + classes + Wailing Caverns
+creatures), `forms` (Druid cat/bear, hunter pet, the four totems) and
+`future-forms` (Druid tree/moonkin). A path as the first argument keeps the old
+behaviour: slice it with the `wailing` boxes.
+
+The source boxes below are pixel coordinates in a 2400x1792 sheet.
 """
 import sys
 from collections import deque
@@ -22,7 +26,7 @@ from pathlib import Path
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "images/Gemini_Generated_Image_tyj66ztyj66ztyj6.jpg"
+TILESETS = ROOT / "images/Tilesets"
 OUT = ROOT / "src/WowRoguelike.Game/Assets"
 
 # Must match `tile` and `spriteSize` in the Game's Program.fs.
@@ -68,6 +72,37 @@ SPRITES = {
     "fern": ((1212, 612, 1488, 888), 34),
 }
 
+# The extended sheet re-draws cat/bear and adds the pet and the four totems. A
+# totem is drawn by its slot, not its name, so `fire` is here ahead of the first
+# fire totem in the content: there is no fire pulse yet, so nothing maps to it.
+# Boxes are the content bbox of each painted cell: sprite plus its stone plinth,
+# stopping above the caption. The captions are the reason these are not the whole
+# 300 px cell -- a caption left inside the crop survives the flood fill as an
+# island and `fit` then shrinks the sprite to make room for it.
+FORMS = {
+    "cat_form": ((63, 239, 415, 512), SPRITE),
+    "bear_form": ((444, 159, 813, 516), SPRITE),
+    "pet": ((912, 249, 1188, 500), SPRITE),
+    "totem_fire": ((1815, 124, 2065, 378), SPRITE),
+    "totem_earth": ((2090, 142, 2340, 378), SPRITE),
+    "totem_water": ((1815, 440, 2066, 693), SPRITE),
+    "totem_air": ((2090, 450, 2340, 676), SPRITE),
+}
+
+# For use in the future: the healer and caster forms sit between cat and bear and
+# the totems on their own sheet. Nothing in the sim has a form state yet.
+FUTURE_FORMS = {
+    "tree_form": ((855, 102, 1184, 510), SPRITE),
+    "moonkin_form": ((1215, 117, 1544, 510), SPRITE),
+}
+
+# name -> (sheet, tiles, sprites)
+SHEETS = {
+    "wailing": (TILESETS / "Gemini_Generated_Image_tyj66ztyj66ztyj6.jpg", TILES, SPRITES),
+    "forms": (TILESETS / "Gemini_Generated_Image_Extended_Druid_Shaman_Hunter.jpg", {}, FORMS),
+    "future-forms": (TILESETS / "Gemini_Generated_Image_Druid_Tree_and_Moonkin.jpg", {}, FUTURE_FORMS),
+}
+
 def key_out(img, tol=30):
     """Flood-fill the background from every edge pixel, making it transparent."""
     img = img.convert("RGBA")
@@ -98,14 +133,23 @@ def fit(img, size):
     return out
 
 def main():
-    sheet = Image.open(SRC).convert("RGB")
+    arg = sys.argv[1] if len(sys.argv) > 1 else "wailing"
+    if arg in SHEETS:
+        src, tiles, sprites = SHEETS[arg]
+    else:  # a path: the original single-sheet behaviour.
+        src, tiles, sprites = Path(arg), TILES, SPRITES
+
+    sheet = Image.open(src).convert("RGB")
     (OUT / "tiles").mkdir(parents=True, exist_ok=True)
     (OUT / "sprites").mkdir(parents=True, exist_ok=True)
-    for name, box in TILES.items():
+    for name, box in tiles.items():
         sheet.crop(box).resize((TILE, TILE), Image.LANCZOS).save(OUT / "tiles" / f"{name}.png")
-    for name, (box, size) in SPRITES.items():
-        fit(key_out(sheet.crop(box)), size).save(OUT / "sprites" / f"{name}.png")
-    print(f"wrote {len(TILES)} tiles and {len(SPRITES)} sprites to {OUT.relative_to(ROOT)}")
+    for name, (box, size) in sprites.items():
+        keyed = key_out(sheet.crop(box))
+        if keyed.getbbox() is None:
+            raise SystemExit(f"{name}: box {box} is empty -- caption inside it, or the sheet moved")
+        fit(keyed, size).save(OUT / "sprites" / f"{name}.png")
+    print(f"{arg}: wrote {len(tiles)} tiles and {len(sprites)} sprites to {OUT.relative_to(ROOT)}")
 
 if __name__ == "__main__":
     main()

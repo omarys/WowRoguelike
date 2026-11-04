@@ -1619,6 +1619,18 @@ delegate-runs/<runId>/activity.jsonl`) and verify the file on disk (a clean
 - **Rendering is rectangles plus per-dungeon tile art.** Sprites and tiles are
   keyed and loaded from `Assets/`, but there is no animation and no content
   pipeline.
+- **Art the sim cannot express yet.** `tools/slice_tileset.py <sheet>` has three
+  named sheets: `wailing` (terrain, classes, Wailing Caverns creatures), `forms`
+  (Druid cat/bear, the hunter pet, the four totems) and `future-forms` (Druid
+  tree/moonkin). A totem is drawn by its slot rather than its name —
+  `TotemSlot.ofPulse` — so `totem_earth`/`air`/`water` follow the AI's own rule
+  and a renamed totem keeps its art; `totem_fire` is sliced with nothing mapping
+  to it, because no fire pulse exists. The pet is `Name = "Pet"`. The four Druid
+  forms are sliced and loaded but **nothing draws them**: `Stance` (BearForm,
+  CatForm, TravelForm) is an `AbilityDef` requirement that never appears in
+  `SimCombat`, `SimState`, `PartyAi` or `SimTick`, so no entity carries a current
+  form for `spriteKey` to read. Wiring the art needs a form state in the sim
+  first, which is a gameplay change, not an art one.
 - **Maps for five further dungeons** (Ragefire Chasm, Razorfen Kraul, Shadowfang
   Keep, The Deadmines, The Stockade) are extracted into `images/Maps/`, and
   Blackfathom Deeps exists only as sliced tiles/sprites in `Assets/`. Per-map
