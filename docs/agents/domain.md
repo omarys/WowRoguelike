@@ -1636,22 +1636,47 @@ delegate-runs/<runId>/activity.jsonl`) and verify the file on disk (a clean
   `"Druid"` alone is the Tree healer, so every existing roster, doc and ladder
   cell keeps its meaning, and the suffix — `"Druid (Bear)"`, `"Druid (Cat)"`,
   `"Druid (Moonkin)"` — picks the other three (`heroOf`,
-  `src/WowRoguelike.Core/Content.fs:4297`, reading the suffix in `druidSpecOf`,
-  `src/WowRoguelike.Core/Content.fs:4287`; an unknown suffix is a `failwithf`, not
+  `src/WowRoguelike.Core/Content.fs:4418`, reading the suffix in `druidSpecOf`,
+  `src/WowRoguelike.Core/Content.fs:4408`; an unknown suffix is a `failwithf`, not
   a silent healer). One builder (`src/WowRoguelike.Core/Content.fs:3871`) shares
-  the sheet and differs only in role, resource, threat, traits and kit, because
-  four gear lists would be four things to balance for one class. Every spec keeps
-  `Entity.Name = "Druid"`, which is what art, logs and the tests that find the
-  class key off. Each kit carries its form (`bearForm`, `catForm`, `treeOfLife`,
-  `moonkinForm`) and the body **spawns in it**
-  (`src/WowRoguelike.Core/Content.fs:4001`), so the art is right from tick 0 and
+  the base row, the talents and the resource, and each spec carries **its own
+  gear list and weapon ladder**, because a bear tanked in a healer's Intellect
+  set is a bear with no armour and no attack power. The sheet has two anchors: the
+  level-24 rows are that spec's own best-in-slot outfit, and `Gear60` is what the
+  spec's real raid tier sums to.
+
+  | spec | level-24 outfit | level-60 anchor |
+  |---|---|---|
+  | `Druid` (Tree, Healer) | caster nine + Staff of the Blessed Seer | `(1376, (0, 0, 196, 261, 158))` — +healing cloth |
+  | `Druid (Cat)` | the Rogue's own sheet, Smite's Mighty Hammer | `(1102, (51, 92, 72, 0, 10))` — cat BiS |
+  | `Druid (Moonkin)` | the caster nine, Emberstone Staff | `(600, (0, 0, 87, 150, 40))` — balance cloth |
+  | `Druid (Bear)` | armour-and-Stamina leather, Slaghammer | `(2018, (71, 98, 184, 15, 7))` — Warden Staff |
+
+  Cat reuses the Rogue's sheet and Moonkin the healer's: the two agree on what
+  those bodies wear at 24, so the outfit that differs is the raid one. Cat and
+  Bear split their weapon ladders on the same reasoning — the cat swings
+  Manual Crowd Pummeler at 60, the bear Warden Staff from 43, whose 260 armour no
+  cat weapon carries. Attack power follows the body rather than the class: a
+  bear's Strength buys two a point and its Agility none, a cat's Agility two and
+  its Strength one. Every item and total, with the host it was checked against,
+  is in `.pi/research/level24/druid.md`.
+
+  Bear armour is `Traits.ArmorBonus = 799`, which is the 180% Bear Form
+  contributes at level 10 applied to the 444 the level-24 set carries, not an
+  independent number. `shortcut:` it is a flat sum pinned to that set and does not
+  grow with the level-60 sheet, so a level-60 bear carries 2817 where its own gear
+  would carry 5650; a per-spec armour multiplier is a new field and a separate
+  decision.
+
+  Every spec keeps `Entity.Name = "Druid"`, which is what art, logs and the tests
+  that find the class key off. Each kit carries its form (`bearForm`, `catForm`,
+  `treeOfLife`, `moonkinForm`) and the body **spawns in it**
+  (`src/WowRoguelike.Core/Content.fs:3928`), so the art is right from tick 0 and
   there is no one-tick window in which a bear could cast from caster shape.
   Bear and Cat forbid casting (`Aura.preventsCasting`), so the lockout is honest
   from the first tick. What is still *not* built is the gameplay that shifts
   mid-fight: nothing in `PartyAi` picks a form, so a Bear or Cat stays in the one
-  it spawned in and the healer never shifts out. Bear's armour is
-  `Traits.ArmorBonus = 428`, the 180% Bear Form contributes at level 10 against
-  the 238 the set carries at 24 — a `shortcut:` that does not scale to 60.
+  it spawned in and the healer never shifts out.
 - **Maps for five further dungeons** (Ragefire Chasm, Razorfen Kraul, Shadowfang
   Keep, The Deadmines, The Stockade) are extracted into `images/Maps/`, and
   Blackfathom Deeps exists only as sliced tiles/sprites in `Assets/`. Per-map

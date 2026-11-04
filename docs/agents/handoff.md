@@ -446,6 +446,81 @@ shape without that regression.
   player heal at all. Any fixture that assumes "a real run heals something" has to
   damage the Tank first.
 
+## TODO — research the OctoWoW class changes, all nine classes
+
+**Requested by the operator, 2026-11-04 (m01257).** The operator wants this game's
+class layer to mirror **OctoWoW**, not vanilla 1.12, and is willing to generate a
+per-class build (talents + gear) to accompany each write-up.
+
+Sources, one page per class — the operator's list repeats `rogue`, so it is nine
+pages and not ten:
+
+- <https://octowow.st/druid>
+- <https://octowow.st/hunter>
+- <https://octowow.st/mage>
+- <https://octowow.st/paladin>
+- <https://octowow.st/priest>
+- <https://octowow.st/rogue>
+- <https://octowow.st/shaman>
+- <https://octowow.st/warlock>
+- <https://octowow.st/warrior>
+
+What the research has to answer, per class, before any code moves:
+
+1. **Which abilities change, and into what** — new ranks, renamed or merged
+   abilities, changed coefficients, costs and cooldowns. The sim's kits are
+   `AbilityDef.kitAt` ladders in `src/WowRoguelike.Core/Content.fs`, so a change is
+   a rank band, not a list entry.
+2. **What the resource model becomes.** Rage, mana, energy and combo points have
+   assumptions baked into `SimCombat.fs`; a class change that alters generation or
+   decay is a core change, not a content one.
+3. **What it does to the two gear anchors.** Every spec carries a level-24 outfit
+   and a level-60 `Gear60` sum. If OctoWoW moves a class from Intellect to
+   Stamina, or adds a feral bench, both anchors move.
+4. **What breaks the shapes the sim already encodes** — forms (the Druid's four),
+   pets (`Name = "Pet"`), totems (`TotemSlot.ofPulse`), shields, stances. Those
+   have art and AI wired to them; a class change that adds a tenth shape is a
+   sprite-pipeline task too.
+5. **Whether the numbers are lining up with anything** — OctoWoW is a private-server
+   project, so establish first whether its baseline is 1.12 or a later client, and
+   whether tooltips are published as text. A balance layer fetched from nowhere
+   verifiable is worse than vanilla numbers, because it cannot be checked.
+
+Deliverable shape: one note per class under `.pi/research/octowow/<class>.md`, in
+the form `.pi/research/level24/druid.md` already uses — itemised, every number
+attributed to the host it came from, an explicit **Contradictions** section, and a
+**Missing evidence** section. Then, not before, a diff plan against `Content.fs`.
+
+Sequencing note: the operator's per-class build is the useful second half of each
+note — it becomes that class's `Gear60` anchor and the talent path the sim
+implicitly assumes. Do not encode a build the operator has not actually chosen.
+
+## TODO — three Druid specs have gear but no ladder coverage
+
+Measured while wiring per-spec gear (commit range ending at the per-spec gear
+commit): seating `Druid (Bear)`, `Druid (Cat)` and `Druid (Moonkin)` into the
+ladder party at level 60 gives
+
+| map | Bear | Cat | Moonkin | `Druid` (Tree) |
+|---|---|---|---|---|
+| graveyard | **3/3 unresolved at the 24000 cap** | 3 clear, 7907 | 3 clear, 7840 | 3 clear, 6763 |
+| library | 3 clear, 5865 | 3 clear, 6110 | 3 clear, 6146 | 3 clear, 6296 |
+| armory | 3 clear, 5609 | 3 clear, 5844 | 3 clear, 6097 | 3 clear, 6025 |
+
+So the bear's graveyard cell is open. The gear totals themselves were checked
+against two hosts and summed by hand, which is why this is recorded as a
+*behaviour* gap and not a data one: an outfit can be right and the body still never
+finishes. Note the phase-one shortcut in the same breath — the bear's kit is Maul
+plus Growl (Heroic Strike and Taunt under feral names), so it has no area damage
+and no second cooldown, and graveyard is the map with the most walking. Whether
+that is the cause is **unmeasured**: the 60000-tick probe that would separate a
+stall from slow killing timed out rather than answering.
+
+Two reasons not to chase it yet: no `comps` cell seats these three specs, so
+there is no ladder to A/B against; and the OctoWoW research above rewrites the
+same kits. Fixing a kit that is about to be replaced is the definition of doing
+the work twice.
+
 ## Working agreements this project keeps re-learning
 
 - **Red first.** Verify the test fails on unmodified code. One fixture this session

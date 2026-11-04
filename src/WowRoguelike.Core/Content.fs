@@ -3880,17 +3880,18 @@ module Content =
     // is: every other spec runs `Talents.none` rather than a copied healer's tree.
     let talents = if spec = TreeDruid then druidTalents else Talents.none
 
-    // Bear Form is +180% armour from items at level 10 (Dire Bear's 360% arrives
-    // at 40), against the 238 the set carries at 24: 428 more. `Traits.ArmorBonus`
-    // is the only lever for it — health comes from the class's own stamina row and
+    // Bear Form is +180% armour from items at level 10 (Dire Bear's 360% arrives at
+    // at 40): 1.8 x the 444 the set carries at 24 is 799. `Traits.ArmorBonus` is the
+    // only lever for it — health comes from the class's own stamina row and
     // `Traits` has no health field.
     //
-    // shortcut: a flat sum does not grow with the level-60 sheet, so a level-60
-    // bear is under-armoured against its own gear; a per-spec armour multiplier is
-    // a new field and a separate decision.
+    // shortcut: a flat sum pinned to the level-24 set does not grow with the
+    // level-60 sheet, so a level-60 bear carries 2817 where its own gear would
+    // carry 5650; a per-spec armour multiplier is a new field, and a separate
+    // decision.
     let traits =
       match spec with
-      | BearDruid -> { Traits.none with ArmorBonus = 428 }
+      | BearDruid -> { Traits.none with ArmorBonus = 799 }
       | CatDruid -> Traits.none
       // The two casters get the pushback resistance that makes a cast land through
       // a hit; only the damage spec gets the crit every other caster dps has, since
@@ -3966,6 +3967,144 @@ module Content =
       | TreeDruid -> TreeForm
       | MoonkinDruid -> MoonkinForm
 
+    // The caster rows, nine of them, without a weapon: the healer and the balance
+    // spec share every piece because at 24 the caster pool is one cloth ladder.
+    let casterNine =
+      [ gear "Azure Silk Hood" (Some 24) 33 (0, 0, 0, 0, 0)
+        gear "Silver-thread Amice" (Some 24) 32 (0, 0, 2, 7, 0)
+        gear "Watcher's Cape" (Some 19) 19 (0, 0, 0, 0, 0)
+        gear "Robes of Arugal" (Some 24) 46 (0, 3, 5, 9, 10)
+        gear "Silver-thread Cuffs" (Some 22) 18 (0, 0, 2, 5, 0)
+        gear "Belt of Arugal" (Some 24) 26 (0, 2, 0, 10, 3)
+        gear "Darkweave Breeches" (Some 17) 35 (0, 0, 4, 7, 6)
+        gear "Spidersilk Boots" (Some 20) 29 (0, 0, 4, 4, 7)
+        gear "Lavishly Jeweled Ring" (Some 17) 0 (0, 2, 0, 6, 0) ]
+
+    // The feral level-24 set. No leather head is wearable at 24 — the one item that
+    // claims to be is a Season of Discovery row that resolves on no host — so the
+    // cloth hood is the single non-leather piece, and it is statless anyway.
+    // Totals: 447 armour and (33, 47, 23, 0, 3), from .pi/research/druid-forms.md.
+    let catGear =
+      [ gear "Azure Silk Hood" (Some 24) 33 (0, 0, 0, 0, 0)
+        gear "Bristlebark Amice" (Some 22) 67 (3, 6, 0, 0, 0)
+        gear "Cape of the Brotherhood" (Some 20) 21 (0, 6, 3, 0, 0)
+        gear "Blackened Defias Armor" (Some 19) 92 (4, 3, 11, 0, 0)
+        gear "Madwolf Bracers" (Some 24) 40 (0, 5, 2, 0, 0)
+        gear "Emblazoned Belt" (Some 24) 52 (7, 0, 3, 0, 0)
+        gear "Leggings of the Fang" (Some 18) 79 (5, 9, 4, 0, 0)
+        gear "Feet of the Lynx" (Some 19) 63 (3, 8, 0, 0, 0)
+        gear "Ring of Precision" (Some 20) 0 (0, 6, 0, 0, 3)
+        gear "Smite's Mighty Hammer" (Some 18) 0 (11, 4, 0, 0, 0) ]
+
+    // Three anchors, and the healer's is the odd one: it is the Molten Core
+    // Cenarion set from `raid-gear-60.md` (1376 armour), while the two Phase 3-4
+    // outfits are Blackwing Lair and Zul'Gurub and carry far less armour because
+    // neither a cat nor a moonkin buys armour with its gear. The healer's row also
+    // carries the highest Intellect here by a wide margin, which is the Cenarion
+    // set's whole job. Research: .pi/research/druid-forms.md.
+    // The bear's own set: armour and Stamina on every slot, because a bear buys no
+    // attack power from Agility and holds threat by being hit. The staff in the
+    // last row is Warden Staff, which carries 260 armour of its own — the reason a
+    // bear swings it instead of the cat's mace.
+    let bearGear =
+      [ gear "Azure Silk Hood" (Some 24) 33 (0, 0, 0, 0, 0)
+        gear "Earthen Leather Shoulders" (Some 22) 67 (0, 0, 7, 0, 0)
+        gear "Sentry Cloak" (Some 19) 21 (0, 4, 5, 0, 0)
+        gear "Blackened Defias Armor" (Some 19) 92 (4, 3, 11, 0, 0)
+        gear "Deepwood Bracers" (Some 21) 38 (0, 0, 5, 0, 1)
+        gear "Deviate Scale Belt" (Some 18) 51 (0, 5, 6, 0, 3)
+        gear "Leggings of the Fang" (Some 18) 79 (5, 9, 4, 0, 0)
+        gear "Feet of the Lynx" (Some 19) 63 (3, 8, 0, 0, 0)
+        gear "Plains Ring" (Some 24) 0 (0, 0, 8, 3, 0)
+        gear "Slaghammer" (Some 24) 0 (11, 0, 10, 0, 0) ]
+
+    let casterGear60 = (1376, (0, 0, 196, 261, 158))
+    let catGear60 = (1102, (51, 92, 72, 0, 10))
+    let moonkinGear60 = (600, (0, 0, 87, 150, 40))
+    let bearGear60 = (2018, (71, 98, 184, 15, 7))
+
+    // A druid's two-hand mace, which is what every sourced feral pick is: a druid
+    // cannot dual-wield in 1.12. The level-60 rung is the Manual Crowd Pummeler at
+    // 29.0 dps, deliberately weaker than the caster staff's 53 — the real weapon is
+    // worn for its three +50% attack-speed charges and the sim has no field for an
+    // on-use effect, so a cat's auto-attack is understated rather than inflated.
+    let catWeapons =
+      [ (1, { Min = 55; Max = 83; Ticks = secTicks 3.5; Range = 1 })
+        (60, { Min = 46; Max = 70; Ticks = secTicks 2.0; Range = 1 }) ]
+
+    // The bear swings Warden Staff from 43: 46.5 dps and 260 armour, which is more
+    // mitigation than any cat weapon and the reason the two feral ladders differ.
+    let bearWeapons =
+      [ (1, { Min = 53; Max = 80; Ticks = secTicks 2.8; Range = 1 })
+        (43, { Min = 89; Max = 134; Ticks = secTicks 2.4; Range = 1 }) ]
+
+    // Four specs, four outfits, and the split is the point: a healer wants Spirit
+    // and Intellect, a moonkin buys spell damage with leather's armour, and a cat
+    // wants Agility and Strength and nothing else. One shared outfit would have
+    // meant three specs wearing a healer's cloth.
+    let sheet =
+      match spec with
+      | CatDruid ->
+        { Base = nightElfDruidBase
+          Gear = catGear
+          Gear60 = catGear60
+          Talents = talents
+          // A cat's attack power is the form's own formula, which is where it
+          // differs from every caster in the file: Strength counts double and
+          // Agility counts once, because Cat Form converts both.
+          ApPerStrength = 2
+          ApPerAgility = 1
+          FixedPool = pool }
+      | BearDruid ->
+        { Base = nightElfDruidBase
+          Gear = bearGear
+          Gear60 = bearGear60
+          Talents = talents
+          // A bear's Strength buys two attack power a point and its Agility buys
+          // none of it: armour and Stamina carry the spec, not Agility.
+          ApPerStrength = 2
+          ApPerAgility = 0
+          FixedPool = pool }
+      | TreeDruid ->
+        { Base = nightElfDruidBase
+          Gear = casterNine @ [ gear "Staff of the Blessed Seer" (Some 18) 0 (0, 0, 2, 0, 3) ]
+          Gear60 = casterGear60
+          Talents = talents
+          // 1 and not the 2 that a druid's Strength genuinely buys, because the
+          // conversion applies to the base row as well as the gear and this file
+          // has always carried 1: changing it moves every druid cell and the
+          // bench snapshot, which is a balance decision and not a gear one.
+          ApPerStrength = 1
+          ApPerAgility = 0
+          FixedPool = pool }
+      | MoonkinDruid ->
+        // Emberstone Staff over the healer's Blessed Seer: the four stat points it
+        // adds are Intellect, which is mana, which is the damage this spec casts.
+        // Blessed Seer's worth is its +24 healing, an affix the sim cannot hold,
+        // so for a moonkin it is the worst weapon on the list
+        // (.pi/research/level24/druid.md §9).
+        { Base = nightElfDruidBase
+          Gear = casterNine @ [ gear "Emberstone Staff" (Some 18) 0 (0, 0, 5, 8, 5) ]
+          Gear60 = moonkinGear60
+          Talents = talents
+          ApPerStrength = 1
+          ApPerAgility = 0
+          FixedPool = pool }
+
+    // Both casters swing the staff the healer already carried; the feral pair swings
+    // its own mace, because the two ladders disagree at 60 by design.
+    let weapons =
+      match spec with
+      | CatDruid -> catWeapons
+      | BearDruid -> bearWeapons
+      | TreeDruid | MoonkinDruid ->
+        [ (1, { Min = 47; Max = 71; Ticks = secTicks 3.0; Range = 1 })
+          (28, { Min = 80; Max = 121; Ticks = secTicks 3.1; Range = 1 })
+          (33, { Min = 74; Max = 112; Ticks = secTicks 2.5; Range = 1 })
+          (38, { Min = 88; Max = 133; Ticks = secTicks 2.9; Range = 1 })
+          (40, { Min = 88; Max = 133; Ticks = secTicks 2.9; Range = 1 })
+          (60, { Min = 140; Max = 210; Ticks = secTicks 3.3; Range = 1 }) ]
+
     heroStats
       buffs
       level
@@ -3974,31 +4113,8 @@ module Content =
       role
       Leather
       traits
-      { Base = nightElfDruidBase
-        Gear =
-          [ gear "Azure Silk Hood" (Some 24) 33 (0, 0, 0, 0, 0)
-            gear "Silver-thread Amice" (Some 24) 32 (0, 0, 2, 7, 0)
-            gear "Watcher's Cape" (Some 19) 19 (0, 0, 0, 0, 0)
-            gear "Robes of Arugal" (Some 24) 46 (0, 3, 5, 9, 10)
-            gear "Silver-thread Cuffs" (Some 22) 18 (0, 0, 2, 5, 0)
-            gear "Belt of Arugal" (Some 24) 26 (0, 2, 0, 10, 3)
-            gear "Darkweave Breeches" (Some 17) 35 (0, 0, 4, 7, 6)
-            gear "Spidersilk Boots" (Some 20) 29 (0, 0, 4, 4, 7)
-            gear "Lavishly Jeweled Ring" (Some 17) 0 (0, 2, 0, 6, 0)
-            gear "Staff of the Blessed Seer" (Some 18) 0 (0, 0, 2, 0, 3) ]
-
-        Gear60 = (1376, (0, 0, 196, 261, 158))
-        Talents = talents
-        ApPerStrength = 1
-        ApPerAgility = 0
-        FixedPool = pool }
-      [ (1, { Min = 47; Max = 71; Ticks = secTicks 3.0; Range = 1 })
-        (28, { Min = 80; Max = 121; Ticks = secTicks 3.1; Range = 1 })
-        (33, { Min = 74; Max = 112; Ticks = secTicks 2.5; Range = 1 })
-        (38, { Min = 88; Max = 133; Ticks = secTicks 2.9; Range = 1 })
-        (40, { Min = 88; Max = 133; Ticks = secTicks 2.9; Range = 1 })
-        (60, { Min = 140; Max = 210; Ticks = secTicks 3.3; Range = 1 })
-        ]
+      sheet
+      weapons
       resource
       threatBp
       abilities

@@ -254,3 +254,200 @@ level 4 (10 ranks). Same spell, different counting — the **required level** is
 2. Get the vanilla Spirit→mp5 coefficient (pre-2.4, class-specific) from a 2006-era theorycraft source;
    without it field 5's regen number cannot be sourced.
 3. Fill hand/neck slots, or accept "of the Owl" greens and source their suffix values at item level 24–29.
+
+---
+
+## 9. Balance (moonkin) damage at 24
+
+Added when the Druid gained four specs (`b9a2878`). No authoritative
+level-24 Balance BiS list exists for Classic Era either — searches surface only level-19
+and level-29 twink guides — so this is "best verified", not BiS.
+
+**Finding: at 24 the caster pool is the same pool the healer set already uses.** Cloth
+Int/Spirit is what exists at this level, so the armour and the nine non-weapon rows are
+unchanged from §2, and the only real decision is the weapon. The totals below are the
+§2 rows with a different weapon in slot 10.
+
+| # | Slot | Item | Req lvl | Armour | Sta | Int | Spi | Bind / source |
+|---|---|---|---|---|---|---|---|---|
+| 1 | head | Azure Silk Hood | 24 | 33 | 0 | 0 | 0 | BoE crafted/AH — https://classicdb.ch/?item=7048 |
+| 2 | shoulder | Silver-thread Amice | 24 | 32 | +2 | +7 | 0 | BoE AH — https://classicdb.ch/?item=6395 |
+| 3 | back | Watcher's Cape | 19 | 19 | 0 | 0 | 0 | BoE AH (suffix unverified) — https://classicdb.ch/?item=14179 |
+| 4 | chest | Robes of Arugal | 24 | 46 | +5 | +9 | +10 | BoP, SFK — Arugal — https://wowclassicdatabase.com/item/robes-of-arugal |
+| 5 | wrist | Silver-thread Cuffs | 22 | 18 | +2 | +5 | 0 | BoE AH — https://classicdb.ch/?item=4036 |
+| 6 | waist | Belt of Arugal | 24 | 26 | 0 | +10 | +3 | BoP, SFK — https://wowclassicdatabase.com/item/belt-of-arugal |
+| 7 | legs | Darkweave Breeches | 17 | 35 | +4 | +7 | +6 | BoE AH — https://classicdb.ch/?item=12987 |
+| 8 | feet | Spidersilk Boots | 20 | 29 | +4 | +4 | +7 | BoE crafted/AH — https://classicdb.ch/?item=4320 |
+| 9 | ring | Lavishly Jeweled Ring | 17 | 0 | 0 | +6 | 0 | BoP quest/drop — https://classicdb.ch/?item=1156 |
+| 10 | weapon | **Emberstone Staff** (2H) | 18 | 0 | +5 | +8 | +5 | BoP, Deadmines — Captain Greenskin — https://classicdb.ch/?item=5201 |
+
+**Totals: armour 238, Str 0, Agi +7, Sta +22, Int +56, Spi +31.**
+
+Modelled consequence of the +56 Int over the healer's +48: the sim derives 15 mana per
+Intellect (`Content.fs:3226`), so 840 mana against the healer's 720. Intellect is the
+damage stat at this level because it is the mana that casts Wrath and Moonfire; the 1.12
+tooltips in §7 confirm damage comes from spell ranks, not from a gear affix.
+
+### Weapon: staff vs dagger + held-in-offhand
+
+Druids use daggers, staves, 1H/2H maces and held-in-off-hand items, but not shields
+(https://classic-wow-archive.fandom.com/wiki/Druid), so the pair is legal. Full-set totals
+(armour always 238, Agi always 7):
+
+| Option | Req lvl | Sta | Int | Spi | Source |
+|---|---|---|---|---|---|
+| **Emberstone Staff** (2H) | 18 | 22 | **56** | 31 | https://classicdb.ch/?item=5201 |
+| Crescent Staff (2H) | 10 (quest) | **24** | 55 | **33** | https://classicdb.ch/?item=6505 |
+| Staff of Westfall (2H) | 14 | 17 | 53 | **37** | https://classicdb.ch/?item=2042 |
+| Staff of the Friar (2H) | 19 | 21 | 51 | 37 | https://classicdb.ch/?item=3415 |
+| Blackfang + Witch's Finger | 20 / 21 | 21 | 55 | 28 | https://classicdb.ch/?item=2236 , https://classicdb.ch/?item=16887 |
+| Blackfang + Orb of Mistmantle | 20 / 23 | 17 | 48 | 32 | https://classicdb.ch/?item=13031 |
+| Blackfang + Tear of Grief | 20 / 11 | 17 | 55 | 25 | https://classicdb.ch/?item=5611 |
+
+**Chosen: Emberstone Staff.** No offhand pair can match it, because there is no verified
+caster dagger at this level — the best is Blackfang at +2 Spirit — so the dagger path spends
+two slots to reach 55 Int / 28 Spi where one staff reaches 56 / 31.
+
+Crescent Staff is three stat points better and is the honest ceiling, but it is a **Horde**
+quest reward and this druid is a Night Elf, so it is not available. Recorded rather than
+used. Staff of the Blessed Seer is *not* carried into this set: its value is its +24 healing,
+which the sim cannot hold (see §8), so for Balance it is the worst weapon on the list.
+
+### Contradictions
+
+1. **Orb of Mistmantle** — 1.12 tooltip is +4 Spirit only (classicdb); wowhead Classic lists
+   +6 Int/+4 Spi. Modern values are not 1.12. The 1.12 line is used.
+2. **Staff of Westfall required level** — classicdb prints none; Wowhead/JudgeHype say 14.
+   Both are ≤ 24, so immaterial.
+3. **Witch's Finger Intellect** — 1.12 is +7; a custom-server client lists 8. +7 is used.
+4. **Crescent Staff / Tear of Grief level gates** — classicdb prints no Requires Level; the
+   gates are the quests (req 10 and req 11).
+5. **"of the Eagle" / "of the Owl" greens** — no verified suffix magnitude at item level
+   24–29, so a random-suffix item cannot be shown to beat a fixed-stat set.
+
+### Missing evidence
+
+- **Any dagger ≤ 24 with Intellect on the 1.12 tooltip.** None found. This is what decides
+  the weapon comparison above.
+- **Suffix values** at item level 24–29 — the same gap §2 records.
+- **A head item with stats at 24** — Azure Silk Hood has none in 1.12; no alternative verified.
+- **Any +spell damage cloth or leather ≤ 24** — the only such affix found is Orb of
+  Mistmantle's +6 *Shadow* damage, useless to Balance, so nothing is carried for an affix the
+  sim cannot hold anyway.
+
+### Sources
+
+1.12 tooltips (classicdb.ch items 7048, 6395, 14179, 4036, 12987, 4320, 1156, 5201, 6505,
+2042, 3415, 2236, 16887, 13031, 5611; quest 914), plus wowclassicdatabase.com for
+robes-of-arugal, belt-of-arugal and emberstone-staff drop details, plus
+vanilla-wow-archive.fandom.com for 15 mana/Int and 10 HP/Sta.
+
+---
+
+## 10. Feral (cat) and Bear tank at 24
+
+Same caveat as §9: no authoritative level-24 BiS list exists, so these are "best verified".
+Each number was read off a fetched 1.12 page; nothing is from memory.
+
+### Strength and Agility conversion (this is what the stats are worth)
+
+Source-code-derived formulas (https://vanilla-wow-archive.fandom.com/wiki/Formulas:Attack_Power):
+
+```
+FORM_CAT:  AP = Level x (mLevelMult + 2.0) + STR x 2.0 + AGI - 20.0
+FORM_BEAR: AP = Level x (mLevelMult + 3.0) + STR x 2.0       - 20.0
+NORMAL:    AP =                            STR x 2.0         - 20.0
+```
+
+Confirmed by tooltips: Cat Form "increasing melee attack power by 40 plus Agility"
+(https://classicdb.ch/?spell=768); Bear Form "attack power by 30, armor contribution from
+items by 180%, and health by 20" (https://classicdb.ch/?spell=5487).
+
+- **Cat optimises Strength** — twice the AP of Agility — with Agility second (armour at 2 a
+  point, plus crit and dodge whose 1.12 coefficients could not be verified).
+- **Bear optimises Stamina and item armour.** Agility gives a bear no AP at all, so it buys
+  only armour.
+- The sim's Druid sheet had `ApPerStrength = 1, ApPerAgility = 0` for the one healer spec,
+  which halves Strength and ignores Agility entirely. Four specs need four conversions:
+  feral (2, 1), bear (2, 0), and (2, 0) for the two casters, whose caster gear carries no
+  Strength either way.
+
+### Feral (cat) damage at 24
+
+| Slot | Item | Req | Armour | Str/Agi/Sta/Int/Spi | Bind & source | Notes |
+|---|---|---|---|---|---|---|
+| Head | Azure Silk Hood (cloth) | 24 | 33 | 0/0/0/0/0 | BoE crafted/AH — https://classicdb.ch/?item=7048 | no leather head at or below 24 exists (§Missing); pure armour |
+| Shoulder | Hillman's Shoulders | 21 | 65 | 0/0/5/0/4 | BoE crafted (LW) — https://classicdb.ch/?item=4251 | highest-armour leather shoulder verified |
+| Back | Sentry Cloak | 19 | 21 | 0/4/5/0/0 | BoE world drop — https://classicdb.ch/?item=2059 | cloth back slot |
+| Chest | Tunic of Westfall | none on tooltip (ilvl 24) | 92 | 0/11/5/0/0 | BoP quest — https://classicdb.ch/?item=2041 | tooltip carries no Requires Level, so `None` in `gear` |
+| Wrist | Forest Leather Bracers | 19 | 37 | 0/5/0/0/0 | BoE world drop — https://classicdb.ch/?item=3202 | |
+| Waist | Dark Leather Belt | 20 | 48 | 0/4/4/0/0 | BoE crafted (LW) — https://classicdb.ch/?item=4249 | |
+| Legs | Leggings of the Fang | 18 | 79 | 5/9/4/0/0 | BoP, Lord Cobrahn, Wailing Caverns — https://classicdb.ch/?item=10410 | best item in the set |
+| Feet | Footpads of the Fang | 18 | 57 | 0/4/4/0/0 | BoP, Lord Serpentis, Wailing Caverns — https://classicdb.ch/?item=10411 | |
+| Ring | Thunderbrow Ring | 24 | — | 8/3/0/0/0 | BoE, Unique — https://classicdb.ch/?item=13097 | 19 AP in cat form |
+| Weapon | **Smite's Mighty Hammer** (2H mace) | 18 | 0 | 11/4/0/0/0 | BoP, Mr. Smite, Deadmines — https://classicdb.ch/?item=7230 | 55-83 dmg, 3.50 s, 19.7 dps |
+| **Totals** | | | **432** | **24 / 44 / 27 / 0 / 4** | | |
+
+**Cat AP from gear: 24x2 + 44 = +92** before Cat Form's flat +40 and the level term.
+Agility also adds 88 armour at 2 a point.
+
+Weapon alternatives: **Twisted Chanter's Staff** (55-84, 3.40 s, 20.4 dps, +10 Int +6 Sta,
+BoE, req 19, https://classicdb.ch/?item=890) is 0.7 dps and one top-end higher but about
+26 AP lower, so the hammer wins without a verified cat damage normalisation.
+
+### Bear tank at 24
+
+| Slot | Item | Req | Armour | Str/Agi/Sta/Int/Spi | Bind & source | Notes |
+|---|---|---|---|---|---|---|
+| Head | Green Tinted Goggles (cloth) | none (ilvl 30) | 35 | 0/0/8/0/7 | BoE, Engineering recipe — https://classicdb.ch/?item=4385 | only sub-24 head with Stamina; BoE, so bought rather than made, which is why the profession is not modelled |
+| Shoulder | Hillman's Shoulders | 21 | 65 | 0/0/5/0/4 | BoE crafted — https://classicdb.ch/?item=4251 | |
+| Back | Sentry Cloak | 19 | 21 | 0/4/5/0/0 | BoE — https://classicdb.ch/?item=2059 | |
+| Chest | Blackened Defias Armor | 19 | 92 | 4/3/11/0/0 | BoP, Deadmines — https://classicdb.ch/?item=10399 | the Defias 2pc "+10 Armor" is a set bonus and is not modelled |
+| Wrist | Glowing Leather Bracers | 23 | 40 | 0/2/5/0/0 | BoE — https://classicdb.ch/?item=2017 | |
+| Waist | Dark Leather Belt | 20 | 48 | 0/4/4/0/0 | BoE crafted — https://classicdb.ch/?item=4249 | |
+| Legs | Leggings of the Fang | 18 | 79 | 5/9/4/0/0 | BoP, Wailing Caverns — https://classicdb.ch/?item=10410 | no Stamina-heavy leather legs verified; highest armour wins |
+| Feet | Footpads of the Fang | 18 | 57 | 0/4/4/0/0 | BoP, Wailing Caverns — https://classicdb.ch/?item=10411 | |
+| Ring | Plains Ring | 24 | — | 0/0/8/3/0 | BoE, Unique — https://classicdb.ch/?item=2039 | 8 Sta is the largest verified; the Int is dead weight |
+| Weapon | **Twisted Chanter's Staff** (2H) | 19 | 0 | 0/0/6/10/0 | BoE — https://classicdb.ch/?item=890 | 55-84 dmg, 3.40 s, 20.4 dps |
+| **Totals** | | | **437** | **9 / 26 / 60 / 13 / 7** | | |
+
+**Bear Form consequences:** item armour x 2.8 (the 180% contribution) = **1223** from 437, and
+60 Stamina is about +600 health. Gear AP is only 9x2 = +18, and Agility adds none in Bear
+Form, which is why a bear does not pursue it. The sim's flat `Traits.ArmorBonus = 428` was
+238 x 1.8 for the healer's set; this set implies **437 x 1.8 = 786**.
+
+### Contradictions
+
+1. Hillman's Shoulders Spirit: +4 (classicdb, wowhead classic spell page) vs +3 (jigma.eu,
+   labelled beta data). +4 used.
+2. Druid Strength-to-AP: the 1.12 source-code formula gives Str x 2, while
+   https://wowpedia.fandom.com/wiki/Attributes_(pre-6.0) says "Druids gain 1 melee attack
+   power per point of strength". Both fetched; the 1.12 formula is used.
+3. Cowl of the Fang (+4 Agi/+5 Sta/+4 Int/+3 Spi, req 22, leather head) appears on
+   Turtle/OctoWow databases as item 81006 and is absent from classicdb's 1.12 list. Treated
+   as custom-server data and excluded. If it were real it would replace both head slots.
+
+### Missing evidence
+
+- Level-24 **base attributes** remain unverified (the gap §1 and §Contradictions already
+  record); every total above is gear-only.
+- **No leather head at or below 24** — the lowest verified leather helm is Hardened Leather
+  Helm at req 30 (https://classicdb.ch/?item=8747), so the head slot falls back to cloth.
+- Agility-to-crit and Agility-to-dodge coefficients at 24: no verified 1.12 value, so Agility
+  is scored as armour plus AP only in both sets.
+- Random-suffix greens ("of the Monkey/Tiger/Bear") almost certainly beat some rows, but
+  their suffix magnitude at item level 24-29 is unverified (same gap §2 records), so they
+  are excluded rather than guessed.
+- The `mLevelMult` constant in both form formulas is unverified.
+- **Professions and set bonuses cannot be expressed** in `gear`: the Defias 2pc armor and 5pc
+  attack power are worth about +23 armour together and are not counted.
+- Bear Form's multiplier applies to the "armor contribution from items" only, so 1223 is
+  item armour and excludes the Agility term.
+
+### Sources
+
+classicdb.ch items 7048, 4251, 2059, 2041, 3202, 4249, 10410, 10411, 13097, 7230, 890, 10399,
+2017, 2039, 4385 and spell pages 5487, 768; plus
+https://vanilla-wow-archive.fandom.com/wiki/Formulas:Attack_Power for both form formulas.
+Rejected: Turtle/OctoWow item 81006, jigma.eu's Spirit value, and wowpedia's pre-6.0
+Str-to-AP line (cited only as a contradiction).
