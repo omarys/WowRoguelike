@@ -3366,9 +3366,17 @@ module Content =
   /// (`.pi/research/level24/shaman.md` §5) — its +20% health and mana at 2/2 is
   /// already baked into `reincarnation`'s fraction, the same way a rank's numbers
   /// are baked into its `Ability`.
+  /// Shaman 0/5/46 under OctoWoW's tree, which is `shamanTalents`' shape with two
+  /// things taken away: **Purification no longer exists** (OctoWoW replaced it), so
+  /// `HealDoneBp` is zero rather than 10%; and Totemic Focus is gone, so the totem
+  /// discount is Tidal Focus's now — the OctoWoW talent "reduce[s] the mana cost of
+  /// your totems" as well as your heals, which is why one list serves both.
+  /// Ancestral Knowledge's "all your stats" is still narrowed to `IntellectBp`: a
+  /// stat-wide multiplier is a new axis, and it is named in
+  /// `.pi/research/octowow/shaman.md` §5 rather than half-modelled here.
   let private shamanTalents =
     { Talents.none with
-        HealDoneBp = 1000
+        HealDoneBp = 0
         HealCostBp = 500
         IntellectBp = 500
         TotemEffectBp = 2500

@@ -522,9 +522,9 @@ the talents each build actually takes, not over the tree:
 | Druid (caster dps) | 5 of 19 | 14 | 0 |
 | Druid (tank + melee dps) | 6 of 21 | 15 | 0 |
 | Mage (caster dps) | 4 of 19 | 15 | 0 |
-| Warrior (tank) | — (prose only) | — | Master of Arms merges four specs |
+| Warrior (tank) | 6 of 18 | 12 | 0 — but half its (b) bucket needs new `Effect` cases, not new fields |
 
-**56 of 159 talent spends are data edits; 95 need a model change.** That ratio is the
+**62 of 177 talent spends are data edits; 107 need a model change.** That ratio is the
 headline: this is not a content port, it is a vocabulary change with a content port
 attached.
 
@@ -659,6 +659,32 @@ Two reasons not to chase it yet: no `comps` cell seats these three specs, so
 there is no ladder to A/B against; and the OctoWoW research above rewrites the
 same kits. Fixing a kit that is about to be replaced is the definition of doing
 the work twice.
+
+## TODO — the level-scaled ladder has two failing cells
+
+Found while re-measuring after the first Shaman change, and **pre-existing**: the same two
+cells fail on `HEAD` with the Shaman edit stashed, so they are not a Shaman regression.
+
+The ladder has two axes and only one of them has been watched. `comps N` with no `--level`
+seats each map at its own level (graveyard 33, library 36, armory 39); `comps N --level 60`
+seats everything on the level-60 sheets, which is the axis every "36/36 clean" claim in
+this document was measured on. At `--level 60`: 36 of 36 clean, including with the Shaman
+change below. At the level-scaled axis:
+
+| roster | map | result |
+|---|---|---|
+| Warrior/Druid/Mage/Rogue/Warlock | library 36 | **wiped 2 of 2**, deaths 0 alive |
+| Warrior/Priest/Druid/Mage/Warlock | graveyard 33 | **1 of 2 unresolved** at the 24000 cap |
+
+Both are Druid cells, and the Druid is the one class whose sheet was rewritten after the
+last green scaled-axis measurement (the four-spec work), so the likely cause is per-spec
+gear or the Tree healer's now-conditional talents rather than anything in this session's
+changes. **Unmeasured, and the reason it is a TODO rather than a fix:** nothing here
+distinguishes a healing shortfall from a positioning wipe, and the library wipe takes the
+whole party (0 alive, ~7960 ticks), which is a shape no single gear line produces.
+
+Until this is closed, "the ladder is green" means the level-60 axis and should be written
+that way.
 
 ## Working agreements this project keeps re-learning
 

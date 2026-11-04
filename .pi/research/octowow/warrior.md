@@ -1,162 +1,156 @@
-# Research: OctoWoW Warrior — class changes
+# Warrior — OctoWoW class changes
 
-Source of every sentence below: **<https://octowow.st/warrior>**, fetched and read in full. The
-numeric cross-checks come from **<https://octowow.st/talents/warrior>**'s server-rendered talent
-payload (see §6). No number here is filled in from memory or from vanilla 1.12.
+Research note. Read-only: nothing here touches `src/` or `tests/`.
 
-Status: **prose complete for Warrior, numbers incomplete.** The summary page states intent
-("gains a fifth rank", "Deals a percentage of weapon damage") and almost never prints a coefficient.
-Coefficients must be taken from the talent payload or the spell pages, and are marked **UNVERIFIED**
-where absent.
+**This note supersedes the build it previously described.** The operator supplied the build
+directly — <https://octowow.st/talents/warrior/?points=Y--VYFoKQSopQQYB> — decoded with the
+verified codec (`/tmp/dec.py`): **Arms 3 / Fury 0 / Protection 48, 51/51**. It is a Protection
+tank build, and this file is now read against that build rather than against the tree.
 
----
+Names, max ranks and tooltip text come from the talent page's own payload (`/talents/warrior`:
+54 talents, each with `index`, `ranks`, `requires`, `reqRanks` and per-rank `values`). Slot →
+name is the payload's own `index`, which the page renders in tree order.
 
-## 1. New abilities
+## 1. Build and what it is for
 
-| Ability | Cost / cooldown | Effect (as stated) |
+Protection 48 in 17 talents, plus 3 in Arms for Improved Heroic Strike — mitigation, threat and a tank cooldown almost throughout; the only damage talent is the one-handed specialisation. The sim's Warrior is already the ladder's Tank (`Content.fs:3667-3725`), so this build is the role the sim runs — and the sim spends **no points at all**: `Content.fs:3670` is `Talents = Talents.none`, with no `warriorTalents` record beside the four healer builds at `Content.fs:3369-3500`.
+
+Tally, slot by slot (payload `index` → spent / max): Arms `{0: 3}` → Improved Heroic Strike 3/3. Protection `{0:2, 1:5, 2:3, 5:5, 6:5, 8:1, 9:2, 10:2, 12:2, 13:2, 14:5, 16:5, 17:1, 18:2, 20:2, 22:3, 25:1}` → 48 points in 17 talents.
+
+Every rank spent is ≤ its published max, and both prerequisite gates the payload states are met — Improved Shield Slam (18) and Concussion Blow (25) each require `17/1`, satisfied by Shield Slam 1/1 at slot 17.
+
+Count note: the brief says "17 talents, 51 points", but the payload spends 48 in 17 Protection talents plus 3 in Improved Heroic Strike — **18 talents over 51 points**; 17 is the Protection-only tally.
+
+## 2. What the page changes (quoted verbatim)
+
+Protection entries this build spends in. The page prints each as a heading block (name, row,
+rank, one-word diff); the headings are joined here with em dashes and the body is the page's
+wording unchanged — no word is altered or reordered:
+
+> ★ Defensive Tactics — Row 6, 3 Ranks: new. While wearing a shield you keep part of Defensive Stance's threat bonus in other stances, so stance dancing stops costing you the pull.
+
+> ★ Gag Order — Row 4, 2 Ranks: replaces Improved Sunder Armor. Shield Slam gains extra dispel chance and Shield Bash gains a 50% chance to silence.
+
+> ★ Improved Shield Slam — Row 5, 2 Ranks: replaces Improved Shield Bash. Cuts Shield Slam's cooldown by 0.75 sec and grants extra block chance on your next attack.
+
+> ★ Improved Intervene — Row 3, 2 Ranks: replaces Improved Shield Block. Grants a chance at immunity to movement impairing effects after using Intervene.
+
+> ★ Shield Slam — Row 7 → Row 5. Not a capstone talent, so it is reachable without going all the way down the tree.
+
+> ★ Shield Specialization — Blocking always generates rage.
+
+> ★ Toughness — Also increases the amount of damage your shield absorbs.
+
+> ★ Improved Disarm — 3 Ranks → 2 Ranks. Reduces Disarm's cooldown.
+
+> ★ Concussion Blow — Comes off cooldown in 20 sec and costs no Rage. The stun lasts 3 sec.
+
+> ★ Removed: Improved Shield Block, Improved Sunder Armor, Improved Shield Bash
+
+Baseline spells that touch the tank kit:
+
+> ★ Shield Slam — Its damage is modified by your attack power as well as your shield block value.
+
+> ★ Rage Generation — Rage earned from a swing is calculated from the damage it deals plus a share based on your weapon speed, and it is tuned generously, so armor mitigation costs you far less rage than a damage-only calculation would. Weapon speed itself is rage-neutral: at equal damage per second a slow weapon and a fast one generate the same rage.
+
+## 3. Per-talent table
+
+Rank is spent / published max. The quoted effect is the calculator's per-rank tooltip
+verbatim — brackets are the page's own substitution list.
+
+| Talent (slot) | Rank | Quoted effect | Bucket |
+|---|---|---|---|
+| Improved Heroic Strike (A0) | 3/3 | "Reduces the cost of your Heroic Strike ability by [1,2,3] rage points." | a |
+| Improved Bloodrage (P0) | 2/2 | "Increases the instant Rage generated by your Bloodrage ability by [5,10]." | b |
+| Shield Specialization (P1) | 5/5 | "Increases your chance to block attacks with a shield by [1,2,3,4,5]% and generates [1,2,3,4,5] rage when a block occurs." | b |
+| Anticipation (P2) | 3/3 | "Increases your Defense skill by [7,14,20]." | b |
+| Iron Will (P5) | 5/5 | "Increases your chance to resist Stun and Charm effects by an additional [3,6,9,12,15]%." | b |
+| Toughness (P6) | 5/5 | "Increases your armor value from items by [2,4,6,8,10]% and the amount of damage absorbed by your shield by [3,6,9,12,15]%." | b |
+| Last Stand (P8) | 1/1 | "When activated, this ability temporarily grants you 30% of your maximum hit points for 20 seconds. After the effect expires, the hit points are lost." | b |
+| Improved Intervene (P9) | 2/2 | "Grants a $L47% chance to gain immunity to movement impairing effects for 3 sec after using Intervene." | b |
+| Improved Taunt (P10) | 2/2 | "Reduces the cooldown of your Taunt ability by [1,2] sec." | a |
+| Gag Order (P12) | 2/2 | "Your Shield Slam has an additional [50,100]% chance to dispel 1 magic effect on the target and your Shield Bash ability has a [50,100]% chance to silence the target for 3 sec." | b |
+| Improved Disarm (P13) | 2/2 | "Decreases the cooldown of your Disarm ability by [10,20] secs." | a |
+| Defiance (P14) | 5/5 | "Increases the threat generated while in Defensive Stance by an additional [4,8,12,15,20]%." | a |
+| One-Handed Weapon Specialization (P16) | 5/5 | "Increases the damage you deal with One-Handed Melee weapons by [2,4,6,8,10]%." | a |
+| Shield Slam (P17) | 1/1 | "Slam the target with your shield, causing 174 to 184 damage, modified by your shield block value and attack power. This attack causes a high amount of threat, and has a 50% chance of dispelling 1 magic effect on the target." | b |
+| Improved Shield Slam (P18) | 2/2 | "Reduces the cooldown of Shield Slam by [0.75,1.5] sec, and using this ability will also grant you an extra [35,70]% chance to block the next attack within 4.5 sec." | b |
+| Improved Shield Wall (P20) | 2/2 | "Increases the effect duration of your Shield Wall ability by [1,2] secs and reduces its cooldown by [5,10] min." | a |
+| Defensive Tactics (P22) | 3/3 | "While wearing a shield, you retain [60,120,180]% of the increased threat generation from Defensive Stance in other stances." | b |
+| Concussion Blow (P25) | 1/1 | "Deals 115 damage and stuns the opponent for 3 sec. This ability deals a high amount of threat and penetrates 100% of the enemy's armor. Instantly generates 10 rage." | b |
+
+## 4. The three buckets
+
+Counted over the talents this build spends points in: **18 talents, 51 points**.
+
+| bucket | count | talents |
 |---|---|---|
-| **Intervene** (level 60) | 10 rage, 30 sec | Run at high speed to a party member, intercepting the next melee or ranged attack against them |
-| **Die by the Sword** (passive) | — | Increases parry chance while under Retaliation |
-| **Master Strike** (Arms talent, Row 3) | — | Weapon damage plus a **main-hand-weapon-conditional** rider: Mace disorients until damaged, Sword disarms, Axe immobilises, Polearm "its own distinct effect" |
+| **a — expressible as data today** | **6** | Improved Heroic Strike, Improved Taunt, Improved Disarm, Defiance, One-Handed Weapon Specialization, Improved Shield Wall |
+| **b — needs a new model axis** | **12** | Improved Bloodrage, Shield Specialization, Anticipation, Iron Will, Toughness, Last Stand, Improved Intervene, Gag Order, Shield Slam, Improved Shield Slam, Defensive Tactics, Concussion Blow |
+| **c — collapses a kit row** | **0** | — |
 
-## 2. Class mechanics
+Each (a), with the field it lands in:
 
-**Rage generation is rewritten.** Rage per swing = damage dealt **plus a share based on weapon
-speed**, explicitly tuned so armour mitigation costs less rage than a damage-only formula would. The
-page states weapon speed is **rage-neutral**: equal-DPS slow and fast weapons generate the same rage.
-This is a change to the generation *formula*, not to a constant.
+- **Improved Heroic Strike** — `SpellTalent.CostBp` (`Domain.fs:1109`) is percent-off-cost and all six Heroic Strike rungs cost 15 rage (`Content.fs:254-266`, `Cost = 15` in the rank loop), so 3 rage is exactly 20%: `CostBp = 2000`. Exact only while every rank costs 15.
+- **Improved Taunt / Improved Disarm / Improved Shield Wall** — `Talents.CooldownOff` (`Domain.fs:1132-1170`) already exists, and Taunt (`Content.fs:234`), Disarm (`Content.fs:1608`) and Shield Wall (`Content.fs:1007`) are rows. Shield Wall's +2 s is that row's own `Blocks(secTicks 10.0)` literal.
+- **Defiance** — `Entity.ThreatMultiplierBp` already carries the stance via `tankStanceBp = 50000` (`Content.fs:1650`, passed at `Content.fs:3715`); +20% is 50000 → 60000. A constant edit.
+- **One-Handed Weapon Specialization** — `Talents.DamageDoneBp` (`Domain.fs:1132`), and the ladder is one-handed at every rung (`Content.fs:3669-3674`), so no weapon condition is ever evaluated. It also raises `Shoot` (`Content.fs:1545`) — the only over-application, a crossbow not being a one-handed melee weapon.
 
-## 3. Baseline spell changes
-
-| Spell | Change |
+| (b) talent | axis it needs |
 |---|---|
-| Slam | Percentage of weapon damage, gains a fifth rank, **usable while moving** |
-| Bloodthirst | Damage + **35% of attack power**, and increases movement speed |
-| Mortal Strike | Percentage of weapon damage (scales with the weapon) |
-| Whirlwind, Cleave | Both scale from melee damage |
-| Shield Slam | Damage modified by **attack power as well as shield block value** |
-| Enrage | Damage bonus lasts its full duration |
-| Thunder Clap | Usable in **Defensive Stance as well as Battle Stance** |
+| Improved Bloodrage | a self-resource grant `Effect` (none: `DrainResource` `Domain.fs:867` takes from a target) and a Bloodrage row |
+| Shield Specialization | block chance is data (`Traits.BlockChanceBp`, `Domain.fs:1086`); "rage when a block occurs" needs an on-block trigger into `gainRage` (`SimCombat.fs:234-241`) |
+| Anticipation | a Defense-skill field and its conversion; `Traits` holds `DodgeBonusBp` / `BlockChanceBp` / `ArmorBonus` as separate flat registers |
+| Iron Will | a control-resist roll (`Stunned` aura exists, `Domain.fs:217`; no resist, no Charm) |
+| Toughness | percent-of-gear-armour and percent-of-block-value; `Traits.ArmorBonus` and `BlockValue` are flat ints |
+| Last Stand | a temporary max-health buff; `ReducesDamage` (`Domain.fs:880`) scales incoming damage, not the pool |
+| Improved Intervene | Intervene is not a kit row; impairment immunity is a new state (`Root` exists, `Domain.fs:854`) |
+| Gag Order | a dispel `Effect` plus the Shield Slam row; the Shield Bash half is fine — `Silence of duration` (`Domain.fs:823`) exists and 2/2 is 100% |
+| Shield Slam | damage scaling from block value: `WeaponDamage` (`Domain.fs:800-806`) scales from the weapon roll, `Damage` is flat; plus the 50% dispel |
+| Improved Shield Slam | `Blocks of duration` (`Domain.fs:878`) carries no magnitude, so "+35/70% block" cannot be expressed |
+| Defensive Tactics | per-stance threat: `ThreatMultiplierBp` is one scalar and no Warrior row sets `Stance` (`Stance = None` throughout) |
+| Concussion Blow | stun (`Domain.fs:853`), threat (`Domain.fs:860`) and unmitigated `SpellDamage` are data; "instantly generates 10 rage" needs the self-resource grant |
 
-## 4. Talent changes
+Why (c) is zero, as a finding rather than an omission: nothing this build takes deletes or renames a sim row. The page's three "Removed:" talents were never sim rows — Shield Block, Sunder Armor and Shield Bash are **abilities** here (`Content.fs:946-1000`) and all three survive. "Replaces Improved Sunder Armor" / "replaces Improved Shield Block" is a talent-for-talent swap on the page and costs the sim nothing.
 
-### Arms
-- **Master of Arms** (Row 5, 5 ranks) — replaces Axe/Mace/Sword/Polearm Specialization. One talent
-  adapting to the equipped weapon: axes give crit, maces ignore armour, swords give a chance at an
-  extra attack, "and so on".
-- **Master Strike** (Row 3, 1 rank) — new, replaces Anger Management.
-- **Boundless Anger** (Row 5, 3 ranks) — new; raises maximum Rage above 100.
-- **Improved Disciplines** (Row 5, 3 ranks) — new; reduces Retaliation/Recklessness/Shield Wall cooldowns.
-- **Precision Cut** (Row 6, 3 ranks) — replaces Improved Hamstring; more Execute damage per extra rage.
-- **Improved Slam** — moved Fury → Arms Row 6, **5 ranks → 2 ranks**; cuts Slam's GCD as well as cast time.
-- **Sweeping Strikes** — applies to abilities as well as main-hand melee.
-- **Improved Thunder Clap** — also increases damage, not only reduces rage cost.
-- **Two-Handed Weapon Specialization** — **5 → 3 ranks**, also raises skill with all two-handers.
-- **Improved Rend** — **3 → 2 ranks**.
-- **Removed:** Axe/Mace/Sword/Polearm Specialization, Anger Management, Improved Hamstring.
+## 5. The level-24 and level-60 picture
 
-### Fury
-- **Blood Drinker** (Row 6, 3 ranks) — new; while under Enrage/Death Wish/Recklessness, attacks restore a share of max health.
-- **Improved Shouts** (Row 3, 5 ranks) — merges Improved Battle Shout + Improved Demoralising Shout.
-- **Battlefield Mobility** (Row 4, 2 ranks) — replaces Improved Intercept; one talent for Intercept/Intervene/Charge cooldowns.
-- **Ravager** (Row 5, 3 ranks) — replaces Improved Cleave; Whirlwind cooldown and Cleave rage cost.
-- **Improved Pummel** (Row 4, 2 ranks) — new; Pummel can slow, and spell-school lockouts last longer.
-- **Dual Wield Specialization** — **Row 4 → Row 2**, also raises off-hand hit chance.
-- **Unbridled Wrath** — extra-rage chance doubled with a two-hander.
-- **Improved Berserker Rage** — also a chance to break movement-impairing effects.
-- **Booming Voice** — increases the **area** of all shouts.
-- **Flurry** — number of hasted swings scales with the talent.
-- **Removed:** Improved Battle Shout, Improved Demoralising Shout, Improved Cleave, Improved Intercept.
+**Today, at either anchor, one kit:** Taunt, Heroic Strike, Sunder Armor, Charge, Intercept, Disarm, Execute, Shoot, plus Shield Bash / Shield Block / Shield Wall when a shield is worn — the `kitAt` list at `Content.fs:3691-3696`. Traits `BlockChanceBp = 500`, `BlockValue = 8` (`Content.fs:3327-3330`); threat 5.0x; a fixed 100-rage pool; rage per hit `max 1 (amount * 5 / (2 * level))` (`SimCombat.fs:234-241`) — 10 rage for a 100-damage hit at 24, 5 at 60.
 
-### Protection
-- **Defensive Tactics** (Row 6, 3 ranks) — new; while wearing a shield, keep part of Defensive Stance's threat bonus in other stances.
-- **Gag Order** (Row 4, 2 ranks) — replaces Improved Sunder Armor; Shield Slam dispel chance, Shield Bash silence chance.
-- **Improved Shield Slam** (Row 5, 2 ranks) — replaces Improved Shield Bash; −0.75 sec cooldown, extra block chance on the next attack.
-- **Reprisal** (Row 5, 2 ranks) — new; more Revenge damage, chance to refund its rage.
-- **Improved Intervene** (Row 3, 2 ranks) — replaces Improved Shield Block; chance of immunity to movement impairment after Intervene.
-- **Shield Slam** — **Row 7 → Row 5**; explicitly no longer a capstone gate.
-- **Shield Specialization** — blocking always generates rage.
-- **Toughness** — also increases shield-absorbed damage.
-- **Improved Revenge** — moved within Row 3, also reduces Revenge cooldown.
-- **Improved Disarm** — **3 → 2 ranks**, reduces Disarm's cooldown.
-- **Anticipation** — **5 → 3 ranks**.
-- **Concussion Blow** — 20 sec cooldown, **no rage cost**, 3 sec stun.
-- **Removed:** Improved Shield Block, Improved Sunder Armor, Improved Shield Bash.
+**At 24**, if the port lands the tank gains 15% block (5% trait + Shield Specialization), +20% stance threat, +10% one-handed damage, Heroic Strike at 12 rage, Taunt at 8 s, Shield Wall 10 minutes cheaper, and — the one to watch — **Disarm at 0 s**: Improved Disarm 2/2 removes 20 s from a row whose cooldown is 20 s (`Content.fs:1608-1610`). That needs a floor, or Disarm becomes spammable. The three Shield Slam talents would also add two rows at 24, the file's biggest fidelity question: the level-24 research treats that anchor as a tank with Shield Bash / Shield Block / Shield Wall (`Content.fs:3650-3674`), and Shield Slam is a 31-point Protection talent in vanilla. Points are not level-scaled either — the sim fixes a build for the run and holds it as a sheet constant (`Domain.fs:1124-1131`), the way the healer builds are level-60 builds on a level-24 sheet — so all 48 points are spent at 24, which a level-24 character could not earn.
 
-## 5. What this costs in `src/WowRoguelike.Core/Content.fs`
+**At 60** nothing new arrives from the tree — the same 12 talents apply, and the only deltas are the sheet's own: plate at 40, 8068 armour (`Content.fs:3667-3690`), the 53-100 / 1.6 s weapon rung. The port is therefore **level-flat in talent terms**: whatever the tank gains at 24 it also has at 60, so the ladder's tank side would carry constant talent weight at both ends — the opposite of a ladder that gets harder.
 
-Three buckets, cheapest first.
+## 6. Cost, per change
 
-**Expressible today** — coefficient and rank-table changes only. Slam's fifth rank, Bloodthirst
-"damage + 35% AP", Mortal Strike/Whirlwind/Cleave scaling from melee damage, Shield Slam taking AP on
-top of block value, Concussion Blow's cost and cooldown, and every rank-count change (Two-Handed
-5→3, Anticipation 5→3, Improved Slam 5→2, Improved Rend 3→2, Improved Disarm 3→2). These are edits to
-`AbilityDef` rank ladders and coefficients; the model already carries them.
+Targets are file:line in `src/WowRoguelike.Core/`.
 
-**Needs a new axis in the model, not a new entry.** **Master Strike** and **Master of Arms** are
-both "behave differently depending on the equipped main-hand weapon". `Effect` is a closed union with
-no weapon dispatch, and `AbilityDef` has one definition shared by every wielder of a rank band. So
-this is either a per-entity substitution at cast time or a weapon-keyed variant table — a design
-decision before it is an implementation. Four abilities in this class alone depend on it (Master
-Strike's four riders, Master of Arms' four bonuses).
+1. **A Warrior talents record.** Add `let private warriorTalents` beside `shamanTalents` (`Content.fs:3369`) and point `Talents = Talents.none` at `Content.fs:3670` at it. Carries Heroic Strike `CostBp = 2000`, three `CooldownOff` lines (Taunt −1 s, Disarm −10 s, Shield Wall −5 min) and `DamageDoneBp = 1000`. **No new fields** — this is all of bucket (a).
+2. **Threat.** `tankStanceBp = 50000` → `60000` (`Content.fs:1650`), or a `ThreatBp` on `Talents` folded in at `Content.fs:3715` so Defiance is a talent rather than a class constant. One line either way.
+3. **Block chance.** `warriorTraits` (`Content.fs:3327`) → `BlockChanceBp = 1000`; better as a `Talents.BlockChanceBp` folded in beside the traits.
+4. **A cooldown floor** for Disarm at `Content.fs:1608`, or wherever `CooldownOff` is applied.
+5. **New Effect cases** (`Domain.fs:797-880`), in priority order: a magnitude on `Blocks` (`Domain.fs:878`) — one field, unblocks Improved Shield Slam; a `Dispel` case — unblocks Gag Order and Shield Slam; a self-resource grant — unblocks Improved Bloodrage and Concussion Blow's rage clause. The defensive-duration family (max health for Last Stand, control resist for Iron Will) is the expensive end.
+6. **Not** a general talent engine. Every item above is a field or a union case on `Effect` / `Talents` / `Traits`, which is what `Domain.fs:1131` asks for: name what the vocabulary cannot express in a comment beside the build and leave it out.
 
-**Collapses kit rows.** Master of Arms merges four specialisations into one talent; Improved Shouts
-merges two. Our kits are hand-written per rank, so a merge deletes entries rather than editing them —
-cheap to do, but it changes what a rank band *is*, and a diff that adds Master of Arms without
-removing the four specialisations would leave both live.
+## 7. Contradictions
 
-**Also to check, not yet modelled at all:** max Rage above 100 (Boundless Anger), shout radius
-(Booming Voice), and Defensive Tactics' "keep part of the threat bonus in another stance" — that last
-one interacts with the `Threat` model directly.
+1. **Gag Order's silence chance.** Notes: "a 50% chance to silence". Calculator at 2/2: `[50,100]%` — 100%. The note understates its own max rank by half.
+2. **Improved Shield Slam's cooldown.** Notes: "by 0.75 sec". Calculator: `[0.75,1.5]` sec over two ranks — rank 1 quoted as if it were the whole talent.
+3. **Improved Revenge** (0 points here). Notes: "Moved within Row 3 … Also reduces Revenge's cooldown". Calculator adds a clause the notes never mention: "a [15,30,45]% chance to stun the target for 3 sec".
+4. **Shield Slam's row vs Concussion Blow's prerequisite.** The notes move Shield Slam "Row 7 → Row 5" and call it not a capstone; the calculator keeps Concussion Blow requiring Shield Slam `17/1` while sitting at slot 25 — row 7 under the four-per-row layout the notes' own row numbers imply.
+5. **Across revisions — Improved Shield Block.** The archived page (Wayback `20260729192644`) lists it as live: "Talent has been reduced from 3 ranks down to 1 rank". The live page lists it under "Removed:".
+6. **Across revisions — Slam.** The archive makes Slam's rework a new ability, "Decisive Strike" ("Focus an attack equal to Slam (Rank 4) … can be cast while moving"), crediting Wallcraft; the live page keeps Slam as Slam with a fifth rank, and the live Arms tree has no Decisive Strike at any slot.
 
-## 6. The build string codec (verified)
+## 8. Missing evidence / UNVERIFIED
 
-`?points=` is **3 bits per talent, 28 talents per tree, three `-`-separated base64 chunks**, each
-padded to 14 chars with `A`; the packer trims trailing `A`s (and uses a trailing `=` form for the
-cosmetic/screenshot path). Both directions live in the site bundle
-`/talents/_next/static/chunks/app/%5Blocale%5D/%5Bclass%5D/page-ce9cdb06bf9c66c9.js` (`_H` unpack,
-`LD` pack).
+- **Improved Intervene's per-rank chance — UNVERIFIED.** The calculator leaves it `$L47%`, unsubstituted, with no `values` array. The rendered live tooltip would settle it.
+- **What Defense skill converts to — UNVERIFIED.** Anticipation's 7/14/20 means nothing without a conversion to dodge/block/miss, and no page states one. Do not substitute a vanilla ratio; the client's combat table would settle it.
+- **Whether Shield Slam is level-gated — UNVERIFIED.** The calculator prints no level on talents. This decides whether Shield Slam exists at the 24 anchor.
+- **The 28-slot, four-per-row layout is inferred.** Corroborated by every row number the page prints (Gag Order slot 12 = Row 4, Shield Slam 17 = Row 5, Improved Intervene 9 = Row 3, Defensive Tactics 22 = Row 6) and by the codec's 28 slots, but never stated.
+- **The rage-generation formula has no numbers.** §2 says rage is damage plus a weapon-speed share and that speed is rage-neutral; `gainRage` is damage-only over `2 * level`. The magnitude at 24 and 60 is UNVERIFIED, and it moves every rage-cost talent here, Improved Heroic Strike first.
+- **Defiance × Defensive Tactics — UNVERIFIED and unmodellable.** 5/5 Defiance is +20% in Defensive Stance; 3/3 Defensive Tactics retains 180% of that elsewhere — over 100%, which the page does not explain, and the sim has no second stance for the Warrior to be in.
+- **Nothing here has been run.** `Talents = Talents.none` (`Content.fs:3670`) means the port is additive, so there is no regression risk today — and equally no build or test behind any number in this file.
 
-The operator's build `Y--VYFoKQSopQQYB` decodes to:
-
-```
-Arms        3 points  {0: 3}
-Fury        0 points  {}
-Protection 48 points  {0:2, 1:5, 2:3, 5:5, 6:5, 8:1, 9:2, 10:2,
-                       12:2, 13:2, 14:5, 16:5, 17:1, 18:2, 20:2, 22:3, 25:1}
-= 51 of 51
-```
-
-Index→name mapping verified against the site's own payload for four talents: Toughness (tree 2,
-index 6, 5 ranks) = 5, Shield Slam (17, 1) = 1, Gag Order (12, 2) = 2, Improved Shield Slam (18, 2) = 2.
-
-Two records taken verbatim from the payload, showing what a full parse yields:
-
-- tree 0, index 0 — `ability_rogue_ambush`, ranks 3 — **Improved Heroic Strike**: "Reduc…"
-- tree 0, index 10 — `ability_backstab`, ranks 3, `requires: 2`, `reqRanks: 2` — **Deep Wounds**:
-  "Your critical strikes cause the opponent to bleed, dealing [20/40/60]% of your…" (IDs #12290, #12963)
-
-The payload also carries `reqBy` (dependants) and a `spellIds` array per talent, so prerequisites and
-Blizzard spell IDs are available without scraping tooltips by hand.
-
-## 7. Missing evidence
-
-- **No coefficients on the summary page.** "A percentage of weapon damage" without the percentage is
-  not implementable; every such value must come from the payload or a spell page. **UNVERIFIED.**
-- **Master Strike's Polearm rider** is described only as "its own distinct effect". **UNVERIFIED.**
-- **Rage formula is described qualitatively.** "Damage dealt plus a share based on weapon speed" needs
-  the actual share before it can be coded; a weapon-speed-neutral formula is testable, which is the
-  good news — see §5.
-- **Which of these are live on OctoWoW's current build** versus planned is not stated on the page.
-- **Whether the calculator's tree is OctoWoW or vanilla-plus-partial** is inferred, not documented.
-  Evidence for OctoWoW: `master_strike_1`, `ability_warrior_improveddisciplines` and
-  `ability_warrior_decisivestrike` all appear in the Arms tree and none of them exists in 1.12. The
-  calculator also shows an Arms talent at Row 6 with icon `ability_warrior_strengthofarms` and 3 ranks
-  whose identity was **not** established — do not assume it is Precision Cut without checking.
-
-## 8. Not done
-
-- Eight other classes.
-- Coefficients for anything in §7.
-- Any change to `Content.fs`: this note is research, and the class layer rewrite is the parent item in
-  `docs/agents/handoff.md`.
+Skipped: no `src/`/`tests/` edit, no build run — research only.
+Risk: Improved Disarm 2/2 lands Disarm on a 0 s cooldown against a 20 s row, and 12 of the 18
+talents need a new axis before any of this can be coded.
