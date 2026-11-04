@@ -1164,19 +1164,25 @@ seed out of three, and a single-cell difference is not a ranking.
    Measured on the eight-seed freeze probe (24000 ticks): 8/8 frozen before, 0/8
    after, including the two seeds where the Tank lived and blocked the door.
 
-   **Forms are a stance, and a stance can be a requirement.** Tree of Life is the
-   Druid healer's default, but the operator's rule is "not exclusively": Tree of
-   Life forbids Healing Touch, so the healer shifts to human for it and returns to
-   the form afterwards. The movement penalty is deliberately not modelled. The
-   requirement lives on the `Ability`, not on the AI — one guard where abilities
-   resolve refuses an ability whose form the actor is not in, so Tree of Life
-   forbids Healing Touch as a rule rather than as a convention the AI happens to
-   keep. Shifting out needs a `Human Form` ability, because "no form" is a stance
-   the entity can be in and nothing in the kit could produce it. This changed the
-   benchmark (Druid party, all seeds still clear, ~30 ticks faster) and did **not**
-   change either failing cell on the scaled ladder — the healer's behaviour was the
-   first hypothesis for those and it is now refuted, so the open question is
-   recorded in the handoff rather than answered here.
+   **Entering a form costs mana; leaving it costs nothing.** The operator's rule, and
+   the asymmetry matters: the requirement lives on the `Ability`, not on the AI — one
+   guard where abilities resolve refuses an ability whose form the actor is not in, so
+   Tree of Life forbids Healing Touch as a rule rather than as a convention the AI
+   happens to keep. Shifting out needs a `Human Form` ability, because "no form" is a
+   stance the entity can be in and nothing in the kit could produce it. The movement
+   penalty is deliberately not modelled; the shift's price is, and it is not cosmetic —
+   with a free shift the healer re-entered Tree of Life as a matter of course and the
+   party starved of its healing, and one graveyard cell on the scaled ladder parked
+   that way until entering cost something. `shortcut: 60` is a flat level-24 figure that
+   does not scale to the level-60 sheet, where Healing Touch costs 405; vanilla charges
+   a share of base mana and the OctoWoW research will move these numbers anyway.
+
+   That shift changed the benchmark at seed 9 and the change is a **divergence, not a
+   speed-up**: the bench party's Druid is a caster body that never shifts, but its kit
+   now carries a price, one affordability check flipped a tick earlier than before, and
+   the fight resynchronised onto a different path (867 ticks instead of 909, more health
+   and mana left). It was verified by A/B — setting the cost back to zero returns seed 9
+   to 909 exactly — so the snapshot was refreshed knowing which line moved and why.
 
    Measured at 12000 ticks, seed 1, frozen → moving: graveyard min froze at tick 8000
    with 27 mobs left and 5/5 alive at full health, and now reaches 37 left with 1

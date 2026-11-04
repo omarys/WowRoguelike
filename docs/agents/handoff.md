@@ -669,22 +669,25 @@ The ladder has two axes and only one of them has been watched. `comps N` with no
 seats each map at its own level (graveyard 33, library 36, armory 39); `comps N --level 60`
 seats everything on the level-60 sheets, which is the axis every "36/36 clean" claim in
 this document was measured on. At `--level 60`: 36 of 36 clean, including with the Shaman
-change below. At the level-scaled axis:
+change below. At the level-scaled axis, one cell:
 
 | roster | map | result |
 |---|---|---|
 | Warrior/Druid/Mage/Rogue/Warlock | library 36 | **wiped 2 of 2**, deaths 0 alive |
-| Warrior/Priest/Druid/Mage/Warlock | graveyard 33 | **1 of 2 unresolved** at the 24000 cap |
 
-Both are Druid cells, and the Druid is the one class whose sheet was rewritten after the
-last green scaled-axis measurement (the four-spec work). **The first hypothesis for this
-— that the Druid's healing behaviour was at fault — has been measured and refuted:** after
-the Tree of Life work (`77c184b`) gave the healer a form to heal from and a rule for
-leaving it, both cells are unchanged, cell for cell. So it is not the healer's stance, and
-not obviously its gear. The library wipe takes the whole party (0 alive, ~7960 ticks),
-which is a shape no single gear line produces. Still **unmeasured**: nothing here
-distinguishes a healing shortfall from a positioning failure, and the next step is the log
-of one library run rather than another theory.
+A second cell used to fail here — `Warrior/Priest/Druid/Mage/Warlock graveyard`, one of
+two runs unresolved at the 24000 cap — and it cleared once **entering** a Druid form was
+priced (leaving stays free, per the operator's rule). That is evidence for the diagnosis
+rather than a coincidence: with a free shift the healer kept re-entering Tree of Life and
+starved the party of heals, which is exactly the shape a "nobody dies but nothing dies
+either" park has.
+
+The library wipe survived that fix and takes the whole party (0 alive, ~7100 ticks),
+which is a shape no single gear line produces. **Unmeasured**: nothing yet distinguishes a
+healing shortfall from a positioning failure, and the next step is the log of one library
+run rather than another theory. The hypothesis that the Druid's *stance* was at fault is
+refuted — the cell is unchanged cell-for-cell by the form work, while the graveyard one
+moved.
 
 Until this is closed, "the ladder is green" means the level-60 axis and should be written
 that way.

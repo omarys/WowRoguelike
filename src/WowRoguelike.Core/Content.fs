@@ -3529,12 +3529,40 @@ module Content =
   let private naturesSwiftness =
     nextSpell "Nature's Swiftness" (secTicks 180.0) 0 { Empower.none with Instant = true }
 
-  /// A Druid form. Instant, free, no cooldown: what a form costs is the casting
-  /// it forbids (`Aura.preventsCasting` for Bear and Cat), so charging mana for
-  /// entering one would charge for it twice. A single `Ability` rather than a
-  /// `AbilityDef`, because a form has no ranks — it does not scale, it just is.
-  let private form (stance: Stance) (name: string) =
+  /// A Druid form. Entering one costs mana; leaving one costs nothing, which is why
+  /// `humanForm` is built separately below rather than through this helper. A single
+  /// `Ability` rather than an `AbilityDef`, because a form has no ranks — it does not
+  /// scale, it just is.
+  ///
+  /// shortcut: 60 is a level-24 figure and a form does not rank, so it does not grow
+  /// with the level-60 sheet where a Healing Touch costs 405. Vanilla charges a share
+  /// of base mana instead; a per-level cost means a rank ladder on the form, and the
+  /// OctoWoW research is going to move these numbers anyway.
+  let private form (stance: Stance) (name: string) (cost: int) =
     { Name = name
+      CastTicks = ticks 0
+      CooldownTicks = ticks 0
+      ResourceCost = cost
+      Stance = None
+      Interruptible = false
+      Range = 0
+      TargetKind = Self
+      Effects = [ TakeStance stance ] }
+
+  let bearForm = form BearForm "Bear Form" 60
+  let catForm = form CatForm "Cat Form" 60
+  let travelForm = form TravelForm "Travel Form" 60
+  let treeOfLife = form TreeForm "Tree of Life" 60
+  let moonkinForm = form MoonkinForm "Moonkin Form" 60
+
+  /// Shifting back out, and free. Vanilla reaches the same place by cancelling the
+  /// aura from the buff bar; an ability is the only way to say it here, and it is what
+  /// lets a shift be one action of the same kind as any other. It costs nothing
+  /// because leaving is not entering: a healer that had to buy its way out of Tree of
+  /// Life to cast one Healing Touch would be charged for the round trip, and the
+  /// operator's rule is that only the way in has a price.
+  let humanForm =
+    { Name = "Human Form"
       CastTicks = ticks 0
       CooldownTicks = ticks 0
       ResourceCost = 0
@@ -3542,17 +3570,7 @@ module Content =
       Interruptible = false
       Range = 0
       TargetKind = Self
-      Effects = [ TakeStance stance ] }
-
-  let bearForm = form BearForm "Bear Form"
-  let catForm = form CatForm "Cat Form"
-  let travelForm = form TravelForm "Travel Form"
-  let treeOfLife = form TreeForm "Tree of Life"
-  let moonkinForm = form MoonkinForm "Moonkin Form"
-  /// Shifting back out. Vanilla reaches the same place by cancelling the aura
-  /// from the buff bar; an ability is the only way to say it here, and it is what
-  /// lets a shift be one action of the same kind as any other.
-  let humanForm = form HumanForm "Human Form"
+      Effects = [ TakeStance HumanForm ] }
 
   /// Divine Favor: the next healing spell is a guaranteed crit.
   let private divineFavor =
