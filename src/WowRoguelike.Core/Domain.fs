@@ -413,6 +413,17 @@ module Aura =
     | Wounded(r, _, _)
     | Numbed(r, _)
     | Crippled(r, _) -> r
+    // A form has no clock: it lasts until it is shifted out of. Asking a `function`
+    // that predates the form auras for its lifetime used to raise a match failure,
+    // and the buff bar asks about every aura an entity carries, so a Druid in Tree
+    // of Life took the display down with it.
+    | Shaped _ -> ticks System.Int32.MaxValue
+
+  /// A form is the shape a body is standing in rather than a buff with a clock.
+  let isForm =
+    function
+    | Shaped _ -> true
+    | _ -> false
 
   /// Whole seconds left, rounded up so a live aura never reads "0s".
   let remainingSeconds (a: Aura) : int =

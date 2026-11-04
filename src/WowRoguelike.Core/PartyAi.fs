@@ -471,15 +471,29 @@ module PartyAi =
     /// on a small hole is mana burnt as overheal, which is exactly why a real
     /// Priest downranks: Lesser Heal restores less and goes further.
     let directFor (deficit: int) =
+      let byHeal (l: Ability list) = l |> List.sortByDescending healsOf
+
+      let covers (a: Ability) = healsOf a >= deficit
+
       let affordable =
         h.Abilities
         |> List.filter (fun a -> hasHeal a && not (hasHot a) && canUse h a.Name)
-        |> List.sortByDescending healsOf
+        |> byHeal
 
-      affordable
-      |> List.filter (fun a -> healsOf a >= deficit)
-      |> List.tryLast
-      |> Option.orElse (List.tryHead affordable)
+      // The shape the healer is already in comes first: Tree of Life is where the
+      // resto spec lives and it is the shape that forbids Healing Touch, so the
+      // shift out is spent only when the form's own heals cannot fill the hole.
+      // Picking on size alone would leave the Druid parked in human form for the
+      // whole fight and the form the spec is named for would never be used.
+      let inForm =
+        affordable |> List.filter (fun a -> a.Stance |> Option.forall (SimState.inStance h))
+
+      let best (l: Ability list) =
+        l |> List.filter covers |> List.tryLast |> Option.orElse (List.tryHead l)
+
+      match inForm |> List.filter covers with
+      | _ :: _ -> best inForm
+      | [] -> best affordable
 
     let projected (t: Entity) = t.Health + Aura.healOverTimePending t.Auras
     let projectedPct (t: Entity) = projected t * 100 / t.MaxHealth

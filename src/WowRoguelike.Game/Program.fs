@@ -1262,7 +1262,12 @@ type RoguelikeGame(?browse: int * uint64) as this =
         if hover = Some e.Id && not auras.IsEmpty then
           let text =
             auras
-            |> List.map (fun a -> sprintf "%s %ds" (Aura.label a) (Aura.remainingSeconds a))
+            // A form has no duration to print; it lasts until it is shifted out of.
+            |> List.map (fun a ->
+              if Aura.isForm a then
+                Aura.label a
+              else
+                sprintf "%s %ds" (Aura.label a) (Aura.remainingSeconds a))
             |> String.concat "  "
 
           let y = if e.Faction = Party then feet + 18 else feet + 2

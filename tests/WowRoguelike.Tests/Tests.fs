@@ -6114,3 +6114,13 @@ let ``the Tree Druid shifts out for Healing Touch and back into the tree`` () =
     sinceHeal |> List.exists (fun (stance, _, _) -> stance = Some TreeForm),
     "the Druid never got back into the tree: " + describe arc
   )
+
+/// A form is a shape, not a buff with a clock: it lasts until it is shifted out
+/// of. The Shell prints every aura an entity carries with `remainingSeconds`, and
+/// `Shaped` had no case in `Aura.remaining`, so hovering a Druid in Tree of Life
+/// raised a match failure and took the buff bar with it.
+[<Fact>]
+let ``a form aura reports a lifetime instead of throwing`` () =
+  Assert.True(Aura.isForm (Shaped TreeForm))
+  Assert.False(Aura.isForm (Rejuvenation(secTicks 3.0, 1, "Druid")))
+  Assert.True(Aura.remainingSeconds (Shaped TreeForm) > 0)
