@@ -4268,6 +4268,62 @@ let ``the rogue cashes in four combo points and strikes below that`` () =
   Assert.Contains("Backstab", ordersAt 3)
   Assert.DoesNotContain("Eviscerate", ordersAt 3)
 
+/// The newest content is seated by name and played by effect. A bear's Growl is
+/// the Warrior's Taunt under a feral name, so the script may not look for
+/// "Taunt" to find it: the mob that has left the tank is taunted back by
+/// whatever the tank's own kit calls its taunt.
+[<Fact>]
+let ``a bear tank taunts with its own Growl`` () =
+  let bear =
+    Content.partyOf [ "Druid (Bear)" ] 24
+    |> List.head
+    |> fun e -> { e with Id = EntityId 3; Pos = { X = 5; Y = 4 } }
+
+  let w =
+    partyWorld (Some(EntityId 100)) [] 1000
+    |> fun w -> { w with Entities = w.Entities @ [ bear ] }
+
+  // The Near mob is on the Warrior, so it is a mob that has left the Bear.
+  Assert.Contains("Growl", abilitiesFor (EntityId 3) (PartyAi.decide w))
+
+/// Shred and Claw are the Rogue's pair renamed, and Ferocious Bite its
+/// Eviscerate: the rotation finds them by what they do — the harder builder is
+/// the one that needs the mob's back — so a Cat fights without the script ever
+/// naming a Rogue ability.
+[<Fact>]
+let ``a cat druid shreds and ferocious bites`` () =
+  let ordersAt (points: int) (onCat: bool) =
+    let cat =
+      Content.partyOf [ "Druid (Cat)" ] 24
+      |> List.head
+      |> fun e ->
+        { e with
+            Id = EntityId 3
+            Pos = { X = 7; Y = 5 }
+            ComboPoints = points
+            Resource = e.MaxResource }
+
+    let w =
+      partyWorld (Some(EntityId 100)) [] 1000
+      |> fun w -> { w with Entities = w.Entities @ [ cat ] }
+      |> if onCat then
+           SimState.mapEntity (EntityId 100) (fun e -> { e with Target = Some(EntityId 3) })
+         else
+           id
+
+    abilitiesFor (EntityId 3) (PartyAi.decide w)
+
+  // The mob faces the Warrior, so its back is open and Shred — 150% weapon
+  // damage against Claw's 100% — is the builder the Cat reaches for.
+  Assert.Contains("Shred", ordersAt 0 false)
+  Assert.Contains("Ferocious Bite", ordersAt 5 false)
+
+  // A mob that has turned on the Cat has no back to offer it, so the cheaper
+  // builder is the one it strikes with. That only holds if the positional builder
+  // was found by its damage rather than by the Rogue's name for it.
+  Assert.Contains("Claw", ordersAt 0 true)
+  Assert.DoesNotContain("Shred", ordersAt 0 true)
+
 /// Nobody has noticed the Party yet — the only state `prePull` runs in, and the
 /// state that stands in for a stealthed Rogue.
 let private calmWorld (rogue: Entity) (mobs: Entity list) : World =
@@ -5715,8 +5771,10 @@ let ``shifting into Cat Form holds, and Bear Form locks the caster out`` () =
   let stanceAfter (world: World) =
     world.Entities |> List.find (fun e -> e.Id = druid.Id) |> SimState.stance
 
-  Assert.Equal<Stance option>(None, stanceAfter w)
-  Assert.True((w.Entities |> List.find (fun e -> e.Id = druid.Id) |> SimState.canCast), "a body in its own shape casts")
+  // The healer Druid spawns as a tree, so the body starts in a form rather than
+  // in its own shape; what is still true is that a caster form can cast.
+  Assert.Equal<Stance option>(Some TreeForm, stanceAfter w)
+  Assert.True((w.Entities |> List.find (fun e -> e.Id = druid.Id) |> SimState.canCast), "a tree casts")
 
   let w = shift "Cat Form"
   Assert.Equal<Stance option>(Some CatForm, stanceAfter w)
@@ -5736,3 +5794,79 @@ let ``shifting into Cat Form holds, and Bear Form locks the caster out`` () =
   // And a caster form gives the spellbook back.
   let tree = shift "Tree of Life"
   Assert.True(SimState.canCast (tree.Entities |> List.find (fun e -> e.Id = druid.Id)))
+
+/// The Druid is the one class that fills all three roles, and which one it fills
+/// is the roster string rather than the class: `"Druid"` alone stays the healer
+/// so every existing roster and ladder cell keeps its meaning. All four specs are
+/// still `Name = "Druid"`, so art, logs and the tests that find the class keep
+/// working.
+[<Fact>]
+let ``a Druid's roster string picks its spec, role and opening form`` () =
+  let druid name =
+    match Content.partyOf [ name ] 24 with
+    | [ e ] -> e
+    | other -> failwithf "expected one party member, got %d" (List.length other)
+
+  let check name role stance =
+    let e = druid name
+    Assert.Equal("Druid", e.Name)
+    Assert.Equal<Role option>(Some role, e.Role)
+    Assert.Equal<Stance option>(Some stance, SimState.stance e)
+
+  check "Druid" Healer TreeForm
+  check "Druid (Bear)" Tank BearForm
+  check "Druid (Cat)" Dps CatForm
+  check "Druid (Moonkin)" Dps MoonkinForm
+
+  // A passive is the class's, not the spec's: a spec'd Druid still brings Mark of
+  // the Wild, which is the one place a roster string is read for its class alone.
+  for name in [ "Druid"; "Druid (Bear)"; "Druid (Cat)"; "Druid (Moonkin)" ] do
+    Assert.Contains(MarkOfTheWild, Content.partyBuffsFor [ name ])
+
+[<Fact>]
+let ``a Bear Druid cannot cast and a Tree Druid can`` () =
+  let bear = Content.partyOf [ "Druid (Bear)" ] 24 |> List.head
+  let tree = Content.partyOf [ "Druid" ] 24 |> List.head
+  Assert.False(SimState.canCast bear, "a bear is claws and hide, not a caster")
+  Assert.True(SimState.canCast tree, "the healer's form is a caster form")
+
+[<Fact>]
+let ``each Druid spec is paid for from its own resource`` () =
+  let druid name = Content.partyOf [ name ] 24 |> List.head
+  Assert.Equal(Rage, (druid "Druid (Bear)").ResourceKind)
+  Assert.Equal(Energy, (druid "Druid (Cat)").ResourceKind)
+  Assert.Equal(Mana, (druid "Druid").ResourceKind)
+  Assert.Equal(Mana, (druid "Druid (Moonkin)").ResourceKind)
+
+  // A Rage and an Energy pool are a flat 100, the Warrior's and the Rogue's own.
+  Assert.Equal(100, (druid "Druid (Bear)").MaxResource)
+  Assert.Equal(100, (druid "Druid (Cat)").MaxResource)
+
+  // A tank holds threat the way the Warrior tank does, and a damage spec the way
+  // every other damage class does.
+  let warrior = Content.partyOf [ "Warrior" ] 24 |> List.head
+  Assert.Equal(warrior.ThreatMultiplierBp, (druid "Druid (Bear)").ThreatMultiplierBp)
+  Assert.Equal((druid "Druid").ThreatMultiplierBp, (druid "Druid (Moonkin)").ThreatMultiplierBp)
+
+[<Fact>]
+let ``Moonkin is a damage caster and carries no heal`` () =
+  let names =
+    Content.partyOf [ "Druid (Moonkin)" ] 24
+    |> List.head
+    |> fun e -> e.Abilities |> List.map (fun a -> a.Name)
+
+  // The point of the spec: a caster dps that can heal turns every pull into a
+  // stalemate, so none of the healer's spells may be in the kit.
+  for heal in [ "Healing Touch"; "Regrowth"; "Rejuvenation"; "Swiftmend"; "Rebirth" ] do
+    Assert.DoesNotContain(heal, names)
+
+  for spell in [ "Wrath"; "Moonfire"; "Entangling Roots"; "Moonkin Form" ] do
+    Assert.Contains(spell, names)
+
+[<Fact>]
+let ``a Feral Druid is the Rogue's economy under feral names`` () =
+  let cat = Content.partyOf [ "Druid (Cat)" ] 24 |> List.head
+  let names = cat.Abilities |> List.map (fun a -> a.Name)
+  Assert.Equal(0, cat.ComboPoints)
+  for spell in [ "Claw"; "Shred"; "Ferocious Bite"; "Cat Form" ] do
+    Assert.Contains(spell, names)

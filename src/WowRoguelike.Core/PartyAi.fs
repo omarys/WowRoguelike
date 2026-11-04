@@ -82,6 +82,30 @@ module PartyAi =
       | SpellDamage(_, mx) -> mx
       | _ -> 0)
 
+  /// The first ability in a kit whose effects satisfy `test`. Rules ask what an
+  /// ability *does*, not what it is called: a bear's Growl is the Warrior's Taunt
+  /// under a feral name and its Maul is Heroic Strike, and the effect is the only
+  /// thing that says so.
+  let private abilityWhere (e: Entity) (test: Effect -> bool) =
+    e.Abilities |> List.tryFind (fun a -> a.Effects |> List.exists test)
+
+  /// A kit's combo-point builders, hardest first. There are two in a kit and the
+  /// content carries no positional flag, so the harder one is read as the strike
+  /// that needs the mob's back: Backstab is 150% weapon damage against Sinister
+  /// Strike's 100%, and a Cat's Shred against its Claw is the same pair renamed.
+  /// No cooldown, because energy is the whole limiter — which is what leaves the
+  /// stun out of the pair. Ambush is out by name because nothing in its effects
+  /// says "stealth": it is a stealth opener, and offering it here would spend it
+  /// as though stealth were free.
+  let private builders (e: Entity) =
+    e.Abilities
+    |> List.filter (fun a ->
+      a.CooldownTicks = ticks 0
+      && a.TargetKind = Foe
+      && a.Name <> "Ambush"
+      && a.Effects |> List.exists (function ComboPoint _ -> true | _ -> false))
+    |> List.sortByDescending damageOf
+
   /// Armour already stripped off a target. Sunder Armor refreshes rather than
   /// stacking in this model, so this is zero or the flat reduction — but the
   /// selection below is written against the total, so stacking later needs no
@@ -163,8 +187,9 @@ module PartyAi =
   /// open floor) and the two coarse keys are compared on their own, so a Tank that
   /// already holds a good spot stays on it instead of orbiting forever.
   let private holdSpot (w: World) (m: Entity) (tank: Entity) (party: Entity list) =
-    let backstabber =
-      party |> List.exists (fun e -> e.Abilities |> List.exists (fun a -> a.Name = "Backstab"))
+    // Whoever brings a builder that wants the mob's back, which is a fact about the
+    // kit's numbers rather than its names (`builders`).
+    let backstabber = party |> List.exists (fun e -> not (List.isEmpty (builders e)))
 
     // A caster behind a corner cannot help, and standing closer does not fix it:
     // the mob has to be pulled out of wherever it is hiding.
@@ -341,8 +366,17 @@ module PartyAi =
           if SimState.healthPct t < 30 && has t "Shield Wall" && canUse t "Shield Wall" then
             yield "Shield Wall" ]
 
-      match thief with
-      | Some h when has t "Taunt" && canUse t "Taunt" -> cmd at (UseAbility(t.Id, "Taunt", h.Id))
+      // The tank's two had-to-be-named buttons, read off the effects instead: a
+      // bear's Growl is a `Taunt` and its Maul is a paid `WeaponDamage` strike,
+      // exactly as the Warrior's are, and the rank tables are the same ones.
+      let taunt = abilityWhere t (function Taunt -> true | _ -> false)
+
+      let dump =
+        abilityWhere t (function WeaponDamage _ -> true | _ -> false)
+        |> Option.filter (fun a -> a.ResourceCost > 0)
+
+      match thief, taunt with
+      | Some h, Some a when canUse t a.Name -> cmd at (UseAbility(t.Id, a.Name, h.Id))
       // Intercept is in the kit and stays out of the rotation: measured, it reads 7
       // of 12 in `library` against 10 without it. The leaps themselves are not the
       // problem — the geometry they create is. A Tank that arrives eight tiles ahead
@@ -366,7 +400,8 @@ module PartyAi =
         cmd at (UseAbility(t.Id, name, (if isSelf then t.Id else f.Id)))
       | _ when has t "Sunder Armor" && not sundered && canUse t "Sunder Armor" ->
         cmd at (UseAbility(t.Id, "Sunder Armor", f.Id))
-      | _ when canUse t "Heroic Strike" -> cmd at (UseAbility(t.Id, "Heroic Strike", f.Id))
+      | _ when dump.IsSome && canUse t dump.Value.Name ->
+        cmd at (UseAbility(t.Id, dump.Value.Name, f.Id))
       | _ when canUse t "Sunder Armor" -> cmd at (UseAbility(t.Id, "Sunder Armor", f.Id))
       | _ -> []
 
@@ -706,14 +741,18 @@ module PartyAi =
   /// linear in points, so four points already out-earns the strike that would
   /// build a fifth: it fires from four up, never below.
   let private meleeOrders (w: World) (e: Entity) (target: Entity option) (at: int<tick>) =
-    // Backstab is a positional strike: it exists from behind the mob and nowhere
-    // else, and a mob faces what it is attacking. `holdSpot` is what makes the back
-    // exist for a mob the Tank holds. A mob that has *turned on the Rogue* has no
-    // back to offer him — every tile he could step to is in front of it — so from
-    // the front he falls back to Sinister Strike rather than burning 60 energy on a
-    // strike the mob is facing. Any other target qualifies, whichever seat it is
-    // hitting.
+    // The harder builder is a positional strike: it exists from behind the mob and
+    // nowhere else, and a mob faces what it is attacking. `holdSpot` is what makes
+    // the back exist for a mob the Tank holds. A mob that has *turned on the Rogue*
+    // has no back to offer him — every tile he could step to is in front of it — so
+    // from the front he falls back to the cheap builder rather than burning the
+    // energy on a strike the mob is facing. Any other target qualifies, whichever
+    // seat it is hitting.
     let inPosition (f: Entity) = not (f.Target |> Option.exists (fun id -> id = e.Id))
+
+    // Which of the kit's two builders needs the back: `builders` puts the harder
+    // one first.
+    let positional = builders e |> List.tryHead |> Option.map (fun a -> a.Name)
 
     let mine =
       e.Abilities
@@ -721,7 +760,7 @@ module PartyAi =
         a.TargetKind = Foe
         && a.Range <= 1
         && not (interrupts a)
-        && (a.Name <> "Backstab"
+        && (Some a.Name <> positional
             || (match target with
                 | Some f -> inPosition f
                 | None -> true))
@@ -747,10 +786,11 @@ module PartyAi =
     let strike =
       mine
       |> List.filter (fun a -> not (isFinisher a) && ready e a.Name)
-      // Backstab first, and by rule rather than by arithmetic: it is worth 150%
-      // weapon damage against Sinister Strike's 100%, so `damageOf` happens to put
-      // it on top today, and the sort says so on purpose in case a rank is retuned.
-      |> List.sortByDescending (fun a -> (if a.Name = "Backstab" then 1 else 0), damageOf a)
+      // The positional builder first, and by rule rather than by arithmetic: it is
+      // worth 150% weapon damage against the other builder's 100%, so `damageOf`
+      // happens to put it on top today, and the sort says so on purpose in case a
+      // rank is retuned.
+      |> List.sortByDescending (fun a -> (if Some a.Name = positional then 1 else 0), damageOf a)
       |> List.tryHead
       |> Option.filter (SimState.canAfford e)
 
@@ -831,10 +871,10 @@ module PartyAi =
         // Sinister Strike's 100% for 45, which is a 14% edge per point, not a
         // doubling: a Rogue who walks instead of striking loses more than the
         // position buys. Walking on the ticks it is pooling energy costs nothing.
-        let backstab = e.Abilities |> List.tryFind (fun a -> a.Name = "Backstab")
+        let walkRound = builders e |> List.tryHead
 
         let circle =
-          match backstab with
+          match walkRound with
           | Some a when false &&
             SimState.withinRange 1 e f
             && not (inPosition f)
@@ -849,7 +889,7 @@ module PartyAi =
           match finisher |> Option.orElse strike with
           | Some a when SimState.withinRange 1 e f -> cmd at (UseAbility(e.Id, a.Name, f.Id))
           | _ ->
-            // A Rogue with a Backstab goes round the back rather than into the
+            // A Rogue with a positional strike goes round the back rather than into the
             // Tank's spot: the Tank is already holding the mob from the front.
             let stand =
               match behindSpot w e f with

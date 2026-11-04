@@ -3079,7 +3079,13 @@ module Content =
   /// The party-wide passives, one per class present (Q2a), each at the highest
   /// rank a level-24 caster can train. Computed from the roster, so a party
   /// without a Warrior gets no Battle Shout.
+  ///
+  /// A passive is the class's, not the spec's, so a roster entry is read as its
+  /// class alone: `"Druid (Bear)"` is a Druid and brings Mark of the Wild exactly
+  /// as `"Druid"` does. Class names are one word, so the first word is the class.
   let partyBuffsFor (roster: string list) : PartyBuffKind list =
+    let roster = roster |> List.map (fun entry -> entry.Split(' ').[0])
+
     [ if List.contains "Mage" roster then ArcaneIntellect
       if List.contains "Priest" roster then PowerWordFortitude
       if List.contains "Druid" roster then MarkOfTheWild
@@ -3847,17 +3853,127 @@ module Content =
           counterspellRanks ])
       { X = 2; Y = 6 }
 
+  /// Which Druid spec a roster entry asked for. The Druid is the only class that
+  /// fills all three roles, so its spec is content rather than something read off
+  /// `Role`: one body is a tank, a healer, or either of two damage builds.
+  type private DruidSpec =
+    | BearDruid
+    | TreeDruid
+    | CatDruid
+    | MoonkinDruid
+
   /// Night Elf Druid: 238 armour from the set, the same staff as the Priest. Four
   /// pieces need 24.
-  let private druid (buffs: PartyBuffKind list) (level: int) (id: int) =
+  ///
+  /// One body, four specs. The sheet is shared because a spec swaps the kit, the
+  /// role and the resource, not the outfit: four gear lists would be four things
+  /// to balance for one class, and the class wears one set of leather either way.
+  let private druid (spec: DruidSpec) (buffs: PartyBuffKind list) (level: int) (id: int) =
+    let role =
+      match spec with
+      | TreeDruid -> Healer
+      | BearDruid -> Tank
+      | CatDruid | MoonkinDruid -> Dps
+
+    // Nature's Grace and Gift of Nature are healing talents and no balance or
+    // feral tree is modelled at all, so the healer's build is the only one there
+    // is: every other spec runs `Talents.none` rather than a copied healer's tree.
+    let talents = if spec = TreeDruid then druidTalents else Talents.none
+
+    // Bear Form is +180% armour from items at level 10 (Dire Bear's 360% arrives
+    // at 40), against the 238 the set carries at 24: 428 more. `Traits.ArmorBonus`
+    // is the only lever for it — health comes from the class's own stamina row and
+    // `Traits` has no health field.
+    //
+    // shortcut: a flat sum does not grow with the level-60 sheet, so a level-60
+    // bear is under-armoured against its own gear; a per-spec armour multiplier is
+    // a new field and a separate decision.
+    let traits =
+      match spec with
+      | BearDruid -> { Traits.none with ArmorBonus = 428 }
+      | CatDruid -> Traits.none
+      // The two casters get the pushback resistance that makes a cast land through
+      // a hit; only the damage spec gets the crit every other caster dps has, since
+      // a healer's crit is already paid for by `druidTalents` and a moonkin without
+      // it would be the Priest's spellbook without the Priest's crit.
+      | MoonkinDruid -> healerTraits 500 7000
+      | TreeDruid -> healerTraits 0 7000
+
+    // Rage and Energy are the flat 100 the Warrior and the Rogue get; a caster's
+    // mana is derived from Intellect, so it stays `None`.
+    let pool = if spec = BearDruid || spec = CatDruid then Some 100 else None
+
+    // A tank holds threat the way the Warrior tank does, and a damage spec holds
+    // it the way every other damage class does.
+    let threatBp = if spec = BearDruid then tankStanceBp else partyThreatBp
+
+    let resource =
+      match spec with
+      | BearDruid -> Rage
+      | CatDruid -> Energy
+      | TreeDruid | MoonkinDruid -> Mana
+
+    let abilities =
+      match spec with
+      | BearDruid ->
+        // Maul is Heroic Strike and Growl is Taunt, so a bear is the Rage tank's
+        // own buttons under feral names rather than a second threat curve. Swipe
+        // is left out because the Warrior kit has no area ability to copy from:
+        // the only Cleave and Whirlwind in this file are mob abilities.
+        AbilityDef.kitAt
+          level
+          [ { heroicStrikeRanks with Name = "Maul" }
+            { tauntRanks with Name = "Growl" } ]
+        @ [ bearForm ]
+      | TreeDruid ->
+        // Today's Druid healer, unchanged, plus the form it stands in.
+        withTalents
+          druidTalents
+          (AbilityDef.kitAt
+            level
+            [ healingTouchR4Ranks
+              regrowthRanks
+              rejuvenationRanks
+              entanglingRootsRanks
+              wrathRanks
+              moonfireRanks ]
+          @ [ swiftmend; naturesSwiftness; rebirth; innervate ])
+        @ [ treeOfLife ]
+      | CatDruid ->
+        // The Rogue's energy economy with feral names on it: Claw is Sinister
+        // Strike, Shred is Backstab and Ferocious Bite is Eviscerate.
+        AbilityDef.kitAt
+          level
+          [ { sinisterStrike with Name = "Claw" }
+            { backstab with Name = "Shred" }
+            { eviscerate with Name = "Ferocious Bite" } ]
+        @ [ catForm ]
+      | MoonkinDruid ->
+        // A caster dps: the three damage spells the healer already carries, plus
+        // the two instants that are not themselves a heal. No heal is in the kit,
+        // because a caster that can heal turns every pull into a stalemate.
+        AbilityDef.kitAt level [ entanglingRootsRanks; wrathRanks; moonfireRanks ]
+        @ [ naturesSwiftness; innervate; moonkinForm ]
+
+    // A spec with a form enters it at spawn. Shifting on tick 1 instead would
+    // leave one tick in which a bear stood in caster shape and could cast from it,
+    // which is a determinism trap, and the art should match the kit from tick 0.
+    // Travel Form has no art and no kit, so nothing spawns in it.
+    let form =
+      match spec with
+      | BearDruid -> BearForm
+      | CatDruid -> CatForm
+      | TreeDruid -> TreeForm
+      | MoonkinDruid -> MoonkinForm
+
     heroStats
       buffs
       level
       id
       "Druid"
-      Healer
+      role
       Leather
-      (healerTraits 0 7000)
+      traits
       { Base = nightElfDruidBase
         Gear =
           [ gear "Azure Silk Hood" (Some 24) 33 (0, 0, 0, 0, 0)
@@ -3872,10 +3988,10 @@ module Content =
             gear "Staff of the Blessed Seer" (Some 18) 0 (0, 0, 2, 0, 3) ]
 
         Gear60 = (1376, (0, 0, 196, 261, 158))
-        Talents = druidTalents
+        Talents = talents
         ApPerStrength = 1
         ApPerAgility = 0
-        FixedPool = None }
+        FixedPool = pool }
       [ (1, { Min = 47; Max = 71; Ticks = secTicks 3.0; Range = 1 })
         (28, { Min = 80; Max = 121; Ticks = secTicks 3.1; Range = 1 })
         (33, { Min = 74; Max = 112; Ticks = secTicks 2.5; Range = 1 })
@@ -3883,20 +3999,11 @@ module Content =
         (40, { Min = 88; Max = 133; Ticks = secTicks 2.9; Range = 1 })
         (60, { Min = 140; Max = 210; Ticks = secTicks 3.3; Range = 1 })
         ]
-      Mana
-      partyThreatBp
-      (withTalents
-        druidTalents
-        (AbilityDef.kitAt
-          level
-          [ healingTouchR4Ranks
-            regrowthRanks
-            rejuvenationRanks
-            entanglingRootsRanks
-            wrathRanks
-            moonfireRanks ]
-        @ [ swiftmend; naturesSwiftness; rebirth; innervate ]))
+      resource
+      threatBp
+      abilities
       { X = 2; Y = 7 }
+    |> fun e -> { e with Auras = Shaped form :: e.Auras }
 
   /// Human Paladin: mail at 24 — plate is trained at 40 — with Verigan's Fist
   /// 65-99 at 3.20 s. Five of the researched BiS slots have no verifiable item at
@@ -4178,6 +4285,17 @@ module Content =
           mendPet ])
       { X = 3; Y = 8 }
 
+  /// Which Druid spec a roster entry names. `"Druid"` alone is the healer, which
+  /// is what every existing roster, doc and ladder cell means by the name; the
+  /// suffix is the spec. An unknown suffix is a content bug and stops here rather
+  /// than silently seating a healer under a damage spec's name.
+  let private druidSpecOf (className: string) : DruidSpec =
+    match className with
+    | "Druid (Bear)" -> BearDruid
+    | "Druid (Cat)" -> CatDruid
+    | "Druid (Moonkin)" -> MoonkinDruid
+    | _ -> failwithf "no Druid spec by that name: %s" className
+
   /// Every class the sim can build, by the name a roster entry uses. None means
   /// that class has no kit yet, which is why a roster is filtered rather than
   /// trusted.
@@ -4187,7 +4305,8 @@ module Content =
     | "Priest" -> Some(priest buffs level id)
     | "Rogue" -> Some(rogue buffs level id)
     | "Mage" -> Some(mage buffs level id)
-    | "Druid" -> Some(druid buffs level id)
+    | "Druid" -> Some(druid TreeDruid buffs level id)
+    | _ when className.StartsWith "Druid (" -> Some(druid (druidSpecOf className) buffs level id)
     | "Paladin" -> Some(paladin buffs level id)
     | "Warlock" -> Some(warlock buffs level id)
     | "Shaman" -> Some(shaman buffs level id)

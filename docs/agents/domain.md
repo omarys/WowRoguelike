@@ -1531,8 +1531,9 @@ destination needs to be given up, but not on every blocked tick.
    killing 28–54 of 111 hostiles in 9000 ticks). Its roster and quest chain are real;
    the gap is balance. Unchanged by the level-scale work — level 24 is the anchor.
 6. **The class roster has no UI.** `Content.defaultRoster` is still a constant;
-   nine kits exist and five get seated. `Content.partyOf`/`withRoster` are ready
-   for a picker.
+   twelve kits exist — nine classes, and the Druid's four specs — and five get
+   seated. `Content.partyOf`/`withRoster` are ready for a picker, and a spec'd
+   entry (`"Druid (Bear)"`) can be seated through them today.
 7. **Slice 4: boss phases.** `Phase` is in the glossary with no implementation.
    Five open design questions are listed in `TODO.md` §Slice 4 — put them to the
    user rather than guessing. `Mutanus the Devourer` is deliberately not stood in
@@ -1629,12 +1630,28 @@ delegate-runs/<runId>/activity.jsonl`) and verify the file on disk (a clean
   Druid forms, **Bear, Cat, Tree and Moonkin are drawn**: `TakeStance` sets a
   `Shaped` aura (`Aura.stanceOf`, `SimState.stance`) and `spriteKey` reads it.
   Travel Form is still un-drawn and has no art sliced, so a travelling body
-  stays in its own shape rather than borrowing another form's. What is *not*
-  built yet is the gameplay that picks a form: nothing in `PartyAi` or `Content`
-  hands a Druid a form button, because the Druid is still a Healer only and Cat
-  and Moonkin need a Dps/caster Druid to inhabit. Bear and Cat do forbid casting
-  (`Aura.preventsCasting`), so the mechanic is enforced the moment something
-  shifts.
+  stays in its own shape rather than borrowing another form's.
+- **The Druid is four specs, one body.** Bear (Tank), Tree (Healer), Cat (feral
+  Dps) and Moonkin (balance Dps) are picked by the roster string and nothing else:
+  `"Druid"` alone is the Tree healer, so every existing roster, doc and ladder
+  cell keeps its meaning, and the suffix — `"Druid (Bear)"`, `"Druid (Cat)"`,
+  `"Druid (Moonkin)"` — picks the other three (`heroOf`,
+  `src/WowRoguelike.Core/Content.fs:4297`, reading the suffix in `druidSpecOf`,
+  `src/WowRoguelike.Core/Content.fs:4287`; an unknown suffix is a `failwithf`, not
+  a silent healer). One builder (`src/WowRoguelike.Core/Content.fs:3871`) shares
+  the sheet and differs only in role, resource, threat, traits and kit, because
+  four gear lists would be four things to balance for one class. Every spec keeps
+  `Entity.Name = "Druid"`, which is what art, logs and the tests that find the
+  class key off. Each kit carries its form (`bearForm`, `catForm`, `treeOfLife`,
+  `moonkinForm`) and the body **spawns in it**
+  (`src/WowRoguelike.Core/Content.fs:4001`), so the art is right from tick 0 and
+  there is no one-tick window in which a bear could cast from caster shape.
+  Bear and Cat forbid casting (`Aura.preventsCasting`), so the lockout is honest
+  from the first tick. What is still *not* built is the gameplay that shifts
+  mid-fight: nothing in `PartyAi` picks a form, so a Bear or Cat stays in the one
+  it spawned in and the healer never shifts out. Bear's armour is
+  `Traits.ArmorBonus = 428`, the 180% Bear Form contributes at level 10 against
+  the 238 the set carries at 24 — a `shortcut:` that does not scale to 60.
 - **Maps for five further dungeons** (Ragefire Chasm, Razorfen Kraul, Shadowfang
   Keep, The Deadmines, The Stockade) are extracted into `images/Maps/`, and
   Blackfathom Deeps exists only as sliced tiles/sprites in `Assets/`. Per-map
