@@ -657,13 +657,18 @@ module SimCombat =
           // One form at a time: the old one is dropped rather than layered. What a
           // form is worth lives in the abilities it unlocks and the casting it
           // forbids, not in a hidden multiplier here — so this case changes the
-          // `Shaped` aura and nothing else.
+          // `Shaped` aura and nothing else. `HumanForm` drops it without putting
+          // one back, because a body in humanoid shape carries no form aura.
+          let auras =
+            actor.Auras
+            |> List.filter (fun a -> (Aura.stanceOf a).IsNone)
+            |> fun rest ->
+              match form with
+              | HumanForm -> rest
+              | _ -> Shaped form :: rest
+
           w
-          |> mapEntity actorId (fun e ->
-            { e with
-                Auras =
-                  Shaped form
-                  :: (e.Auras |> List.filter (fun a -> (Aura.stanceOf a).IsNone)) })
+          |> mapEntity actorId (fun e -> { e with Auras = auras })
           |> logLine (sprintf "%s shifts into %s form" actor.Name (Stances.name form))
 
         | Taunt ->

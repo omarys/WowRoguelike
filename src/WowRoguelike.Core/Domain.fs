@@ -172,10 +172,15 @@ module Empower =
 /// A Warrior stance or a Druid form. An ability that requires one cannot be used
 /// outside it, which is what makes Overpower a Battle Stance decision rather
 /// than a button. Declared above `Aura` because an aura carries one.
+///
+/// `HumanForm` is the shape a Druid is born in: it is a form you can shift
+/// *into* from any other, which is why it is a case here rather than the absence
+/// of one. (Distinct from `Form.Humanoid`, which is what a mob *is*.)
 type Stance =
   | BattleStance
   | DefensiveStance
   | BerserkerStance
+  | HumanForm
   | BearForm
   | CatForm
   | TravelForm
@@ -189,6 +194,7 @@ module Stances =
     | BattleStance -> "battle"
     | DefensiveStance -> "defensive"
     | BerserkerStance -> "berserker"
+    | HumanForm -> "humanoid"
     | BearForm -> "bear"
     | CatForm -> "cat"
     | TravelForm -> "travel"

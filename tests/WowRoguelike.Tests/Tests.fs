@@ -5870,3 +5870,43 @@ let ``a Feral Druid is the Rogue's economy under feral names`` () =
   Assert.Equal(0, cat.ComboPoints)
   for spell in [ "Claw"; "Shred"; "Ferocious Bite"; "Cat Form" ] do
     Assert.Contains(spell, names)
+
+[<Fact>]
+let ``a Druid's forms are gated by its spec`` () =
+  let forms name = Content.druidForms name |> List.map Stances.name |> List.sort
+
+  // Tree of Life is the healer's, Moonkin is the caster's; Bear and Cat are open
+  // to every role, and every role keeps the humanoid shape it was born in.
+  Assert.Equal<string list>([ "bear"; "cat"; "humanoid"; "tree" ], forms "Druid")
+  Assert.Equal<string list>([ "bear"; "cat"; "humanoid"; "moonkin" ], forms "Druid (Moonkin)")
+  Assert.Equal<string list>([ "bear"; "cat"; "humanoid" ], forms "Druid (Bear)")
+  Assert.Equal<string list>([ "bear"; "cat"; "humanoid" ], forms "Druid (Cat)")
+
+  // A class that is not a Druid has no forms, and no name it does not know is
+  // silently given the healer's.
+  Assert.Empty(Content.druidForms "Warrior")
+
+[<Fact>]
+let ``every Druid spawns in a form its spec may take`` () =
+  for name in [ "Druid"; "Druid (Bear)"; "Druid (Cat)"; "Druid (Moonkin)" ] do
+    let body = Content.partyOf [ name ] 60 |> List.head
+    let spawn = body.Auras |> List.choose Aura.stanceOf |> List.exactlyOne
+    Assert.Contains(spawn, Content.druidForms name)
+
+[<Fact>]
+let ``shifting to humanoid leaves no form behind`` () =
+  let humanForm =
+    { Content.bearForm with
+        Name = "Humanoid Form"
+        Effects = [ TakeStance HumanForm ] }
+
+  let w =
+    Content.scarletMonasteryAt "graveyard" Content.Median 1UL
+    |> Content.withRosterAt 24 [ "Warrior"; "Druid (Bear)"; "Mage"; "Rogue"; "Warlock" ]
+
+  let bear = SimState.aliveParty w |> List.find (fun e -> e.Name = "Druid")
+  Assert.Equal<Stance option>(Some BearForm, SimState.stance bear)
+
+  let w = SimCombat.resolveAbility bear.Id bear.Id humanForm w
+  let after = SimState.aliveParty w |> List.find (fun e -> e.Id = bear.Id)
+  Assert.Equal<Stance option>(None, SimState.stance after)

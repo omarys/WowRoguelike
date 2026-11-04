@@ -3862,6 +3862,19 @@ module Content =
     | CatDruid
     | MoonkinDruid
 
+  /// Which forms a Druid of this spec may stand in. The operator's rule: Tree of
+  /// Life belongs to the healer and Moonkin to the caster damage spec, while Bear
+  /// and Cat are open to every role, and every role may drop back to humanoid.
+  /// Bear and Cat are weaker for the two caster roles, but the penalty is not a
+  /// number here — `Aura.preventsCasting` already makes a healer that shifted to
+  /// bear a healer that cannot heal, which is the penalty.
+  let private formsOf (spec: DruidSpec) : Stance list =
+    match spec with
+    | BearDruid -> [ BearForm; CatForm; HumanForm ]
+    | CatDruid -> [ CatForm; BearForm; HumanForm ]
+    | TreeDruid -> [ TreeForm; BearForm; CatForm; HumanForm ]
+    | MoonkinDruid -> [ MoonkinForm; BearForm; CatForm; HumanForm ]
+
   /// Night Elf Druid: 238 armour from the set, the same staff as the Priest. Four
   /// pieces need 24.
   ///
@@ -4411,6 +4424,14 @@ module Content =
     | "Druid (Cat)" -> CatDruid
     | "Druid (Moonkin)" -> MoonkinDruid
     | _ -> failwithf "no Druid spec by that name: %s" className
+
+  /// The forms a Druid of that roster name may stand in, the shape it is born in
+  /// included. Nothing shifts yet, so this is the rule a future shifting AI and
+  /// the form art read; a class that is not a Druid has no forms at all.
+  let druidForms (className: string) : Stance list =
+    if className = "Druid" then formsOf TreeDruid
+    elif className.StartsWith "Druid (" then formsOf (druidSpecOf className)
+    else []
 
   /// Every class the sim can build, by the name a roster entry uses. None means
   /// that class has no kit yet, which is why a roster is filtered rather than

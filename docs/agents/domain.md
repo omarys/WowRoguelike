@@ -1677,6 +1677,28 @@ delegate-runs/<runId>/activity.jsonl`) and verify the file on disk (a clean
   from the first tick. What is still *not* built is the gameplay that shifts
   mid-fight: nothing in `PartyAi` picks a form, so a Bear or Cat stays in the one
   it spawned in and the healer never shifts out.
+
+  **Which forms a spec may enter is role-gated, and the gate is data.**
+  `Content.druidForms` returns, per roster name:
+
+  | spec | forms |
+  |---|---|
+  | `Druid` (Tree, Healer) | Tree of Life, Bear, Cat, Human |
+  | `Druid (Moonkin)` (Caster dps) | Moonkin, Bear, Cat, Human |
+  | `Druid (Cat)` (Melee dps) | Cat, Bear, Human |
+  | `Druid (Bear)` (Tank) | Bear, Cat, Human |
+
+  Tree of Life belongs to the healer and Moonkin to the caster damage spec; Bear
+  and Cat are open to every role; every role may also drop back to the human
+  shape it was born in. Bear and Cat are *weaker* for the two caster roles, and
+  deliberately not by a penalty number: `Aura.preventsCasting` already makes a
+  healer that shifted to bear a healer that cannot heal. `Stance.HumanForm`
+  exists so "the shape you were born in" is a stance you can shift into rather
+  than the absence of one, and `TakeStance HumanForm` drops the `Shaped` aura
+  instead of adding a form (it is distinct from `Form.Humanoid`, which is what a
+  creature *is*, not what it stands in). Three tests hold this: the table above,
+  that each spec spawns in a form on its own list, and that shifting to human
+  leaves no form behind.
 - **Maps for five further dungeons** (Ragefire Chasm, Razorfen Kraul, Shadowfang
   Keep, The Deadmines, The Stockade) are extracted into `images/Maps/`, and
   Blackfathom Deeps exists only as sliced tiles/sprites in `Assets/`. Per-map
