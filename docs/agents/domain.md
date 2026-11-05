@@ -1113,11 +1113,41 @@ visible to a bench fight — and was refreshed deliberately after reading the di
   99-100% and the Warlock at 97-100%: at level 60, a caster's resource is a floor, not a
   constraint, so a resource talent is measured in damage and ticks or not at all.
 
-What this unblocks: **fifteen of A1's eighteen entries** are now a `Procs` line on a build
-plus, at most, one new `ProcEvent` case and one `procOn` call site — Warrior's Improved
-Bloodrage and Toughness, Rogue's Relentless Strikes, the Paladin's Blessed Strikes
-cooldown reset, the Shaman's two, the Hunter's two, the Warlock's Nightfall (which needs a
-DoT-tick event, the one genuinely new hook), and the Druid's remaining four.
+What this unblocks: no remaining A1 talent needs a new *pattern* — each one is a `Procs`
+line plus, at most, one result kind or one event case. Whether any of them can be *landed
+today* is a different question, and the answer, checked one by one against the tree, is
+that none can: every survivor is blocked by missing content or a missing number rather than
+by missing machinery.
+
+### What is left of A1, and why none of it is machinery
+
+Checked against the tree rather than the notes, because the notes assume abilities the
+landed kits do not have:
+
+| entry | needs | blocked by |
+|---|---|---|
+| Warrior Improved Bloodrage | Bloodrage's rage amount | **the Warrior kit has no Bloodrage** (`grep Bloodrage src/WowRoguelike.Core/Content.fs` → nothing) |
+| Warrior Toughness | a percent-armour multiplier | not an event at all: `Armor` is a flat int (`Domain.fs:838`), so it is the A9 axis |
+| Rogue Relentless Strikes | 20% *per combo point* restored on a finisher | `ChanceBp` is a constant; the chance is `2000 * ComboPoints` at trigger time, so `Proc` needs a chance *function* — and nothing else in A1 needs one |
+| Rogue Remorseless Attacks | a crit charge on the *next generator*, after a kill | needs `OnKill` **and** an `Empower` that applies to a melee generator; `Empower` is spell-gated by design (the `FreeMana`/`Instant` gate in `resolveAbility`) |
+| Paladin Blessed Strikes | reset the cooldown of Holy Shock when Crusader Strike lands | **neither ability exists in the kit** — the Paladin port is vanilla abilities plus OctoWoW talents |
+| Paladin Daybreak | a heal on taking damage | nothing fires on being hit: `dealDamage` resolves no `Effect`, so this is a new reactive pipeline, not an event |
+| Shaman Undertow, Tidal Surge | payload numbers | **no source gives numbers** (both marked unverified in `shaman.md`) |
+| Hunter Piercing Shots | a bleed on a *crit* shot | `spellDamage` fires `OnSpellHit` without telling the proc whether it crit; needs a crit flag on that call and `ApplyAura` as a result kind |
+| Hunter Lock and Load | reset Aimed Shot, "line AoE" | the note's payload is self-contradictory; does not port until the ability's shape is settled |
+| Warlock Nightfall | 2/4% per DoT tick → instant Shadow Bolt | **a DoT does not know its caster**: `Aura.DamageOverTime of duration * damagePerTick` (`Domain.fs:917`) carries no owner, and `advanceAuraDamage` (`SimTick.fs:102`) ticks the *target*. Adding `caster` to that case is a schema change across every construction site and match |
+| Mage Resonance Cascade | a self-recursive chance to cast again | needs an extra-cast result *and* a recursion policy; not a data row |
+| Mage Arcane Instability | [16..25]% damage | a flat multiplier, not a proc — A9 axis |
+| Mage Temporal Convergence | — | the note records "no coefficient"; nothing to port |
+| Druid Ancient Brutality | rage/energy from bleed ticks | same missing DoT caster as Nightfall, plus a resource-over-time result |
+| Druid Omen of Clarity | a free-cast proc | the source gives no chance percentage |
+| Druid Sylvan Blessing, Owlkin Frenzy | auras on damage taken | Moonkin is one of the three **parked** specs (10 skipped tests); Owlkin Frenzy also needs `OnDamageTaken` |
+
+So the next engine axis should be chosen for the builds that exist, not chosen from the
+inventory's ranking in the abstract: A8 (per-entity haste) and A9 (percent multipliers)
+were ranked second and third and **no landed kit has a talent that uses either** — `grep
+-i haste src/WowRoguelike.Core/*.fs` finds nothing, and there is no Flurry, no Aspect of
+the Hawk, no Blade Rush. The blocker for A8/A9 is a build to hang them on.
 
 ## 9. Open work, in priority order
 

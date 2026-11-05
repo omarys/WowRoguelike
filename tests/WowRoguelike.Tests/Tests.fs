@@ -6589,3 +6589,44 @@ let ``a free-mana empower pays for the damage spell that spends it`` () =
 
   Assert.Equal(500, caster.Resource)
   Assert.False((Aura.empower caster.Auras).FreeMana)
+
+/// The wiring, not the mechanism: the Warrior a roster actually seats must be the
+/// one carrying Shield Specialization, and a block must be what pays him. The
+/// block is forced — an attack table is a die, and a test that rolls for its
+/// precondition is a test that fails on a Thursday.
+[<Fact>]
+let ``a rostered warrior's shield pays him rage on a block`` () =
+  let warrior =
+    Content.partyOf [ "Warrior"; "Priest" ] 60
+    |> List.find (fun e -> e.Talents.Procs |> List.exists (fun p -> p.Talent = "Shield Specialization"))
+
+  let mob =
+    let noSwing = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
+
+    Content.mob 900 "Brute" CreatureType.Humanoid 20 5000 0 (Some noSwing) [] None { X = 6; Y = 5 }
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 20 10
+      Entities =
+        [ { warrior with
+              Pos = { X = 5; Y = 5 }
+              Resource = 0
+              BlockChanceBp = 10000 }
+          mob ]
+      Pending = []
+      Rng = Rng.streamsOf 11UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  // Big enough to survive the swing, small enough that armour does not matter.
+  let (EntityId wid) = warrior.Id
+  let w = SimCombat.meleeStrike mob warrior.Id 5 0 w |> snd
+
+  Assert.Equal(5, poolOf wid w)
+  Assert.True(
+    w.Log |> List.exists (fun l -> l.Contains "Shield Specialization"),
+    "the block paid rage without naming the talent"
+  )

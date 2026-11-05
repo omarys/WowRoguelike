@@ -4,8 +4,8 @@ Written at commit `aba0722`, with that session's work on top as one WIP commit
 `40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**244 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
-Release`, 254 total), Release build clean — re-verified 2026-11-05 on the tree at
+**245 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
+Release`, 255 total), Release build clean — re-verified 2026-11-05 on the tree at
 `42975a1` (Hunter port `67d7c1c`, swing hook `42975a1`) and again on the proc axis
 (§"The proc axis is built", below). The 10 skips are the operator's parked
 Bear/Cat/Moonkin specs.
@@ -97,6 +97,16 @@ HP −239..+319, resource −627..+247, all 30 still cleared). The caveat to car
 ends every cell at **97-99% mana**, so Clearcasting's rebate is invisible to every mana
 floor — third class in a row where a level-60 caster's resource is a floor, not a
 constraint.
+
+And the part worth knowing before the next session plans anything: **the rest of A1 is
+blocked by content, not by the vocabulary.** `domain.md` §"What is left of A1" has the
+table — no Bloodrage in the Warrior kit, no Crusader Strike or Holy Shock in the Paladin's,
+no source giving the Shaman's two numbers, a DoT that does not know who cast it (which
+blocks Nightfall and Ancient Brutality), and Moonkin parked. A8 (haste) and A9 (percent
+multipliers) were ranked second and third by the inventory and **no landed kit has a
+talent that would use either** — there is no Flurry, no Aspect of the Hawk, no Blade Rush
+anywhere in `Content.fs`. That is the real state: the engine has more axes than the
+content has talents, so the next move is a build, not a subsystem.
 
 ## CLOSED — both open bugs below were one dead totem
 
