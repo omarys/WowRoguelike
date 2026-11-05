@@ -1344,7 +1344,10 @@ module Content =
             CastTicks = ticks 0
             CooldownTicks = secTicks 30.0
             Range = 30
-            Effects = [ Interrupt ] } ] }
+            // Improved Counterspell 2/2 silences for four seconds on top of the lockout
+            // (OctoWoW `mage.md` §5(a)). Baked into the row rather than the talent,
+            // because `Talents` edits numbers and this adds an `Effect`.
+            Effects = [ Interrupt; Silence(secTicks 4.0) ] } ] }
 
   let counterspell = rank24 counterspellRanks
 
@@ -3611,6 +3614,13 @@ module Content =
   let private naturesSwiftness =
     nextSpell "Nature's Swiftness" (secTicks 180.0) 0 { Empower.none with Instant = true }
 
+  /// Presence of Mind: the next spell is instant, for no mana on a three-minute
+  /// cooldown. The same `nextSpell` shape as Nature's Swiftness because it is the same
+  /// mechanic, and the reason it is a kit row rather than a `Talents` field is that no
+  /// talent record can add an ability the kit did not have.
+  let private presenceOfMind =
+    nextSpell "Presence of Mind" (secTicks 180.0) 0 { Empower.none with Instant = true }
+
   /// A Druid form. Entering one costs mana; leaving one costs nothing, which is why
   /// `humanForm` is built separately below rather than through this helper. A single
   /// `Ability` rather than an `AbilityDef`, because a form has no ranks — it does not
@@ -3967,7 +3977,59 @@ module Content =
   /// 1.50 s) as the auto-attack, which is why the Mage has no attack-power
   /// contribution. Four pieces need 24, so a level-20 Mage loses Robes and Belt
   /// of Arugal, Plains Ring and the Rod of the Sleepwalker.
+  /// Mage 40/0/11 under OctoWoW's tree — the operator's build
+  /// (`?points=TAFOLISYZKAoB--FADD`: Arcane 40, Fire 0, Frost 11, every taken talent at
+  /// maximum rank). Four of its nineteen talents are expressible as data; the other
+  /// fifteen are named with the axis each needs in `.pi/research/octowow/mage.md` §5(b).
+  ///
+  /// - Improved Frostbolt 5/5: half a second off a 3 s cast.
+  /// - Improved Counterspell 2/2: *not* here — it adds a `Silence` effect, and a talent
+  ///   record edits numbers rather than effects, so it is baked into
+  ///   `counterspellRanks` with a comment saying so.
+  /// - Arcane Impact 3/3: +6% crit on Arcane Missiles and Arcane Explosion. One `Spells`
+  ///   line per spell because the talent is written per spell, and this build takes no
+  ///   Fire talents at all, so Fireball gets nothing.
+  ///
+  /// What the build would want and cannot have yet: Arcane Instability (+3% damage and
+  /// crit to everything), Arcane Power (a casting-speed window), Arcane Potency, and the
+  /// whole Arcane Missiles line — all of §5(b).
+  let private mageTalents =
+    { Talents.none with
+        Spells =
+          [ { Spell = "Frostbolt"
+              CostBp = 0
+              HealBp = 0
+              DamageBp = 0
+              CritBp = 0
+              CastTicksOff = secTicks 0.5 }
+            { Spell = "Arcane Missiles"
+              CostBp = 0
+              HealBp = 0
+              DamageBp = 0
+              CritBp = 600
+              CastTicksOff = ticks 0 }
+            { Spell = "Arcane Explosion"
+              CostBp = 0
+              HealBp = 0
+              DamageBp = 0
+              CritBp = 600
+              CastTicksOff = ticks 0 } ] }
+
   let private mage (buffs: PartyBuffKind list) (level: int) (id: int) =
+    let abilities =
+      withTalents
+        mageTalents
+        (AbilityDef.kitAt
+          level
+          [ fireballRanks
+            frostboltRanks
+            arcaneMissilesRanks
+            arcaneExplosionRanks
+            blizzardRanks
+            polymorphRanks
+            counterspellRanks ])
+      @ [ presenceOfMind ]
+
     heroStats
       buffs
       level
@@ -3977,7 +4039,7 @@ module Content =
       Cloth
       Traits.none
       { Base = gnomeMageBase
-        Talents = Talents.none
+        Talents = mageTalents
         Gear =
           [ gear "Spellpower Goggles Xtreme" None 46 (0, 0, 0, 0, 0)
             gear "Sentinel's Medallion" (Some 9) 0 (0, 2, 2, 0, 0)
@@ -4007,15 +4069,7 @@ module Content =
         ]
       Mana
       partyThreatBp
-      (AbilityDef.kitAt
-        level
-        [ fireballRanks
-          frostboltRanks
-          arcaneMissilesRanks
-          arcaneExplosionRanks
-          blizzardRanks
-          polymorphRanks
-          counterspellRanks ])
+      abilities
       { X = 2; Y = 6 }
 
   /// Which Druid spec a roster entry asked for. The Druid is the only class that

@@ -1146,6 +1146,31 @@ let ``the rogue's OctoWoW build lands on his kit`` () =
   // Improved Kick 2/2 adds the silence beside the school lockout.
   Assert.Contains(Silence(secTicks 2.0), (ability "Kick").Effects)
 
+/// The Mage's OctoWoW build. Four of nineteen talents are data; the rest are in
+/// `.pi/research/octowow/mage.md` §5(b) with the axis each needs.
+[<Fact>]
+let ``the mage's OctoWoW build lands on his kit`` () =
+  let mage =
+    (Content.gully 1UL).Entities |> List.find (fun e -> e.Name = "Mage")
+
+  let ability name = mage.Abilities |> List.find (fun a -> a.Name = name)
+
+  // Improved Frostbolt 5/5, measured against the untouched row rather than as a
+  // literal: the rank a level-24 mage holds is content that can move.
+  let stock = (AbilityDef.at 24 Content.frostboltRanks).Value
+  Assert.Equal(stock.CastTicks - secTicks 0.5, (ability "Frostbolt").CastTicks)
+  // Improved Counterspell 2/2, baked into the row because a talent cannot add an
+  // `Effect`.
+  Assert.Contains(Silence(secTicks 4.0), (ability "Counterspell").Effects)
+  // Arcane Impact 3/3, on the two spells the talent names and no others.
+  Assert.Contains(CritBonus 600, (ability "Arcane Missiles").Effects)
+  Assert.Contains(CritBonus 600, (ability "Arcane Explosion").Effects)
+  Assert.DoesNotContain((ability "Fireball").Effects, fun e -> e = CritBonus 600)
+  // Presence of Mind, a kit row rather than a talent line.
+  let pom = ability "Presence of Mind"
+  Assert.Equal(secTicks 180.0, pom.CooldownTicks)
+  Assert.Equal<Effect list>([ Empowers(secTicks 20.0, { Empower.none with Instant = true }) ], pom.Effects)
+
 /// The Warrior's OctoWoW build, landed where it lands: six of the eighteen talents
 /// it spends are expressible as data, and each one is checked on the kit the party
 /// is actually handed rather than on the talent record, because the record is the

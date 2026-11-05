@@ -811,6 +811,41 @@ level-scaled axis **36/36 for the first time**, including the library cell that 
 2 of 2. That cell is not "fixed by the Rogue" in any proven sense — the whole party's
 numbers moved, and this is a one-seed run — but there is no failing cell left to debug.
 
+### Mage: the OctoWoW build, four of nineteen, and the two-seed lie
+
+The operator's build (`?points=TAFOLISYZKAoB--FADD`, Arcane 40 / Fire 0 / Frost 11, every
+taken talent at maximum) landed four of nineteen: Improved Frostbolt 5/5 (half a second
+off a 3 s cast), Arcane Impact 3/3 (`CritBonus 600` on Arcane Missiles and Arcane
+Explosion, and on nothing else — this build takes no Fire talents), Improved Counterspell
+2/2 (`Silence 4 s` baked into the row, because a talent record edits numbers and this adds
+an `Effect`), and Presence of Mind as a kit row built from the same `nextSpell` helper as
+Nature's Swiftness: no talent record can hand over an ability the kit did not have.
+
+The remaining fifteen are exactly the ones that would change the class: Arcane Instability
+(+3% damage *and* crit to everything), Arcane Power (a casting-speed window), Arcane
+Potency, the Improved Arcane Missiles line. That is not a porting oversight, it is §5(b) —
+none of them has a field to land in.
+
+**Baseline changes the note lists and this did not apply**, because the numbers are for
+ranks the level-24 anchor never reaches: Fireball cheaper at rank 11 (395 → 275) and 12
+(410 → 295), Arcane Intellect rank 3-5 (520 → 240, 945 → 340, 1510 → 445). A curve through
+two top-rank points is a guess, and a guessed number is worse than a vanilla one that is
+at least checkable.
+
+**The measurement is the interesting part, and it is a repeat offence.** The scaled ladder
+was reported green (36/36) after the Rogue port. It is not: at six seeds it is **32/36**,
+four library cells each losing at least one seed, three of the four carrying a Mage. The
+earlier number came from a Harness binary that `dotnet build` had declined to recompile —
+the first A/B I ran to check the Mage port gave "identical output" for a reason that had
+nothing to do with the Mage. The fix is `-t:Rebuild` for any A/B and a DLL hash printed
+next to the numbers; and the lesson, in the same shape as the stale-DLL probe earlier in
+this session, is that the benchmark's *denominator* is as easy to get wrong as its result.
+
+Measured on a verified-current DLL: bench 30/30 clear with 18 seeds moved (all within 7%,
+both directions); `--level 60` **36/36 clean at six seeds**; level-scaled **32/36 at six
+seeds**, and the same single library cell fails at two seeds both before and after the
+port (median 9666 either way), so the port neither caused nor fixed that one.
+
 ## 9. Open work, in priority order
 
 0. **The balance-and-story programme: decided with the owner, under way.** It

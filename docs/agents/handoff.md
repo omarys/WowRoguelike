@@ -459,8 +459,9 @@ not measured. No ladder or `comps` cell seats them either, so nothing else needs
 |---|---|---|---|
 | Warrior | Prot 3/0/48 | **6 of 18** | all six data-only; 12 need axes |
 | Rogue | 17/34/0 | **6 of 18** | six data-only, plus two flat energy costs from the baseline changes |
+| Mage | Arcane 40/Frost 11 | **4 of 19** | four data-only, incl. Presence of Mind as a kit row; 15 need axes |
 | Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
-| Mage, Priest, Paladin, Hunter, Warlock, Druid | — | 0 | notes written, nothing ported |
+| Priest, Paladin, Hunter, Warlock, Druid | — | 0 | notes written, nothing ported |
 
 The Warrior port is the template: each (a)-bucket talent lands as a field, each (b)-bucket
 talent is left out and named with the axis it needs. Two findings from it are recorded in
@@ -696,21 +697,36 @@ The ladder has two axes and only one of them has been watched. `comps N` with no
 seats each map at its own level (graveyard 33, library 36, armory 39); `comps N --level 60`
 seats everything on the level-60 sheets, which is the axis every "36/36 clean" claim in
 this document was measured on. At `--level 60`: 36 of 36 clean, including with the Shaman
-change below. Both axes are now clean: **36/36 at `--level 60` and 36/36 level-scaled**,
-which is the first time the scaled axis has been fully green.
+change below. **Level-60 axis: 36/36 cells clean at six seeds.** Level-scaled axis:
+**32/36 clean at six seeds**, the four failures all in library.
 
-The scaled axis had one failing cell for most of this work —
-`Warrior/Druid/Mage/Rogue/Warlock library`, wiped 2 of 2 at ~7100 ticks. Two changes moved
-it. First, **pricing a Druid form's entry** cleared the graveyard park next door
-(`Warrior/Priest/Druid/Mage/Warlock graveyard`, one of two runs unresolved at the 24000
-cap): with a free shift the healer kept re-entering Tree of Life and starved the party,
-which is the shape a "nobody dies but nothing dies either" park has. Second, the **Rogue
-port** cleared the library wipe itself — it now clears at 9136 ticks with 5 alive.
+> **Correction, and the reason it is here.** This file claimed "36/36 on the scaled axis,
+the first time it has ever been fully green" after the Rogue port. That was measured with a
+Harness binary `dotnet build` had declined to recompile. With a forced rebuild the scaled
+axis is 32/36 at six seeds — see `docs/agents/domain.md` §8 (Mage). Any A/B here needs
+`-t:Rebuild` and a printed DLL hash.
 
-Do not read that as "the Rogue was the bug". The whole party's numbers moved in the same
-commit, the run is one seed, and the cause was never isolated. What is true is narrower and
-more useful: there is no failing cell left to debug, and the two failures that were chased
-for several sessions are both gone with measurements attached.
+Seeds matter more than the ladder does. At **two** seeds the scaled axis reads 35/36; at
+**six** it reads 32/36, and the difference is not one bad cell appearing, it is four
+library cells each losing one or two seeds out of six. The single cell that fails at two
+seeds — `Warrior/Priest/Mage/Hunter/Warlock library`, median 9666 — fails identically
+before and after the Mage port, so it is not a Mage regression either. **A two-seed green
+run means "no cell failed twice", not "no cell fails".**
+
+The four failing cells at six seeds, all library:
+
+| roster | seeds cleared | wiped | median ticks |
+|---|---|---|---|
+| Warrior/Priest/Mage/Rogue/Warlock | 5 of 6 | 1 | 8650 |
+| Warrior/Druid/Mage/Rogue/Warlock | 3 of 6 | 3 | 8843 |
+| Warrior/Shaman/Mage/Hunter/Warlock | 5 of 6 | 1 | 9308 |
+| Warrior/Shaman/Hunter/Rogue/Warlock | 5 of 6 | 0 (1 unresolved) | 9408 |
+
+Three of the four carry a Mage, which is where the port is suspected but not proven: the
+Mage's twelve unported talents are the damage ones, so the class is currently a caster
+that casts faster and crits a little harder on two spells and nothing else. Library at
+level 36 is the tightest cell in the ladder and was already the map that failed before any
+talent landed.
 
 ## Working agreements this project keeps re-learning
 
