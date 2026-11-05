@@ -766,9 +766,10 @@ Protection 48) is in `warriorTalents`, part-landed: six of its eighteen talents 
 expressible as data today — Improved Heroic Strike (Heroic Strike 15 → 12 rage),
 Improved Taunt (10 → 8 s), Improved Disarm, Defiance (`warriorThreatBp = 60000`, a
 separate constant from the Bear's `tankStanceBp`), One-Handed Weapon Specialization
-(`DamageDoneBp`) and Improved Shield Wall (duration baked into the row, cooldown via
-`CooldownOff`). The other twelve each need a model axis and are listed with it in
-`.pi/research/octowow/warrior.md` §4.
+(`DamageDoneBp` — **but see the Hunter section: that tag cannot reach a swing, so this
+talent is carried and does nothing yet**) and Improved Shield Wall (duration baked into
+the row, cooldown via `CooldownOff`). The other twelve each need a model axis and are
+listed with it in `.pi/research/octowow/warrior.md` §4.
 
 **Two things that surfaced on the way in, both worth knowing.** First, *Disarm's base
 cooldown was wrong*: the row said 20 s and both tables say 60 s
@@ -972,6 +973,58 @@ is Warrior/Priest/Rogue/Mage/Druid and no bench encounter seats a Warlock — re
 column: **the Warlock ends every arm at 99-100% mana**, so the class is not mana-limited at
 all and its damage talents are visible only in ticks, never in a mana floor. Any future
 question about a warlock's sustain needs a different instrument than the mana column.
+
+### Hunter: seven of sixteen, and a talent that cannot reach the bow
+
+Marksmanship 41 with no Beast Mastery and Survival 10 lands **seven of sixteen**, and
+it is the first port that got cheaper because an *earlier* one changed the model:
+Improved Stings' 30% on Serpent Sting is a `DamageOverTime` multiplication, which the
+Warlock port put on the aura at application time. No code moved for the Hunter — the
+note written before that change had already filed Improved Stings under "needs a new
+axis", and it was wrong by the time it was read.
+
+Six of the seven lines are `Talents.damageBp` (Efficiency is a cost, not a line):
+Ranged Weapon Spec 5/5 (+10%) on every damaging shot, Improved Marksmanship 2/2 on
+Aimed Shot, Improved Stings 5/5 on Serpent Sting, Swiftshot 3/3 on Arcane Shot's
+cooldown, Efficiency 5/5 and Resourcefulness 5/5 as costs. The eighth line is
+Lethal Shots 5/5, which goes to `Traits.CritBonusBp` — the only crit field there is, so
++5% ranged crit also raises the hunter's melee Raptor Strike. That is the same
+over-application the Rogue's Malice recorded, and it is cheap to accept for the same
+reason: one number, and the class has one crit.
+
+Four things a reader will otherwise get wrong:
+
+- **`DamageDoneBp` cannot reach an auto-attack at all.** `advanceSwings`
+  (`src/WowRoguelike.Core/SimTick.fs:481`) adds `serpentBonus` and nothing else — no
+  talent multiplier touches a swing. Ranged Weapon Spec is therefore a kit-row talent
+  by force, and the same hole makes the **Warrior's One-Handed Weapon Spec 5/5 dead
+  weight in its landed port**. A swing-side hook is the fix, and it is worth doing once
+  for both classes rather than in either port.
+- **Swiftshot's Aimed leg is skipped on purpose.** 3/3 is −1.5 s, and `withTalents`
+  floors a shortened cooldown at 1.5 s; 6 s − 4.5 s = 1.5 s would shorten the row by
+  four and a half seconds to honour a page that gives Aimed Shot **26 s**. Taking the
+  Arcane leg (6 → 4.5 s) is the half the numbers support.
+- **Mortal Shots 5/5 is the sharpest miss in the set**, and it needs two things: the
+  crit multiplier as data (`SimCombat.rollCrit` hardcodes `amount * 150 / 100` at
+  `src/WowRoguelike.Core/SimCombat.fs:23-25`), and a per-ability "this spell benefits
+  from bonus crit damage" flag. A global multiplier would silently buff every class's
+  crits, which is exactly what the field would prevent.
+- **There is no Concussive Shot row**, so Improved Concussive Shot 5/5 — 5% of the build
+  — is dead weight, as Demonic Swiftness was for the Warlock. Aimed Shot's page 26 s
+  against the sim's 6 s is the same contradiction the note recorded; the port keeps the
+  sim's cooldown because 26 s would park the button for most of a fight.
+
+Measured: 239 passed and 10 skipped, with two new tests (`the hunter's kit is the
+marksmanship build`, `the hunter carries lethal shots as a trait`) asserting the cost,
+cooldown and damage figures above against `Content.partyOf [ "Hunter" ] 24`. The bench
+snapshot **did not move**, because `defaultRoster` seats no Hunter and no bench
+encounter does either — again "the bench cannot see this class", not "nothing changed".
+`comps 6 --level 60` is **35 of 36 cells clean**; the one dirty cell is
+`Warrior/Priest/Paladin/Mage/Warlock graveyard L33` (`cleared=5`, `unresolved=1`), which
+seats no Hunter — it is the known park flake, not this port. The finding to carry
+forward is the mana column: **the Hunter ends every cell at 100% mana**, exactly as the
+Warlock ends at 99-100%. Neither class is resource-limited at level 60, so no hunter
+damage talent will ever show up in a mana floor either.
 
 ## 9. Open work, in priority order
 0. **The balance-and-story programme: decided with the owner, under way.** It

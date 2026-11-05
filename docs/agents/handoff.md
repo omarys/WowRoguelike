@@ -464,7 +464,8 @@ not measured. No ladder or `comps` cell seats them either, so nothing else needs
 | Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
 | Paladin | 40/0/11 | **7 of 17** | five lines and one deletion; Illumination is a **nerf** (10000 → 6000) and Divine Favor's cooldown row is gone; `comps 6 --level 60` 36/36 clean, bench 30/30 with the snapshot unmoved |
 | Warlock | 31/0/20 | **8 of 17** | needed a model change: DoT ticks now take `Talents.damageBp` at aura-application time; `comps 6 --level 60` 36/36 clean, but the warlock ends every arm at 99-100% mana |
-| Hunter, Druid | — | 0 | notes written, nothing ported |
+| Hunter | 0/41/10 | **7 of 16** | first class to get cheaper from an earlier port: Improved Stings rides the Warlock's DoT-at-application change with no new code; Lethal Shots had to become `Traits.CritBonusBp` (hero-wide crit); `comps 6 --level 60` 35/36 cells clean, but **100% mana in every cell** — like the Warlock, not resource-limited at 60 |
+| Druid | — | 0 | notes written (feral + moonkin), three specs `Skip`ped by the operator's direction |
 
 The Warrior port is the template: each (a)-bucket talent lands as a field, each (b)-bucket
 talent is left out and named with the axis it needs. Two findings from it are recorded in
@@ -475,7 +476,27 @@ The (b)-bucket is where the *next* class gets cheaper: eight axes recur across t
 notes — self-resource grants, dispels, chain heals, stacking self-buffs, damage-taken
 debuffs, temporary health, per-stance threat, and `Blocks` with a magnitude. Each one
 built unlocks talents in three or four classes at once, which is why the port order below
-is by axis rather than by class.
+is by axis rather than by class. Nine ports in, one axis has been built after the fact
+(the Warlock's DoT-at-application change) and it immediately paid for a Hunter talent
+with no code at all — the cheapest evidence yet that building an axis beats porting a
+class.
+
+**Cheapest axis on the list, and it unblocks two landed ports.** `Talents.damageBp`
+never reaches an auto-attack: `advanceSwings` (`src/WowRoguelike.Core/SimTick.fs:481`)
+adds `serpentBonus` and no talent multiplier. So the Warrior's One-Handed Weapon
+Specialization, already tagged, does nothing, and the Hunter's Ranged Weapon
+Specialization had to be applied to kit rows because the bow itself cannot take it —
+where most of the class's damage is. One hook in `advanceSwings` (fold the tree's
+`damageBp` tag for the swing's ability name, as `resolveAbility` already does) repairs
+the Warrior, makes the Hunter's tag honest and covers every future weapon-spec talent
+in one place. It is not done here because it moves every class's white damage and
+needs a `comps` sweep of its own.
+
+**Wave A is now one class from done: only the Druid is left**, and the operator has
+parked Bear, Cat and Moonkin, so it is the feral/moonkin specs that have to be measured
+before any Druid talents can be. Two axes recur there — per-form stat swaps (already
+modelled) and `ThreatMultiplierBp` (already a field) — so the Druid is likely a data port
+overlaid on a role question rather than a vocabulary one.
 
 ## TODO — research the OctoWoW class changes, all nine classes
 

@@ -228,5 +228,35 @@ points buff an ability this `Content.fs` does not have.**
   Assault, Scent of Blood, Bestial Precision, Swift Aspects, Improved Slaying, Alone Against the World and
   Swift Reflexes are all present, and none exists in 1.12.
 - **Sim-side gaps not chased**: whether the engine calls `Talents.costBp` for a non-healing ability, and
-  whether a ranged auto-shot can take a `CritBonus` at all.
-- **Not done**: seven other classes; any change to `Content.fs` — this note is research.
+  whether a ranged auto-shot can take a `CritBonus` at all. **Both answered by the port, below.**
+- **Not done**: the other classes.
+
+## 8. Landed — seven of sixteen, and what the port found
+
+Ported in `Content.fs` (`hunterTalents` + the tagged kit rows), seven of the sixteen above: Efficiency,
+Resourcefulness, Swiftshot (Arcane leg only), Improved Marksmanship, Improved Stings, Ranged Weapon Spec
+as `Talents.damageBp` lines, and Lethal Shots as `Traits.CritBonusBp = 500`.
+
+Two answers to the open questions at the end of §7:
+
+1. **`Talents.costBp` does apply to a non-healing ability** — the `CostBp` fold is not gated on the
+   `healing` flag, which §5(a) already noted at `Domain.fs:1182`. Efficiency lands as written.
+2. **A ranged auto-shot cannot take a talent at all.** `advanceSwings`
+   (`src/WowRoguelike.Core/SimTick.fs:481`) adds `serpentBonus` and no `Talents.damageBp`, so
+   `DamageDoneBp` never reaches a swing — for any class. Ranged Weapon Spec is a kit-row talent by
+   force, and the Warrior's landed One-Handed Weapon Spec is inert for the same reason.
+
+Three deviations from §5, all deliberate:
+
+- **Swiftshot's Aimed leg (−1.5 s) is skipped.** `withTalents` floors a shortened cooldown at 1.5 s, and
+  6 s − 4.5 s = 1.5 s would shorten a page-26 s row fourfold. Arcane only.
+- **Improved Stings moved from (b) to (a) between the note and the port**, because the Warlock port made
+  `DamageOverTime` take `Talents.damageBp` at application time. No Hunter code was needed for it.
+- **Mortal Shots stays unported** and is the one talent worth an axis here: it needs the crit multiplier
+  as data (`SimCombat.rollCrit` hardcodes `amount * 150 / 100`, `src/WowRoguelike.Core/SimCombat.fs:23-25`)
+  plus a per-ability "benefits from bonus crit damage" flag. Improved Concussive Shot stays unported for
+  the simpler reason: there is no Concussive Shot row.
+
+Measured: `dotnet test` 239 passed / 10 skipped (two new hunter tests); `comps 6 --level 60` 35 of 36 cells
+clean, the dirty one seating no Hunter; **100% Hunter mana in every cell**. Details in
+`docs/agents/domain.md` §8, "Hunter: seven of sixteen".

@@ -3024,6 +3024,50 @@ let ``the hunter's kit is the level-24 one`` () =
 
   Assert.Equal(9, List.length hunter.Abilities)
 
+/// The Marksmanship build underneath that kit: Efficiency on six rows, Resourcefulness
+/// on the one melee row, Swiftshot on Arcane Shot, Improved Marksmanship on Aimed Shot,
+/// Improved Stings on Serpent Sting, and Ranged Weapon Spec on every damaging shot.
+[<Fact>]
+let ``the hunter's kit is the marksmanship build`` () =
+  let hunter = Content.partyOf [ "Hunter" ] 24 |> List.head
+  let ability name = hunter.Abilities |> List.find (fun a -> a.Name = name)
+
+  // Efficiency 5/5 is 10% off the shots and stings; Resourcefulness 5/5 the same off
+  // Raptor Strike, which is the melee half of a talent whose traps are unmodelled.
+  Assert.Equal(45, (ability "Arcane Shot").ResourceCost)
+  Assert.Equal(45, (ability "Serpent Sting").ResourceCost)
+  Assert.Equal(67, (ability "Aimed Shot").ResourceCost)
+  Assert.Equal(90, (ability "Multi-Shot").ResourceCost)
+  Assert.Equal(81, (ability "Viper Sting").ResourceCost)
+  Assert.Equal(54, (ability "Scatter Shot").ResourceCost)
+  Assert.Equal(40, (ability "Raptor Strike").ResourceCost)
+
+  // Swiftshot 3/3 takes 1.5 s off Arcane Shot's 6 s. Aimed Shot keeps its cooldown:
+  // the talent's Aimed leg would floor a 6 s row at 1.5 s, so `Content.fs` leaves it
+  // out rather than take 4.5 s off a button the page gives 26 s.
+  Assert.Equal(secTicks 4.5, (ability "Arcane Shot").CooldownTicks)
+  Assert.Equal(secTicks 6.0, (ability "Aimed Shot").CooldownTicks)
+
+  // Ranged Weapon Spec 5/5 (+10%) reaches every damaging shot; Improved Marksmanship
+  // 2/2 and Improved Stings 5/5 stack on their own rows on top of it.
+  let tagOf name = Talents.damageBp name hunter.Talents
+  Assert.Equal(11000, tagOf "Arcane Shot")
+  Assert.Equal(12000, tagOf "Aimed Shot")
+  Assert.Equal(14000, tagOf "Serpent Sting")
+  Assert.Equal(11000, tagOf "Multi-Shot")
+  Assert.Equal(10000, tagOf "Viper Sting")
+  Assert.Equal(10000, tagOf "Scatter Shot")
+  // Raptor Strike is a melee strike: the ranged talent must not reach it.
+  Assert.Equal(10000, tagOf "Raptor Strike")
+
+/// Lethal Shots 5/5 is +5% ranged crit, and `Traits.CritBonusBp` is the only place a
+/// crit can come from — so it lands on the hero, as the rogue's Malice does.
+[<Fact>]
+let ``the hunter carries lethal shots as a trait`` () =
+  let hunter = Content.partyOf [ "Hunter" ] 24 |> List.head
+  // 5% base, 132 Agility at 10 bp a point, and Lethal Shots' 500.
+  Assert.Equal(2320, hunter.CritChanceBp)
+
 /// A hunter's auto-attack is its bow, so it stands at range like the casters do:
 /// 21-39 bow plus Sharp Arrow plus 302 ranged attack power, 66-84 a shot.
 [<Fact>]

@@ -4762,12 +4762,73 @@ module Content =
   /// Arrow, +38.8 from 302 ranged attack power) rather than a bare weapon, because
   /// vanilla's ranged AP formula is `level x 2 + agility x 2 - 20` and the level
   /// term and the offset cannot be expressed through `ApPerAgility`.
-  /// shortcut: no pet. Vanilla's Growl, Bite and Claw have no home in the
+  /// shortcut: a pet without Growl, Bite or Claw. Those have no home in the
   /// vocabulary, so the pet is a plain swing rather than a threat-generating
-  /// companion. Aspects, Hunter's Mark, Multi-Shot, Concussive Shot and Wing Clip are
-  /// also out: nothing in the vocabulary carries a ranged-attack-power buff, a
-  /// multi-target shot, or a movement slow — `Effect` has stun, root, sleep and
-  /// disarm, but no snare of any strength.
+  /// companion. Aspects, Hunter's Mark, Concussive Shot and Wing Clip are also out:
+  /// nothing in the vocabulary carries a ranged-attack-power buff or a movement slow
+  /// — `Effect` has stun, root, sleep and disarm, but no snare of any strength.
+  ///
+  /// The build is OctoWoW's 0 / 41 / 10 (Beast Mastery 0, Marksmanship 41, Survival
+  /// 10), decoded in `.pi/research/octowow/hunter.md` §6. **Seven of its sixteen
+  /// talents are expressible**, and one of them only because the warlock port taught
+  /// `Talents.damageBp` to reach periodic damage: Improved Stings' Serpent leg is a
+  /// damage-over-time multiplier, which the note's §5(b) — written before that change
+  /// — still files under "needs a new axis".
+  ///
+  /// - Efficiency 5/5: `CostBp = 1000` on the six shots and stings in the kit (Arcane,
+  ///   Serpent, Aimed, Multi-Shot, Viper, Scatter).
+  /// - Resourcefulness 5/5: `CostBp = 1000` on Raptor Strike, its melee half; the
+  ///   traps it also discounts are not in the vocabulary.
+  /// - Swiftshot 3/3: `CooldownOff` takes 1.5 s off Arcane Shot. The Aimed leg (−6 s)
+  ///   is deliberately absent: this file's Aimed Shot rows on a 6 s cooldown the page
+  ///   does not carry (that note's Contradiction 1), and `withTalents` would floor the
+  ///   result at 1.5 s — 4.5 s off a button to honour a talent that claims 6 s of a
+  ///   26 s one. Adopting the page's cooldown is a balance decision for the ladder
+  ///   runs, not for a talent port.
+  /// - Improved Marksmanship 2/2: `DamageBp = 1000` on Aimed Shot. The Steady Shot
+  ///   half of the talent has no row to land on.
+  /// - Improved Stings 5/5: `DamageBp = 3000` on Serpent Sting. Its Viper leg needs a
+  ///   drain multiplier and its Scorpid leg a Scorpid Sting row; neither exists.
+  /// - Ranged Weapon Specialization 5/5: `DamageBp = 1000` on the four damaging shots
+  ///   **and on Serpent Sting**, whose damage is a ranged attack's. It cannot reach the
+  ///   auto-attack, where most of this class's damage is: `advanceSwings`
+  ///   (`SimTick.fs`) applies no talent multiplier at all, so even `DamageDoneBp`
+  ///   misses white damage. Named in the handoff rather than fixed here, because it is
+  ///   one rule for every class and not this port's to change.
+  /// - Lethal Shots 5/5: `hunterTraits.CritBonusBp = 500`, spent the way the rogue
+  ///   spends Malice. `CritChanceBp` is one number for melee and ranged, so a hunter's
+  ///   dagger crits as often as its bow — the same over-application the rogue carries.
+  ///
+  /// The nine that are not here are that note's §5(b): Mortal Shots needs a crit
+  /// *multiplier* (a crit is `* 150 / 100` in `SimCombat.rollCrit`), Experimental
+  /// Ammunition a queued next-cast rider, Piercing Shots something that fires on a
+  /// crit, Lock and Load both of those, Improved Slaying a reader for `CreatureType`,
+  /// Swift Reflexes a parry, and Improved Concussive Shot a Concussive Shot row to
+  /// stun with. The build spends 0 of its 51 points in Beast Mastery, so nothing in
+  /// this port waits on an inheritance link for the pet.
+  let private hunterTalents =
+    { Talents.none with
+        CooldownOff = [ "Arcane Shot", secTicks -1.5 ]
+        Spells =
+          [ for spell, costBp, damageBp in
+              [ "Arcane Shot", 1000, 1000
+                "Serpent Sting", 1000, 4000
+                "Aimed Shot", 1000, 2000
+                "Multi-Shot", 1000, 1000
+                "Viper Sting", 1000, 0
+                "Scatter Shot", 1000, 0
+                "Raptor Strike", 1000, 0 ] do
+              { Spell = spell
+                CostBp = costBp
+                HealBp = 0
+                DamageBp = damageBp
+                CritBp = 0
+                CastTicksOff = ticks 0 } ] }
+
+  /// Lethal Shots 5/5: +5% ranged crit, which `Traits.CritBonusBp` is the only place
+  /// a crit can be raised from.
+  let private hunterTraits = { Traits.none with CritBonusBp = 500 }
+
   let private hunter (buffs: PartyBuffKind list) (level: int) (id: int) =
     heroStats
       buffs
@@ -4776,9 +4837,9 @@ module Content =
       "Hunter"
       Dps
       Leather
-      Traits.none
+      hunterTraits
       { Base = nightElfHunterBase
-        Talents = Talents.none
+        Talents = hunterTalents
         Gear =
           [ gear "Scout's Medallion" (Some 18) 0 (0, 6, 2, 0, 0)
             gear "Serpent's Shoulders" (Some 18) 68 (0, 9, 0, 0, 0)
@@ -4805,17 +4866,19 @@ module Content =
         ]
       Mana
       partyThreatBp
-      (AbilityDef.kitAt
-        level
-        [ arcaneShotRanks
-          serpentStingRanks
-          raptorStrikeRanks
-          aimedShotRanks
-          scatterShot
-          multiShot
-          viperSting
-          summonPetRanks
-          mendPet ])
+      (withTalents
+        hunterTalents
+        (AbilityDef.kitAt
+          level
+          [ arcaneShotRanks
+            serpentStingRanks
+            raptorStrikeRanks
+            aimedShotRanks
+            scatterShot
+            multiShot
+            viperSting
+            summonPetRanks
+            mendPet ]))
       { X = 3; Y = 8 }
 
   /// Which Druid spec a roster entry names. `"Druid"` alone is the healer, which
