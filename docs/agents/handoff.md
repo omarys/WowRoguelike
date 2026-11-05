@@ -481,16 +481,15 @@ is by axis rather than by class. Nine ports in, one axis has been built after th
 with no code at all — the cheapest evidence yet that building an axis beats porting a
 class.
 
-**Cheapest axis on the list, and it unblocks two landed ports.** `Talents.damageBp`
-never reaches an auto-attack: `advanceSwings` (`src/WowRoguelike.Core/SimTick.fs:481`)
-adds `serpentBonus` and no talent multiplier. So the Warrior's One-Handed Weapon
-Specialization, already tagged, does nothing, and the Hunter's Ranged Weapon
-Specialization had to be applied to kit rows because the bow itself cannot take it —
-where most of the class's damage is. One hook in `advanceSwings` (fold the tree's
-`damageBp` tag for the swing's ability name, as `resolveAbility` already does) repairs
-the Warrior, makes the Hunter's tag honest and covers every future weapon-spec talent
-in one place. It is not done here because it moves every class's white damage and
-needs a `comps` sweep of its own.
+**The swing hook landed** (`SimTick.advanceSwings`, `SimTick.swingName`). A white swing
+has no ability row, so it answers to one fixed name and `Talents.damageBp` now folds into
+both hands. That repairs the Warrior's One-Handed Weapon Specialization, which had been
+tagged since its port and doing nothing — most of that tree's damage is white — and it
+lets the Hunter's Ranged Weapon Specialization reach the bow. **A talent that has to tell
+a bow from a dagger still cannot**: that needs a name on `AutoAttack`, and no landed
+talent cares yet. The bench snapshot moved by 23 of 30 cells for this (mean 958 → 956
+ticks, no outcome flips), which is the smallest honest evidence that the swing is now
+where the tree lives, and `comps 3 --level 60` afterwards is **36 of 36 cells clean**.
 
 **Wave A is now one class from done: only the Druid is left**, and the operator has
 parked Bear, Cat and Moonkin, so it is the feral/moonkin specs that have to be measured

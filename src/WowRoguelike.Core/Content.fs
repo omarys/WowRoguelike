@@ -3470,8 +3470,12 @@ module Content =
   ///   all of it — and the floor in `withTalents` is the guard for the next one.
   /// - Defiance 5/5: not here — it is `warriorThreatBp`, because threat is a field
   ///   on the sheet rather than a line about a spell.
-  /// - One-Handed Weapon Specialization 5/5: `DamageDoneBp`. It also raises `Shoot`,
-  ///   the tree's one over-application: a crossbow is not a one-handed melee weapon.
+  /// - One-Handed Weapon Specialization 5/5: `DamageDoneBp`, which reaches the
+  ///   weapon strike, `Shoot` and — since `SimTick.advanceSwings` was taught to fold
+  ///   `Talents.damageBp` — the white swing itself, where most of this tree's damage
+  ///   is. Two over-applications ride along: `Shoot`, because a crossbow is not a
+  ///   one-handed melee weapon, and the off hand of a dual-wielder, which the Warrior
+  ///   does not have.
   ///
   /// shortcut: Shield Wall's "+2 sec duration" is baked into its row as twelve
   /// seconds rather than modelled, the same way a rank's numbers are baked into its
@@ -4789,12 +4793,9 @@ module Content =
   ///   half of the talent has no row to land on.
   /// - Improved Stings 5/5: `DamageBp = 3000` on Serpent Sting. Its Viper leg needs a
   ///   drain multiplier and its Scorpid leg a Scorpid Sting row; neither exists.
-  /// - Ranged Weapon Specialization 5/5: `DamageBp = 1000` on the four damaging shots
-  ///   **and on Serpent Sting**, whose damage is a ranged attack's. It cannot reach the
-  ///   auto-attack, where most of this class's damage is: `advanceSwings`
-  ///   (`SimTick.fs`) applies no talent multiplier at all, so even `DamageDoneBp`
-  ///   misses white damage. Named in the handoff rather than fixed here, because it is
-  ///   one rule for every class and not this port's to change.
+  /// - Ranged Weapon Specialization 5/5: `DamageBp = 1000` on the four damaging shots,
+  ///   on Serpent Sting whose damage is a ranged attack's, **and on `SimTick.swingName`**
+  ///   — the bow's own white damage, where most of this class's damage is.
   /// - Lethal Shots 5/5: `hunterTraits.CritBonusBp = 500`, spent the way the rogue
   ///   spends Malice. `CritChanceBp` is one number for melee and ranged, so a hunter's
   ///   dagger crits as often as its bow — the same over-application the rogue carries.
@@ -4817,7 +4818,10 @@ module Content =
                 "Multi-Shot", 1000, 1000
                 "Viper Sting", 1000, 0
                 "Scatter Shot", 1000, 0
-                "Raptor Strike", 1000, 0 ] do
+                "Raptor Strike", 1000, 0
+                // The bow's white damage. A swing has no ability row, so
+                // `SimTick.swingName` is the one name it answers to.
+                "Attack", 0, 1000 ] do
               { Spell = spell
                 CostBp = costBp
                 HealBp = 0

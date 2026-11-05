@@ -1109,6 +1109,53 @@ let ``the off hand lands more often than the main hand`` () =
   Assert.True(main > 0, "the main hand should swing at all")
   Assert.True(off > main, sprintf "off hand %d should out-swing main hand %d" off main)
 
+/// `Talents.damageBp` has to reach a white swing: most of a melee class's damage is
+/// the auto-attack, so a tree that raises damage and misses it is a tree half applied.
+/// One-Handed Weapon Specialization 5/5 is the talent that proves it.
+[<Fact>]
+let ``the tree's damage bonus reaches a white swing`` () =
+  // A 5-tick interval is short enough to land inside the window and long enough that
+  // "the first swing" is unambiguous; 30..30 means the roll contributes nothing to the
+  // comparison. The timer starts full (`Content.hero` sets `SwingTicksLeft = attack.Ticks`),
+  // so the window has to outlast one interval.
+  let firstSwing (seed: int) (damageDoneBp: int) =
+    let weapon = { Min = 30; Max = 30; Ticks = ticks 5; Range = 1 }
+
+    let tank =
+      Content.hero 1 "Tank" Tank 1000 1000 weapon 50000 [ Content.heroicStrike ] { X = 5; Y = 5 }
+      |> fun e -> { e with Talents = { Talents.none with DamageDoneBp = damageDoneBp } }
+
+    let mob =
+      { Content.mob 100 "Mob" CreatureType.Humanoid 21 100000 0 (Some weapon) [] None { X = 6; Y = 5 } with
+          Engaged = true
+          Target = Some(EntityId 1) }
+
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 20 10
+      Entities = [ tank; mob ]
+      Pending = []
+      Rng = Rng.streamsOf (uint64 seed)
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+    |> SimTick.run 20
+    |> fun w ->
+      // A dodge or a parry logs a miss, so sweep seeds for a swing that lands.
+      w.Log
+      |> List.tryPick (fun l ->
+        if l.StartsWith "Tank swings at" then
+          l.Split ' ' |> Array.last |> int |> Some
+        else
+          None)
+
+  let plain = [ 1..20 ] |> List.tryPick (fun s -> firstSwing s 0)
+  let talented = [ 1..20 ] |> List.tryPick (fun s -> firstSwing s 1000)
+  // No attack power on the fixture, so the talent's 10% is the whole difference:
+  // 30 against 33.
+  Assert.Equal(Some 30, plain)
+  Assert.Equal(Some 33, talented)
+
 /// The Warrior fights sword and board, and the shield's buttons are what that
 /// buys: a block chance, a block value, and the two cooldowns.
 [<Fact>]
@@ -3057,8 +3104,10 @@ let ``the hunter's kit is the marksmanship build`` () =
   Assert.Equal(11000, tagOf "Multi-Shot")
   Assert.Equal(10000, tagOf "Viper Sting")
   Assert.Equal(10000, tagOf "Scatter Shot")
-  // Raptor Strike is a melee strike: the ranged talent must not reach it.
+  // Raptor Strike is a melee strike: the ranged talent must not reach it. The bow's
+  // own white damage does take it, under the swing's fixed name.
   Assert.Equal(10000, tagOf "Raptor Strike")
+  Assert.Equal(11000, tagOf SimTick.swingName)
 
 /// Lethal Shots 5/5 is +5% ranged crit, and `Traits.CritBonusBp` is the only place a
 /// crit can come from — so it lands on the hero, as the rogue's Malice does.

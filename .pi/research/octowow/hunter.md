@@ -257,6 +257,25 @@ Three deviations from §5, all deliberate:
   plus a per-ability "benefits from bonus crit damage" flag. Improved Concussive Shot stays unported for
   the simpler reason: there is no Concussive Shot row.
 
-Measured: `dotnet test` 239 passed / 10 skipped (two new hunter tests); `comps 6 --level 60` 35 of 36 cells
-clean, the dirty one seating no Hunter; **100% Hunter mana in every cell**. Details in
-`docs/agents/domain.md` §8, "Hunter: seven of sixteen".
+Measured: `dotnet test` 240 passed / 10 skipped (two new hunter tests, plus one for the swing hook);
+`comps 3 --level 60` **36 of 36 cells clean** after the hook; **99-100% Hunter mana in every cell**.
+Details in `docs/agents/domain.md` §8, "Hunter: seven of sixteen".
+
+## 9. The swing hook — landed
+
+`Talents.damageBp` did not reach an auto-attack: `advanceSwings`
+(`src/WowRoguelike.Core/SimTick.fs:481`) applied no talent multiplier, so white damage
+ignored every tree. A swing has no ability row, so `SimTick.swingName = "Attack"` is the
+one name it answers to, and both hands now fold `Talents.damageBp` before the attack
+table (Serpent Form's bonus added after, being the form's damage).
+
+Consequences: the Warrior's One-Handed Weapon Specialization (tagged since its port,
+inert until now) applies; the Hunter tags `"Attack"` with Ranged Weapon Spec so the bow
+itself takes +10%. Both over-apply the same way the note already recorded — the Warrior's
+talent also raises `Shoot` and the off hand, the Hunter's also raises melee Raptor Strike
+via the shared crit — and a talent that must tell a bow from a dagger still needs a name
+on `AutoAttack`, which nothing has needed yet.
+
+Red test first: `the tree's damage bonus reaches a white swing` (30 vs 33 on a 30..30
+fixture, `DamageDoneBp` 0 against 1000). Bench snapshot regenerated: 23 of 30 cells move,
+mean 958 → 956 ticks, no outcome flips. `comps 3 --level 60`: 36 of 36 clean.

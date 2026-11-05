@@ -985,7 +985,8 @@ axis", and it was wrong by the time it was read.
 
 Six of the seven lines are `Talents.damageBp` (Efficiency is a cost, not a line):
 Ranged Weapon Spec 5/5 (+10%) on every damaging shot, Improved Marksmanship 2/2 on
-Aimed Shot, Improved Stings 5/5 on Serpent Sting, Swiftshot 3/3 on Arcane Shot's
+Aimed Shot, Improved Stings 5/5 on Serpent Sting, Ranged Weapon Spec on the bow's own
+white swing as well as every damaging shot, Swiftshot 3/3 on Arcane Shot's
 cooldown, Efficiency 5/5 and Resourcefulness 5/5 as costs. The eighth line is
 Lethal Shots 5/5, which goes to `Traits.CritBonusBp` — the only crit field there is, so
 +5% ranged crit also raises the hunter's melee Raptor Strike. That is the same
@@ -1014,16 +1015,19 @@ Four things a reader will otherwise get wrong:
   against the sim's 6 s is the same contradiction the note recorded; the port keeps the
   sim's cooldown because 26 s would park the button for most of a fight.
 
-Measured: 239 passed and 10 skipped, with two new tests (`the hunter's kit is the
+Measured: 240 passed and 10 skipped, with two new hunter tests (`the hunter's kit is the
 marksmanship build`, `the hunter carries lethal shots as a trait`) asserting the cost,
-cooldown and damage figures above against `Content.partyOf [ "Hunter" ] 24`. The bench
-snapshot **did not move**, because `defaultRoster` seats no Hunter and no bench
-encounter does either — again "the bench cannot see this class", not "nothing changed".
+cooldown and damage figures above against `Content.partyOf [ "Hunter" ] 24`, and a third
+for the swing hook (`the tree's damage bonus reaches a white swing`). The bench snapshot
+moved for the swing hook and not for the Hunter — `defaultRoster` seats no Hunter and no
+bench encounter does either — again "the bench cannot see this class", not "nothing
+changed".
 `comps 6 --level 60` is **35 of 36 cells clean**; the one dirty cell is
 `Warrior/Priest/Paladin/Mage/Warlock graveyard L33` (`cleared=5`, `unresolved=1`), which
-seats no Hunter — it is the known park flake, not this port. The finding to carry
-forward is the mana column: **the Hunter ends every cell at 100% mana**, exactly as the
-Warlock ends at 99-100%. Neither class is resource-limited at level 60, so no hunter
+seats no Hunter — it is the known park flake, not this port. Re-measured at
+`comps 3 --level 60` after the swing hook: **36 of 36 cells clean**. The finding to carry
+forward is the mana column: **the Hunter ends every cell at 99-100% mana**, exactly as
+the Warlock ends at 97-100%. Neither class is resource-limited at level 60, so no hunter
 damage talent will ever show up in a mana floor either.
 
 ## 9. Open work, in priority order

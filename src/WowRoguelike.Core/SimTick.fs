@@ -476,6 +476,14 @@ module SimTick =
         w
         |> logLine (sprintf "%s's %s fizzles (target gone)" (nameOf actorId w) c.Ability.Name))
 
+  /// The name a white swing answers to in `Talents.damageBp`. A swing has no
+  /// ability row to key off, so it is one fixed name for every class: a tree that
+  /// raises auto-attack damage either sets `DamageDoneBp` (One-Handed Weapon
+  /// Specialization) or tags `Spells` with this name. It is also why a talent that
+  /// must tell a bow from a dagger needs a name on `AutoAttack`, which does not
+  /// exist yet — no landed talent cares.
+  let swingName = "Attack"
+
   /// Everyone with a swing timer swings. Party auto-attack only engages Mobs
   /// that are already in the fight, so nobody pulls by accident.
   let advanceSwings (w: World) =
@@ -539,9 +547,15 @@ module SimTick =
               w
             else
               let rolled, w = rollRange attack.Min attack.Max w
-              // The auto-attack runs the same attack table every physical special
-              // does, so a mob dodges both identically.
-              let total = rolled + bonus + e.MeleeDamageBonus
+              // The tree's share of a white swing, on the same principle as the
+              // weapon-strike path in `SimCombat.resolveAbility`: one multiply, and a
+              // character with no talents multiplies by 10000. Serpent Form's bonus is
+              // added after it, being the form's damage rather than the weapon's.
+              let total =
+                (rolled + e.MeleeDamageBonus) * Talents.damageBp swingName e.Talents / 10000 + bonus
+
+              // The auto-attack runs the same attack table every physical special does,
+              // so a mob dodges both identically.
               let total, w = SimCombat.meleeStrike e t.Id total 0 w
 
               w
@@ -568,7 +582,12 @@ module SimTick =
             w
           else
             let rolled, w = rollRange attack.Min attack.Max w
-            let offHand, w = SimCombat.meleeStrike e t.Id ((rolled + bonus + e.MeleeDamageBonus) / 2) 0 w
+            // The off hand takes the same tree's share: a talent that raises white
+            // damage raises both hands.
+            let offRoll =
+              (rolled + e.MeleeDamageBonus) * Talents.damageBp swingName e.Talents / 10000 + bonus
+
+            let offHand, w = SimCombat.meleeStrike e t.Id (offRoll / 2) 0 w
 
             w
             |> dealDamage t.Id offHand
