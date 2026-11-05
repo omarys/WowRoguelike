@@ -995,12 +995,14 @@ reason: one number, and the class has one crit.
 
 Four things a reader will otherwise get wrong:
 
-- **`DamageDoneBp` cannot reach an auto-attack at all.** `advanceSwings`
-  (`src/WowRoguelike.Core/SimTick.fs:481`) adds `serpentBonus` and nothing else — no
-  talent multiplier touches a swing. Ranged Weapon Spec is therefore a kit-row talent
-  by force, and the same hole makes the **Warrior's One-Handed Weapon Spec 5/5 dead
-  weight in its landed port**. A swing-side hook is the fix, and it is worth doing once
-  for both classes rather than in either port.
+- **`DamageDoneBp` could not reach an auto-attack at all.** `advanceSwings`
+  (`src/WowRoguelike.Core/SimTick.fs:481`) added `serpentBonus` and nothing else, so no
+  talent multiplier touched a white swing — which made the **Warrior's landed
+  One-Handed Weapon Spec inert** and forced Ranged Weapon Spec onto kit rows. The swing
+  hook fixed it: `SimTick.swingName` (`"Attack"`) is the one name a swing answers to,
+  both hands fold `Talents.damageBp`, and Serpent Form's bonus is added after the
+  multiply. A talent that has to tell a bow from a dagger still needs a name on
+  `AutoAttack`, which no landed talent has wanted yet.
 - **Swiftshot's Aimed leg is skipped on purpose.** 3/3 is −1.5 s, and `withTalents`
   floors a shortened cooldown at 1.5 s; 6 s − 4.5 s = 1.5 s would shorten the row by
   four and a half seconds to honour a page that gives Aimed Shot **26 s**. Taking the

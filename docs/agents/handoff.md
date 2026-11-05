@@ -4,8 +4,10 @@ Written at commit `aba0722`, with that session's work on top as one WIP commit
 `40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**222/222 tests green**, Release build clean — re-verified on this tree with
-`dotnet test tests/WowRoguelike.Tests -c Release`.
+**240 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
+Release`, 250 total), Release build clean — re-verified 2026-11-05 on the tree at
+`42975a1` (Hunter port `67d7c1c`, swing hook `42975a1`). The 10 skips are the operator's
+parked Bear/Cat/Moonkin specs.
 
 Everything settled — the brief, the architecture rules, the run table, and every
 decision with its reason — is in `docs/agents/domain.md`. Read that first, then §9
@@ -424,6 +426,26 @@ shape without that regression.
 
 ## How to measure without lying to yourself
 
+- **The scaled axis is knife-edge per seed, so quote the seed count.** At
+  `comps 6` with no `--level` (map median: graveyard 33, library 36, armory 39) the
+  tree after the swing hook is **31 of 36 cells clean** — five cells each losing
+  exactly one seed, to a `PartyWiped` and never to a park. The same five cells at
+  **12 seeds each wipe exactly once** (library seeds 6 and 5, graveyard seed 6), so the
+  rate is ~1 seed in 12 and stable, not a class statement: one node in 12 wipes,
+  reproducibly, on that roster. Before the swing hook the same 5 cells × 6 seeds were
+  all `EncounterCleared` and `comps 6` was 35 of 36 clean (the one dirty cell the known
+  park). **A change that cannot weaken the party (+10% white damage) moved this axis by
+  four cells**, which is the proof that a one-seed flip between commits is RNG-path
+  sensitivity, not a regression: quote the scaled axis with its seed count, and read a
+  delta as a class finding only when a cell loses more than one seed.
+- **The wipes are throughput death spirals, not resource or park failures.** Library
+  seed 6, `Warrior/Priest/Mage/Hunter/Warlock`: the party is at full health with the
+  healer at 3085/3085 mana until t=5600, then 6-8 mobs engage and stay engaged for the
+  rest of the run; the Warrior and the Hunter die at t≈6900-7200 under a 1027-1127
+  `Heal` cadence, and the Priest still ends at ~2500/3085. No cell at these medians is
+  healer-mana-limited (`comps 6` ends every roster's healer above 90% mana), so no
+  healer tuning can move a wipe — the failing seed simply pulls a sustained pack that
+  the composition's single-target throughput cannot chew through.
 - **Pin the binary.** Several runs this session were wasted on a DLL rebuilt
   mid-sweep. Build once, copy the DLL aside, record its sha256, and run every
   comparison arm against that copy. A rebuild with `--no-incremental` that leaves
@@ -490,6 +512,11 @@ a bow from a dagger still cannot**: that needs a name on `AutoAttack`, and no la
 talent cares yet. The bench snapshot moved by 23 of 30 cells for this (mean 958 → 956
 ticks, no outcome flips), which is the smallest honest evidence that the swing is now
 where the tree lives, and `comps 3 --level 60` afterwards is **36 of 36 cells clean**.
+On the scaled axis (map median levels) it is **31 of 36 cells clean at 6 seeds**, five
+cells each losing one seed to a throughput wipe — see the instrument bullets above: the
+same five cells wipe on exactly one seed in twelve, and a +10% white-damage buff cannot
+make a party weaker, so those flips are the axis's resolution, not a regression. Nothing
+in the level-60 ladder, the bench or the tests moves.
 
 **Wave A is now one class from done: only the Druid is left**, and the operator has
 parked Bear, Cat and Moonkin, so it is the feral/moonkin specs that have to be measured
@@ -711,7 +738,7 @@ there is no ladder to A/B against; and the OctoWoW research above rewrites the
 same kits. Fixing a kit that is about to be replaced is the definition of doing
 the work twice.
 
-## TODO — the level-scaled ladder has two failing cells
+## TODO — the scaled ladder's one-seed cells: diagnosed, policy question open
 
 Found while re-measuring after the first Shaman change, and **pre-existing**: the same two
 cells fail on `HEAD` with the Shaman edit stashed, so they are not a Shaman regression.
@@ -757,6 +784,43 @@ again: `Warrior/Druid/Mage/Rogue/Warlock` still loses 3 of 6, the two Shaman cel
 clean, and the two 5-of-6 cells both carry a Priest. So a healer's numbers moved cells
 whose roster contains no healer change at all — worth remembering before attributing any
 single cell to a single class.
+
+**Resolved after the Hunter port and the swing hook (2026-11-05).** Forced rebuild, DLL
+md5 `42d25151a89ac0d2c7fc3e686f4e177d`, `comps 6` with no `--level`: **31 of 36 cells
+fully clean**, every failure a `PartyWiped` and every one exactly one seed of six.
+
+| roster | map | seeds cleared | median ticks |
+|---|---|---|---|
+| Warrior/Druid/Mage/Rogue/Warlock | armory | 5 of 6 | 7836 |
+| Warrior/Paladin/Mage/Rogue/Warlock | armory | 5 of 6 | 8186 |
+| Warrior/Priest/Mage/Hunter/Warlock | graveyard | 5 of 6 | 10468 |
+| Warrior/Priest/Mage/Hunter/Warlock | library | 5 of 6 | 9031 |
+| Warrior/Priest/Mage/Rogue/Hunter | library | 5 of 6 | 9217 |
+
+The old worst cell — `Warrior/Druid/Mage/Rogue/Warlock library`, 3 of 6 — is now clean,
+and the losing cells have spread to armory and graveyard. Three probes settle what that
+means:
+
+- **The failure is a property of the seed, not a rate.** Re-run at 12 seeds, the three
+  sampled cells wipe exactly once each (library seeds 6 and 5, graveyard seed 6): 1 in 12,
+  the same seed that failed at six. A one-seed cell is not "17% broken", it is one node.
+- **The swing hook moved this axis without being able to weaken the party.** The
+  pre-hook binary (`67d7c1c`) clears all five cells at seeds 1-6 and reads **35 of 36**;
+  the hook is +10% white Warrior damage, so the four-cell delta is RNG-path divergence —
+  different kill order, different path, a different seed's pull arrives at a different
+  time. This is the clearest evidence yet that the scaled axis is measuring paths.
+- **The wipes are throughput, not park and not mana.** Traced library seed 6
+  (`Warrior/Priest/Mage/Hunter/Warlock`): full health with the Priest at 3085/3085 mana
+  until t=5600, then 6-8 mobs engage and never disengage; Warrior and Hunter die at
+  t≈6900-7200 under a 1027-1127 `Heal` cadence, and the Priest finishes at ~2500/3085.
+  `comps 6` ends every roster's healer above 90% mana, so no healer tuning can move a wipe.
+
+So this TODO is **not** a class bug and there is no code fix queued for it: the open
+question is a policy one — either a level-median party is allowed to lose a sustained
+6-8 mob pack on one map seed in twelve, or the pull is too large and the fix belongs in
+content density or the party's target selection, not in the ladder. Until that is decided,
+quote the scaled axis with its seed count and treat any one-seed flip between commits as
+path noise.
 
 ## Working agreements this project keeps re-learning
 
