@@ -2164,31 +2164,100 @@ let ``per-ability attribution adds up to the per-entity totals`` () =
     "the log should name abilities, not only swings"
   )
 
-/// The warlock's kit is the rank-for-rank level-24 one: no Banish (28), no
-/// Hellfire (30), and Corruption a 2.0 s cast because Improved Corruption does
-/// not exist yet at 24.
+/// The warlock's kit is the rank-for-rank level-24 one: no Banish (28), no Hellfire
+/// (30) — and underneath it, the operator's Affliction build, which is the part that
+/// changes every number here. Cast times shrink (Bane, Improved Corruption), crit
+/// arrives on the two Destruction spells (Devastation), and the range is Grim Reach's
+/// 10 tiles rather than the table's 8.
 [<Fact>]
-let ``the warlock's kit is the level-24 one`` () =
+let ``the warlock's kit is the level-24 one, under the affliction build`` () =
   let warlock =
     Content.partyOf [ "Warrior"; "Warlock" ] 24 |> List.find (fun e -> e.Name = "Warlock")
 
-  let effectsOf name =
-    (warlock.Abilities |> List.find (fun a -> a.Name = name)).Effects
+  let ability name = warlock.Abilities |> List.find (fun a -> a.Name = name)
+  let effectsOf name = (ability name).Effects
 
-  Assert.Equal<Effect list>([ SpellDamage(86, 99) ], effectsOf "Shadow Bolt")
+  // Devastation 5/5 is `CritBonus 500` on the ability, because the crit roll belongs
+  // to the spell that lands rather than to the caster (same shape as the healer lines).
+  Assert.Equal<Effect list>([ SpellDamage(86, 99); CritBonus 500 ], effectsOf "Shadow Bolt")
   Assert.Equal<Effect list>([ DamageOverTime(secTicks 18.0, 12) ], effectsOf "Corruption")
   Assert.Equal<Effect list>([ DamageOverTime(secTicks 24.0, 7) ], effectsOf "Curse of Agony")
   Assert.Equal<Effect list>(
-    [ SpellDamage(45, 45); DamageOverTime(secTicks 15.0, 6) ],
+    [ SpellDamage(45, 45); DamageOverTime(secTicks 15.0, 6); CritBonus 500 ],
     effectsOf "Immolate"
   )
   Assert.Equal<Effect list>([ Sleep(secTicks 10.0) ], effectsOf "Fear")
-  // Corruption is a cast, not instant.
-  Assert.Equal(
-    secTicks 2.0,
-    (warlock.Abilities |> List.find (fun a -> a.Name = "Corruption")).CastTicks
-  )
+
+  // Bane 5/5 takes half a second off Shadow Bolt and Immolate; Improved Corruption
+  // 5/5 takes a second and a half off Corruption, which is OctoWoW's 0.3 s a point
+  // and leaves half a second where 1.12 would leave none.
+  Assert.Equal(secTicks 2.5, (ability "Shadow Bolt").CastTicks)
+  Assert.Equal(secTicks 0.5, (ability "Corruption").CastTicks)
+  Assert.Equal(secTicks 1.5, (ability "Immolate").CastTicks)
+
+  // Grim Reach 2/2 is a range, so it is baked into the Affliction ranks: 8 → 10.
+  Assert.Equal(10, (ability "Corruption").Range)
+  Assert.Equal(10, (ability "Curse of Agony").Range)
+  Assert.Equal(8, (ability "Shadow Bolt").Range)
+
   Assert.Equal(5, List.length warlock.Abilities)
+
+/// Fel Concentration 2/2 is a `Traits` field, like the two healer trees' Nature's
+/// Focus and Spiritual Focus: 70% off the chance a hit interrupts a cast.
+[<Fact>]
+let ``the warlock carries fel concentration as a trait`` () =
+  let warlock =
+    Content.partyOf [ "Warrior"; "Warlock" ] 24 |> List.find (fun e -> e.Name = "Warlock")
+
+  Assert.Equal(7000, warlock.PushbackResistanceBp)
+
+/// The three damage talents land on three different things, and the DoT one only
+/// works because `SimCombat` folds the tree's share into `perTick` when the aura is
+/// applied — a `Corrupted` carries no caster by the time it fires.
+[<Fact>]
+let ``the warlock's damage talents reach direct hits and the dot alike`` () =
+  let warlock =
+    Content.partyOf [ "Warrior"; "Warlock" ] 24 |> List.find (fun e -> e.Name = "Warlock")
+
+  let mob = Content.mob 100 "Mob" CreatureType.Humanoid 24 10000 1000 None [] None { X = 4; Y = 4 }
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 12 10
+      Entities = [ warlock; mob ]
+      Pending = []
+      Rng = Rng.streamsOf 7UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  // Shadow Mastery 5/5 (+10%) is on Shadow Bolt, Improved Curse of Agony 3/3 (+10%)
+  // on the curse and Aftermath 3/3 (+6%) on Immolate. Corruption takes Shadow Mastery
+  // only — it is a Shadow spell and Aftermath names Immolate.
+  let tagOf name = Talents.damageBp name warlock.Talents
+  Assert.Equal(11000, tagOf "Shadow Bolt")
+  Assert.Equal(11000, tagOf "Corruption")
+  Assert.Equal(11000, tagOf "Curse of Agony")
+  Assert.Equal(10600, tagOf "Immolate")
+  Assert.Equal(10000, tagOf "Fear")
+
+  // Applied through `resolveAbility`, the same path a finished cast takes — Corruption is
+  // a half-second cast under this build, so casting it through `ApplyAt` would only
+  // start it. Rank 3 Corruption's 12 a tick becomes 13 at +10%, and Curse of Agony's 7
+  // stays 7 (7 * 1.1 = 7.7 rounds down), which is why the assertion reads Corruption.
+  let corruption =
+    warlock.Abilities |> List.find (fun a -> a.Name = "Corruption")
+
+  let cursed = SimCombat.resolveAbility warlock.Id mob.Id corruption w
+
+  let perTick =
+    (cursed.Entities |> List.find (fun e -> e.Id = mob.Id)).Auras
+    |> List.pick (function
+      | Corrupted(_, n) -> Some n
+      | _ -> None)
+
+  Assert.Equal(13, perTick)
 
 /// The researched gear totals, straight from `.pi/research/level24/warlock.md`:
 /// Str 23, Agi 39, Sta 57, Int 82, Spi 73 on five unfilled slots.

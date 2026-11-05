@@ -1214,10 +1214,12 @@ module Talents =
   /// Percent this character adds to one spell's damage, in basis points: the
   /// tree's own bonus plus the spell's own line. The damage twin of `healBp`.
   ///
-  /// shortcut: periodic damage is not covered. A `DamageOverTime` track carries no
-  /// ability name by the time it ticks, so a talent that only raises a DoT (Improved
-  /// Moonfire's initial hit is direct, its burn is not) has to wait for the aura to
-  /// carry its source. Direct hits, weapon strikes and Multi-Shot all take it.
+  /// Covered: direct hits, weapon strikes and Multi-Shot, and — since the warlock
+  /// port — periodic damage, which `SimCombat` scales at application time because a
+  /// `Corrupted` aura carries no source by the time it ticks. What is still not
+  /// covered is *per-source* identity: every damage-over-time shares one aura, so a
+  /// talent that has to tell Corruption's burn from Curse of Agony's (Malediction)
+  /// needs the aura split first, not a multiplier.
   let damageBp (name: string) (t: Talents) =
     10000
     + t.DamageDoneBp

@@ -922,6 +922,57 @@ single cell at the level the balance question is asked at. Do not read that as "
 is free": the axis that would show it is one where a Paladin runs out of mana, and no cell
 came close (the Paladin seat ends every arm above 60% mana).
 
+### Warlock: eight of seventeen, and the DoT that could not take a talent
+
+Affliction 31 / Demonology 0 / Destruction 20 — the operator's build — lands **eight of
+seventeen**, and unlike every port before it, this one needed the model changed to reach
+eight. `SpellTalent.DamageBp` already existed (the Mage's Fire Power put it there), but
+`Talents.damageBp` only reached direct hits. A `DamageOverTime` track is an aura on the
+*target*: by the time a `Corrupted` fires it has no caster and no ability name, so
+Improved Curse of Agony had nowhere to hang.
+
+**The fix is one line in the `DamageOverTime` case of `SimCombat.resolveAbility`:** fold the
+tree's share into `perTick` when the aura is applied, not when it ticks. A build never
+respecs inside a run — `Talents` says so in its own doc comment — so a multiplier fixed at
+cast time is the same number as one applied a second later, without an aura that has to
+remember who applied it. That makes **Improved Curse of Agony and Shadow Mastery talents
+rather than rank-table edits**, and it retroactively covers the case `damageBp`'s
+`shortcut:` comment named (Improved Moonfire's burn), which can now be ported as data.
+A cost, stated in the aura: two warlocks in one party would keep the first caster's share,
+because the second only refreshes the aura. There is one warlock build in the sim.
+
+Three things in this tree punish a reader who assumes:
+
+- **Shadow Bolt is a Destruction spell.** It is called Shadow Bolt and it reads as
+  Affliction, and Devastation 5/5 (+5% Destruction crit) lands on it. Immolate takes the
+  same `CritBp`; Corruption and Curse of Agony take none.
+- **Improved Corruption 5/5 leaves half a second, not an instant.** OctoWoW's rank is 0.3 s
+  a point; 1.12's is 0.4, which is what makes it instant at five. Copying the vanilla shape
+  here would have made the talent strictly stronger than the reference.
+- **Aftermath 3/3 is the port's one known overstatement.** The tree raises only Immolate's
+  burn; `DamageBp` covers the whole row, so the impact is 6% too high. Recorded here rather
+  than quietly applied, and the alternative — splitting `SpellDamage` from `DamageOverTime`
+  in `SpellTalent` — is a second field for a 6% error on one row of one spell.
+
+Grim Reach 2/2 has no talent shape at all: `Rank.Range` is a plain int, so it is baked into
+`corruptionRanks` and `curseOfAgonyRanks` (8 → 10 tiles) with a comment naming the talent.
+Fel Concentration 2/2 is `Traits.PushbackResistanceBp = 7000`, the third tree to reach for
+that field. **Demonic Swiftness is dead weight** — the build takes it, and there is no Imp
+and no Succubus for it to speed up; it is the clearest example yet of a payload talent that
+costs nothing to skip.
+
+One test trap, and it is new: **Corruption is now a cast**, so a test that fires it through
+`ApplyAt` only *starts* a half-second cast and finds no aura on the target. Assert through
+`SimCombat.resolveAbility`, which is the path a finished cast takes anyway.
+
+Measured on a rebuilt Harness: the bench snapshot **did not move**, because `defaultRoster`
+is Warrior/Priest/Rogue/Mage/Druid and no bench encounter seats a Warlock — read that as
+"the bench cannot see this class", not as "nothing changed". `comps 6 --level 60` is **36 of
+36 cells fully clean at six seeds**. The finding worth carrying forward is in the mana
+column: **the Warlock ends every arm at 99-100% mana**, so the class is not mana-limited at
+all and its damage talents are visible only in ticks, never in a mana floor. Any future
+question about a warlock's sustain needs a different instrument than the mana column.
+
 ## 9. Open work, in priority order
 0. **The balance-and-story programme: decided with the owner, under way.** It
    governs items 3 to 7 below rather than replacing them.

@@ -815,6 +815,14 @@ module SimCombat =
           |> logLine (sprintf "%s's %s hits %s for %d" actor.Name ability.Name targetName amount)
 
         | DamageOverTime(duration, perTick) ->
+          // The tree's per-spell damage share is fixed at cast time, not read on every
+          // tick. By the time a `Corrupted` fires it carries no caster and no ability
+          // name (`Domain.fs:234`), and a build never respecs inside a run, so baking
+          // the multiplier into `perTick` here is the same number as multiplying a
+          // second later — without an aura that has to remember who applied it.
+          // Improved Curse of Agony and Shadow Mastery are the two that need it.
+          let perTick = perTick * Talents.damageBp ability.Name actor.Talents / 10000
+
           match tryEntity targetId w with
           | Some t ->
             w

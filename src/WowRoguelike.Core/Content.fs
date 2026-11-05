@@ -544,9 +544,17 @@ module Content =
   let shadowBolt = rank24 shadowBoltRanks
 
   /// Corruption ranks 1-4: 40, 90, 222 and 324 Shadow over a duration that grows
-  /// 12 → 15 → 18 s. A 2.0 s cast in vanilla on every rank — Improved Corruption
-  /// is a talent, and no warlock here has it. Rank 3's 37 every 3 s is 12 a
-  /// second, which is the file's number (the table's 222 is 12.3 a second).
+  /// 12 → 15 → 18 s. A 2.0 s cast on every rank, which is the table's number; the
+  /// build's Improved Corruption 5/5 takes 1.5 s off it through `warlockTalents`,
+  /// leaving half a second — not the instant 1.12's 0.4 s a point makes it, because
+  /// OctoWoW's rank is 0.3 s a point. The talent is a talent, not a rank edit, so
+  /// this row keeps the untalented number and the tree does the subtraction.
+  /// Rank 3's 37 every 3 s is 12 a second, which is the file's number (the table's
+  /// 222 is 12.3 a second).
+  ///
+  /// The 10-tile range is Grim Reach 2/2 (+20% on Affliction spells, 8 → 9.6 rounded
+  /// to the tile grid). Baked rather than modelled: `Rank.Range` is a plain int and
+  /// there is one warlock build in the sim, so a range talent has nowhere else to go.
   let corruptionRanks: AbilityDef =
     { Name = "Corruption"
       Resource = Mana
@@ -560,7 +568,7 @@ module Content =
               Cost = cost
               CastTicks = secTicks 2.0
               CooldownTicks = ticks 0
-              Range = 8
+              Range = 10
               Effects = [ DamageOverTime(secTicks duration, perTick) ] } ] }
 
   let corruption = rank24 corruptionRanks
@@ -568,10 +576,11 @@ module Content =
   /// Curse of Agony ranks 1-4: 24 s, instant, escalating in WoW. Flat here at the
   /// per-second average: 4 / 7 / 14 / 21, where the table's totals are 84 / 180 /
   /// 324 / 504. Rank 2's 7 a second (168) is the file's number; the table's 7.5
-  /// rounds to it.
+  /// rounds to it. Range 10 is Grim Reach, as on Corruption.
   /// shortcut: every damage-over-time shares one `Corrupted` aura, so Corruption
   /// and Curse of Agony refresh each other instead of stacking. Split the aura
-  /// by source if the warlock ever needs both on one target.
+  /// by source if the warlock ever needs both on one target — OctoWoW's
+  /// Malediction is the talent that would ask for it.
   let curseOfAgonyRanks: AbilityDef =
     { Name = "Curse of Agony"
       Resource = Mana
@@ -585,7 +594,7 @@ module Content =
               Cost = cost
               CastTicks = ticks 0
               CooldownTicks = ticks 0
-              Range = 8
+              Range = 10
               Effects = [ DamageOverTime(secTicks 24.0, perTick) ] } ] }
 
   let curseOfAgony = rank24 curseOfAgonyRanks
@@ -3555,6 +3564,77 @@ module Content =
                 CritBp = critBp
                 CastTicksOff = ticks 0 } ] }
 
+  /// Warlock Affliction 31 / Demonology 0 / Destruction 20 under OctoWoW's tree — the
+  /// operator's build, decoded in `.pi/research/octowow/warlock.md` §6. **Eight of the
+  /// seventeen talents in it are expressible as data**, and this is the first class where
+  /// three of them are only expressible because of a model change made for it: `SpellTalent`
+  /// grew `DamageBp` for the Mage's Fire Power, and the warlock port extended it to
+  /// periodic damage by scaling `perTick` at application time (`SimCombat.fs`, the
+  /// `DamageOverTime` case). Before that, Improved Curse of Agony had to be baked into a
+  /// rank table and stopped being a talent at all.
+  ///
+  /// - Improved Corruption 5/5: `CastTicksOff = secTicks 1.5` — *off*, not "to" — 2.0 s →
+  ///   0.5 s. Not instant: OctoWoW's rank is 0.3 s a point, not 1.12's 0.4, so five points
+  ///   leave half a second where vanilla would leave none.
+  /// - Bane 5/5: `CastTicksOff = secTicks 0.5` on Shadow Bolt **and** Immolate.
+  /// - Devastation 5/5: `CritBp = 500` on both Destruction spells in the kit. Shadow Bolt is
+  ///   a Destruction spell in 1.12 despite being called Shadow Bolt, which is the kind of
+  ///   thing this tree rewards knowing.
+  /// - Improved Curse of Agony 3/3: `DamageBp = 1000` on the curse, periodic, which is the
+  ///   line the DoT change exists for.
+  /// - Shadow Mastery 5/5: `DamageBp = 1000` on **Corruption and Shadow Bolt**, the two
+  ///   Shadow spells in the kit (Immolate is Fire and does not take it).
+  /// - Aftermath 3/3: `DamageBp = 600` on Immolate. The tree raises only the burn, not the
+  ///   impact, and `DamageBp` covers the whole row — so the impact is 6% too high and this
+  ///   is the port's one known overstatement. Named in §8 rather than quietly applied.
+  /// - Grim Reach 2/2 is not here: it is a range, and `Rank.Range` is a plain int, so it is
+  ///   baked into `corruptionRanks` and `curseOfAgonyRanks` with a comment saying so.
+  /// - Fel Concentration 2/2 is a `Traits.PushbackResistanceBp` of 7000, beside the two
+  ///   healer trees that set it the same way.
+  ///
+  /// The nine that need an axis are named with their missing field in §5(b). Three are
+  /// worth memorising because they repeat across classes: **Suppression** needs a resist
+  /// model (there is none — nothing in the sim can miss), **Siphon Life** needs an effect
+  /// that damages one body and heals another, and **Malediction** needs the `Corrupted`
+  /// aura split per source, which is the `shortcut:` already sitting on
+  /// `curseOfAgonyRanks`. **Demonic Swiftness is dead weight** — the build takes it and the
+  /// sim has no demon for it to speed up.
+  ///
+  /// shortcut: Fel Concentration is Affliction-only in the payload and class-wide here,
+  /// because `PushbackResistanceBp` is a `Traits` field and the pushback roll does not know
+  /// which spell is being cast. A warlock who takes three hits while casting Fear is more
+  /// protected than the reference says.
+  let private warlockTalents =
+    { Talents.none with
+        Spells =
+          [ { Spell = "Shadow Bolt"
+              CostBp = 0
+              HealBp = 0
+              DamageBp = 1000
+              CritBp = 500
+              CastTicksOff = secTicks 0.5 }
+            { Spell = "Corruption"
+              CostBp = 0
+              HealBp = 0
+              DamageBp = 1000
+              CritBp = 0
+              CastTicksOff = secTicks 1.5 }
+            { Spell = "Curse of Agony"
+              CostBp = 0
+              HealBp = 0
+              DamageBp = 1000
+              CritBp = 0
+              CastTicksOff = ticks 0 }
+            { Spell = "Immolate"
+              CostBp = 0
+              HealBp = 0
+              DamageBp = 600
+              CritBp = 500
+              CastTicksOff = secTicks 0.5 } ] }
+
+  /// Fel Concentration 2/2: a 70% chance not to lose casting time to damage.
+  let private warlockTraits = { Traits.none with PushbackResistanceBp = 7000 }
+
   /// Druid 5/0/46, Moonglow into Swiftmend: Gift of Nature 5/5 (+10% healing),
   /// Tranquil Spirit 5/5 (-10% Healing Touch mana), Improved Rejuvenation 3/3
   /// (+15% Rejuvenation), Nature's Focus 5/5 (-70% pushback), Reflection 3/3
@@ -4514,6 +4594,11 @@ module Content =
   /// and Voidwalker are still out, and adding a demon here would be the second.
   /// Life Tap has no effect in the vocabulary
   /// (nothing moves health into mana) and is left out for the same reason.
+  ///
+  /// The build is Affliction 31 / Demonology 0 / Destruction 20 (the operator's,
+  /// decoded in `.pi/research/octowow/warlock.md` §6): `warlockTalents` carries the
+  /// eight expressible talents and `warlockTraits` carries Fel Concentration, which
+  /// is a `Traits` field rather than a per-spell line.
   let private warlock (buffs: PartyBuffKind list) (level: int) (id: int) =
     heroStats
       buffs
@@ -4522,9 +4607,9 @@ module Content =
       "Warlock"
       Dps
       Cloth
-      Traits.none
+      warlockTraits
       { Base = gnomeWarlockBase
-        Talents = Talents.none
+        Talents = warlockTalents
         Gear =
           [ gear "Green Tinted Goggles" None 35 (0, 0, 8, 0, 7)
             gear "Talbar Mantle" None 30 (0, 0, 3, 6, 0)
@@ -4549,9 +4634,11 @@ module Content =
         ]
       Mana
       partyThreatBp
-      (AbilityDef.kitAt
-        level
-        [ shadowBoltRanks; corruptionRanks; curseOfAgonyRanks; warlockImmolateRanks; fearRanks ])
+      (withTalents
+        warlockTalents
+        (AbilityDef.kitAt
+          level
+          [ shadowBoltRanks; corruptionRanks; curseOfAgonyRanks; warlockImmolateRanks; fearRanks ]))
       { X = 3; Y = 6 }
 
   /// The Shaman's totems, at the ranks a level-60 casts. Each is a `Summon`, so it
