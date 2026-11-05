@@ -1009,11 +1009,16 @@ module Content =
 
   let shieldBlock = rank24 shieldBlockRanks
 
-  /// Shield Wall rank 1: 75% of all damage taken removed for 10 s, free, on the 30
+  /// Shield Wall rank 1: 75% of all damage taken removed for 12 s, free, on the 20
   /// minute cooldown that makes it a decision rather than a rotation. One rank at
   /// every level in the table, which trains it at 28; this ladder carries it at 24
   /// because the level-24 Warrior is the party's shield tank and Shield Wall is
   /// part of that kit — moving it to 28 changes who can be hit without the button.
+  ///
+  /// The duration is twelve seconds and the cooldown twenty minutes because the
+  /// Warrior's build spends Improved Shield Wall 2/2 (+2 s, -10 min). Vanilla's
+  /// numbers are 10 s on 30 min; baking the talent in here is the same treatment a
+  /// rank's numbers get, and `warriorTalents` says so beside the build.
   let shieldWallRanks: AbilityDef =
     { Name = "Shield Wall"
       Resource = Rage
@@ -1026,7 +1031,7 @@ module Content =
             CastTicks = ticks 0
             CooldownTicks = secTicks 1800.0
             Range = 0
-            Effects = [ ReducesDamage(secTicks 10.0, 7500) ] } ] }
+            Effects = [ ReducesDamage(secTicks 12.0, 7500) ] } ] }
 
   let shieldWall = rank24 shieldWallRanks
 
@@ -1615,8 +1620,16 @@ module Content =
 
   let intercept = rank24 interceptRanks
 
-  /// Disarm (level 18): the target's weapon for 10 s, for 20 rage on a 20 s
+  /// Disarm (level 18): the target's weapon for 10 s, for 20 rage on a 60 s
   /// cooldown. One rank, and a level-24 Warrior has it.
+  ///
+  /// The cooldown is one minute because the tables say so — `.pi/research/
+  /// level24/warrior.md:165` ("20 rage, 1 min CD") and `.pi/research/ranks/
+  /// warrior.md:130` (column `60`) — where this row previously said twenty
+  /// seconds. The OctoWoW build is what surfaced it: Improved Disarm 2/2 takes
+  /// twenty seconds off, and taking twenty off twenty is a Disarm on every tick,
+  /// which is what a wrong base number looks like once a talent is applied to it.
+  /// One minute minus twenty is forty and no floor is needed to make that sane.
   let disarmRanks: AbilityDef =
     { Name = "Disarm"
       Resource = Rage
@@ -1627,7 +1640,7 @@ module Content =
         [ { Level = 18
             Cost = 20
             CastTicks = ticks 0
-            CooldownTicks = secTicks 20.0
+            CooldownTicks = secTicks 60.0
             Range = 1
             Effects = [ Disarm(secTicks 10.0); Threat(200) ] } ] }
 
@@ -1661,6 +1674,12 @@ module Content =
   /// Parties generate threat at 1.0x; the Tank's stance at 5.0x.
   let private partyThreatBp = 10000
   let private tankStanceBp = 50000
+
+  /// Defensive Stance's threat, plus Defiance 5/5's twenty percent. A separate
+  /// constant rather than an edit to `tankStanceBp`, because the Bear form uses
+  /// that one and has no Defiance: the stance and the stance-plus-a-tree are two
+  /// different numbers and only the Warrior's sheet gets this one.
+  let private warriorThreatBp = 60000
   let private mobThreatBp = 10000
 
   /// Resource regeneration per Tick. A Tick is 1/20 s, so this is 20 a second:
@@ -3405,6 +3424,41 @@ module Content =
             CastTicksOff = secTicks 0.5 }
           :: totemDiscount }
 
+  /// Warrior 3/0/48 under OctoWoW's tree — the operator's own build
+  /// (`/talents/warrior/?points=Y--VYFoKQSopQQYB`: Arms 3 in Improved Heroic
+  /// Strike, Protection 48 in seventeen talents). Six of its eighteen talents are
+  /// expressible as data and they are the six here; the other twelve each need a
+  /// model axis and are named with it in `.pi/research/octowow/warrior.md` §4.
+  ///
+  /// - Improved Heroic Strike 3/3: three rage off a fifteen-rage ability, exact
+  ///   only while every Heroic Strike rung costs fifteen (it does).
+  /// - Improved Taunt 2/2, Improved Shield Wall 2/2: `CooldownOff`.
+  /// - Improved Disarm 2/2: twenty seconds off the row's sixty. This is the talent
+  ///   that pointed at a wrong base number — the row said twenty, so the talent took
+  ///   all of it — and the floor in `withTalents` is the guard for the next one.
+  /// - Defiance 5/5: not here — it is `warriorThreatBp`, because threat is a field
+  ///   on the sheet rather than a line about a spell.
+  /// - One-Handed Weapon Specialization 5/5: `DamageDoneBp`. It also raises `Shoot`,
+  ///   the tree's one over-application: a crossbow is not a one-handed melee weapon.
+  ///
+  /// shortcut: Shield Wall's "+2 sec duration" is baked into its row as twelve
+  /// seconds rather than modelled, the same way a rank's numbers are baked into its
+  /// `Ability`; `ReducesDamage` carries a duration, not a talent.
+  let private warriorTalents =
+    { Talents.none with
+        DamageDoneBp = 1000
+        CooldownOff =
+          [ "Taunt", secTicks -2.0
+            "Disarm", secTicks -20.0
+            "Shield Wall", secTicks -600.0 ]
+        Spells =
+          [ { Spell = "Heroic Strike"
+              CostBp = 2000
+              HealBp = 0
+              DamageBp = 0
+              CritBp = 0
+              CastTicksOff = ticks 0 } ] }
+
   /// Paladin 31/20/0, the standard PvE holy build: Divine Intellect 5/5 (+10%
   /// Int), Spiritual Focus 5/5 (-70% pushback), Healing Light 3/3 (+12% Flash of
   /// Light), Illumination 5/5 (a heal crit refunds its whole cost) and Holy Power
@@ -3495,7 +3549,15 @@ module Content =
       { a with
           ResourceCost = a.ResourceCost * (10000 - Talents.costBp a.Name (heals a) t) / 10000
           CastTicks = max (ticks 0) (a.CastTicks - Talents.castOff a.Name t)
-          CooldownTicks = max (ticks 0) (a.CooldownTicks + Talents.cooldownOff a.Name t)
+          CooldownTicks =
+            // A talent may shorten a cooldown but not past 1.5 s, the fastest a 1.12
+            // player can press anything. The floor only applies to a cooldown a
+            // talent touched, so an ability with no cooldown does not sprout one:
+            // Improved Disarm 2/2 takes all 20 s off Disarm's row, and a zero-
+            // cooldown Disarm is a weapon lockout on every tick for 20 rage.
+            match Talents.cooldownOff a.Name t with
+            | off when off = ticks 0 -> a.CooldownTicks
+            | off -> max (secTicks 1.5) (a.CooldownTicks + off)
           // A tree that raises one spell's crit raises it on the ability, because
           // the crit roll belongs to the heal that lands, not to the healer.
           Effects =
@@ -3717,7 +3779,7 @@ module Content =
   let private warrior (buffs: PartyBuffKind list) (level: int) (id: int) =
     let sheet =
       { Base = humanWarriorBase
-        Talents = Talents.none
+        Talents = warriorTalents
         Gear =
           [ gear "Sparkleshell Mantle" (Some 24) 161 (0, 4, 10, 0, 0)
             gear "Sentry Cloak" (Some 19) 21 (0, 4, 5, 0, 0)
@@ -3739,11 +3801,13 @@ module Content =
     let traits = if shielded then warriorTraits else warriorTraits |> fun t -> { t with BlockChanceBp = 0; BlockValue = 0 }
 
     let abilities =
-      AbilityDef.kitAt
-        level
-        ([ tauntRanks; heroicStrikeRanks; sunderArmorRanks ]
-         @ (if shielded then [ shieldBashRanks; shieldBlockRanks; shieldWallRanks ] else [])
-         @ [ chargeRanks; interceptRanks; disarmRanks; executeRanks; shootRanks ])
+      withTalents
+        warriorTalents
+        (AbilityDef.kitAt
+          level
+          ([ tauntRanks; heroicStrikeRanks; sunderArmorRanks ]
+           @ (if shielded then [ shieldBashRanks; shieldBlockRanks; shieldWallRanks ] else [])
+           @ [ chargeRanks; interceptRanks; disarmRanks; executeRanks; shootRanks ]))
 
     heroStats
       buffs
@@ -3762,7 +3826,7 @@ module Content =
         (60, { Min = 53; Max = 100; Ticks = secTicks 1.6; Range = 1 })
         ]
       Rage
-      tankStanceBp
+      warriorThreatBp
       abilities
       { X = 1; Y = 5 }
 

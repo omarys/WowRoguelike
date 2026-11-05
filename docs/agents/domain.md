@@ -758,6 +758,31 @@ survive to reach the room more often, or reach it in a different shape. Do not c
 Caveat that matters when quoting any of it: **3 seeds per cell**, so `dead=33%` is one
 seed out of three, and a single-cell difference is not a ranking.
 
+### Warrior: the OctoWoW build, six of eighteen landed
+
+The operator's own build (`/talents/warrior/?points=Y--VYFoKQSopQQYB`, Arms 3 /
+Protection 48) is in `warriorTalents`, part-landed: six of its eighteen talents are
+expressible as data today — Improved Heroic Strike (Heroic Strike 15 → 12 rage),
+Improved Taunt (10 → 8 s), Improved Disarm, Defiance (`warriorThreatBp = 60000`, a
+separate constant from the Bear's `tankStanceBp`), One-Handed Weapon Specialization
+(`DamageDoneBp`) and Improved Shield Wall (duration baked into the row, cooldown via
+`CooldownOff`). The other twelve each need a model axis and are listed with it in
+`.pi/research/octowow/warrior.md` §4.
+
+**Two things that surfaced on the way in, both worth knowing.** First, *Disarm's base
+cooldown was wrong*: the row said 20 s and both tables say 60 s
+(`.pi/research/level24/warrior.md:165`, `.pi/research/ranks/warrior.md:130`). Improved
+Disarm 2/2 takes twenty seconds off, and twenty off twenty is a zero-cooldown weapon
+lockout on every tick — a wrong base number is invisible until a talent is applied to
+it. Second, `withTalents` clamps a talent-shortened cooldown at **1.5 s** (and only a
+cooldown a talent touched), so no future tree can zero a row; the clamp is not a
+balance number, it is the fastest a 1.12 player can press anything.
+
+Measured after the port: bench 30/30 still `EncounterCleared`, every seed moved by
+≲10% and mostly gained health; `--level 60` 36/36 clean, the level-scaled axis still
+35/36 with the same single library wipe. So the tank's six talents cost no cell —
+which is what a data-only port should cost.
+
 ## 9. Open work, in priority order
 
 0. **The balance-and-story programme: decided with the owner, under way.** It

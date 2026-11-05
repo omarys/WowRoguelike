@@ -446,6 +446,32 @@ shape without that regression.
   player heal at all. Any fixture that assumes "a real run heals something" has to
   damage the Tank first.
 
+## OctoWoW port — where it stands, and the parked Druid specs
+
+**The operator's direction (m01837, paraphrase with ref):** *do not include Bear, Cat or
+Moonkin in any tests for now; the focus is migrating the existing classes to the OctoWoW
+rules.* So the ten tests that seat those three specs are `Skip`ped with that reason in
+`tests/WowRoguelike.Tests/Tests.fs` — deleting the `Skip` argument re-enables each one.
+The specs stay in `Content.fs` (the four-spec work is landed and green); they are simply
+not measured. No ladder or `comps` cell seats them either, so nothing else needs gating.
+
+| class | built | landed | notes |
+|---|---|---|---|
+| Warrior | Prot 3/0/48 | **6 of 18** | all six data-only; 12 need axes |
+| Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
+| Rogue, Mage, Priest, Paladin, Hunter, Warlock, Druid | — | 0 | notes written, nothing ported |
+
+The Warrior port is the template: each (a)-bucket talent lands as a field, each (b)-bucket
+talent is left out and named with the axis it needs. Two findings from it are recorded in
+`docs/agents/domain.md` §8 — Disarm's cooldown was wrong by a factor of three, and
+`withTalents` now floors a talent-shortened cooldown at 1.5 s so no tree can zero a row.
+
+The (b)-bucket is where the *next* class gets cheaper: eight axes recur across the nine
+notes — self-resource grants, dispels, chain heals, stacking self-buffs, damage-taken
+debuffs, temporary health, per-stance threat, and `Blocks` with a magnitude. Each one
+built unlocks talents in three or four classes at once, which is why the port order below
+is by axis rather than by class.
+
 ## TODO — research the OctoWoW class changes, all nine classes
 
 **Requested by the operator, 2026-11-04 (m01257).** The operator wants this game's

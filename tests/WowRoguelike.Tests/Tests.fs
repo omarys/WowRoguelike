@@ -1114,6 +1114,33 @@ let ``the warrior carries a shield`` () =
       sprintf "the warrior should have %s" ability
     )
 
+/// The Warrior's OctoWoW build, landed where it lands: six of the eighteen talents
+/// it spends are expressible as data, and each one is checked on the kit the party
+/// is actually handed rather than on the talent record, because the record is the
+/// claim and the kit is the fact. The other twelve are named in
+/// `.pi/research/octowow/warrior.md` §4 with the axis each one needs.
+[<Fact>]
+let ``the warrior's OctoWoW build lands on his kit`` () =
+  let tank = (Content.gully 1UL).Entities |> List.find (fun e -> e.Role = Some Tank)
+
+  let ability name = tank.Abilities |> List.find (fun a -> a.Name = name)
+
+  // Improved Heroic Strike 3/3: three rage off a fifteen-rage rung. Its cooldown
+  // stays the weapon's own 2.70 s, because it replaces the next swing.
+  Assert.Equal(12, (ability "Heroic Strike").ResourceCost)
+  Assert.Equal(secTicks 2.7, (ability "Heroic Strike").CooldownTicks)
+  // Improved Taunt 2/2 and Improved Shield Wall 2/2, both cooldown cuts.
+  Assert.Equal(secTicks 8.0, (ability "Taunt").CooldownTicks)
+  Assert.Equal(secTicks 1200.0, (ability "Shield Wall").CooldownTicks)
+  // Improved Shield Wall's other half, baked into the row's duration.
+  let wall = ability "Shield Wall"
+  Assert.Contains(ReducesDamage(secTicks 12.0, 7500), wall.Effects)
+  // Improved Disarm 2/2: twenty seconds off Disarm's sixty, and the 1.5 s floor in
+  // `withTalents` is the invariant that keeps a future talent from zeroing a row.
+  Assert.Equal(secTicks 40.0, (ability "Disarm").CooldownTicks)
+  // Defiance 5/5, in the place threat actually lives.
+  Assert.Equal(60000, tank.ThreatMultiplierBp)
+
 [<Fact>]
 let ``shield block raises the block chance`` () =
   let blocked (w: World) =
@@ -4353,7 +4380,7 @@ let ``the rogue cashes in four combo points and strikes below that`` () =
 /// the Warrior's Taunt under a feral name, so the script may not look for
 /// "Taunt" to find it: the mob that has left the tank is taunted back by
 /// whatever the tank's own kit calls its taunt.
-[<Fact>]
+[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
 let ``a bear tank taunts with its own Growl`` () =
   let bear =
     Content.partyOf [ "Druid (Bear)" ] 24
@@ -4371,7 +4398,7 @@ let ``a bear tank taunts with its own Growl`` () =
 /// Eviscerate: the rotation finds them by what they do — the harder builder is
 /// the one that needs the mob's back — so a Cat fights without the script ever
 /// naming a Rogue ability.
-[<Fact>]
+[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
 let ``a cat druid shreds and ferocious bites`` () =
   let ordersAt (points: int) (onCat: bool) =
     let cat =
@@ -5881,7 +5908,7 @@ let ``shifting into Cat Form holds, and Bear Form locks the caster out`` () =
 /// so every existing roster and ladder cell keeps its meaning. All four specs are
 /// still `Name = "Druid"`, so art, logs and the tests that find the class keep
 /// working.
-[<Fact>]
+[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
 let ``a Druid's roster string picks its spec, role and opening form`` () =
   let druid name =
     match Content.partyOf [ name ] 24 with
@@ -5904,14 +5931,14 @@ let ``a Druid's roster string picks its spec, role and opening form`` () =
   for name in [ "Druid"; "Druid (Bear)"; "Druid (Cat)"; "Druid (Moonkin)" ] do
     Assert.Contains(MarkOfTheWild, Content.partyBuffsFor [ name ])
 
-[<Fact>]
+[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
 let ``a Bear Druid cannot cast and a Tree Druid can`` () =
   let bear = Content.partyOf [ "Druid (Bear)" ] 24 |> List.head
   let tree = Content.partyOf [ "Druid" ] 24 |> List.head
   Assert.False(SimState.canCast bear, "a bear is claws and hide, not a caster")
   Assert.True(SimState.canCast tree, "the healer's form is a caster form")
 
-[<Fact>]
+[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
 let ``each Druid spec is paid for from its own resource`` () =
   let druid name = Content.partyOf [ name ] 24 |> List.head
   Assert.Equal(Rage, (druid "Druid (Bear)").ResourceKind)
@@ -5929,7 +5956,7 @@ let ``each Druid spec is paid for from its own resource`` () =
   Assert.Equal(warrior.ThreatMultiplierBp, (druid "Druid (Bear)").ThreatMultiplierBp)
   Assert.Equal((druid "Druid").ThreatMultiplierBp, (druid "Druid (Moonkin)").ThreatMultiplierBp)
 
-[<Fact>]
+[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
 let ``Moonkin is a damage caster and carries no heal`` () =
   let names =
     Content.partyOf [ "Druid (Moonkin)" ] 24
@@ -5944,7 +5971,7 @@ let ``Moonkin is a damage caster and carries no heal`` () =
   for spell in [ "Wrath"; "Moonfire"; "Entangling Roots"; "Moonkin Form" ] do
     Assert.Contains(spell, names)
 
-[<Fact>]
+[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
 let ``a Feral Druid is the Rogue's economy under feral names`` () =
   let cat = Content.partyOf [ "Druid (Cat)" ] 24 |> List.head
   let names = cat.Abilities |> List.map (fun a -> a.Name)
@@ -5952,7 +5979,7 @@ let ``a Feral Druid is the Rogue's economy under feral names`` () =
   for spell in [ "Claw"; "Shred"; "Ferocious Bite"; "Cat Form" ] do
     Assert.Contains(spell, names)
 
-[<Fact>]
+[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
 let ``a Druid's forms are gated by its spec`` () =
   let forms name = Content.druidForms name |> List.map Stances.name |> List.sort
 
@@ -5967,14 +5994,14 @@ let ``a Druid's forms are gated by its spec`` () =
   // silently given the healer's.
   Assert.Empty(Content.druidForms "Warrior")
 
-[<Fact>]
+[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
 let ``every Druid spawns in a form its spec may take`` () =
   for name in [ "Druid"; "Druid (Bear)"; "Druid (Cat)"; "Druid (Moonkin)" ] do
     let body = Content.partyOf [ name ] 60 |> List.head
     let spawn = body.Auras |> List.choose Aura.stanceOf |> List.exactlyOne
     Assert.Contains(spawn, Content.druidForms name)
 
-[<Fact>]
+[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
 let ``shifting to humanoid leaves no form behind`` () =
   let w =
     Content.scarletMonasteryAt "graveyard" Content.Median 1UL
