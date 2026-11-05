@@ -93,7 +93,7 @@ Three buckets, cheapest first. All sixteen talents the build spends in are liste
 | Inner Focus 1/1 | Already shipped as the `innerFocus` ability (`Content.fs:3527`). |
 | Mental Agility 5/5 | Three new `Spells` lines with `CostBp = 1000`: "Renew", "Shadow Word: Pain", "Smite". Slot moves to Row 1 — no cost, rows are not modelled. |
 | Improved Renew 3/3 | One new `Spells` line, `HealBp = 1500` on "Renew"; `healBp` already adds a spell line onto `HealDoneBp`. |
-| Divine Fury 5/5 | `CastTicksOff = ticks 5` on "Smite" and "Heal" (`smiteRanks` `Content.fs:1498`, `healRanks` `Content.fs:294`) — exactly -0.5 s. |
+| Divine Fury 5/5 | `CastTicksOff = secTicks 0.5` on "Smite" and "Heal" (`smiteRanks` `Content.fs`, `healRanks` `Content.fs`) — exactly -0.5 s, which is **ten ticks**, not five: the sim runs **twenty ticks a second** (`secTicks 1.0` = 20, `ticks 5` = 0.25 s). This note originally said `ticks 5`; the port caught it, and any other note that writes a duration as a bare `ticks N` is off by the same factor of two. |
 
 **Needs a new model axis (7).**
 

@@ -460,8 +460,9 @@ not measured. No ladder or `comps` cell seats them either, so nothing else needs
 | Warrior | Prot 3/0/48 | **6 of 18** | all six data-only; 12 need axes |
 | Rogue | 17/34/0 | **6 of 18** | six data-only, plus two flat energy costs from the baseline changes |
 | Mage | Arcane 40/Frost 11 | **4 of 19** | four data-only, incl. Presence of Mind as a kit row; 15 need axes |
+| Priest | Disc 11/Holy 40 | **8 of 16** | best hit rate of the port; two talents had to be *deleted* |
 | Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
-| Priest, Paladin, Hunter, Warlock, Druid | — | 0 | notes written, nothing ported |
+| Paladin, Hunter, Warlock, Druid | — | 0 | notes written, nothing ported |
 
 The Warrior port is the template: each (a)-bucket talent lands as a field, each (b)-bucket
 talent is left out and named with the axis it needs. Two findings from it are recorded in
@@ -698,7 +699,8 @@ seats each map at its own level (graveyard 33, library 36, armory 39); `comps N 
 seats everything on the level-60 sheets, which is the axis every "36/36 clean" claim in
 this document was measured on. At `--level 60`: 36 of 36 clean, including with the Shaman
 change below. **Level-60 axis: 36/36 cells clean at six seeds.** Level-scaled axis:
-**32/36 clean at six seeds**, the four failures all in library.
+**33 of 36 cells fully clean at six seeds**, three cells losing seeds and all three in
+library.
 
 > **Correction, and the reason it is here.** This file claimed "36/36 on the scaled axis,
 the first time it has ever been fully green" after the Rogue port. That was measured with a
@@ -713,7 +715,7 @@ seeds — `Warrior/Priest/Mage/Hunter/Warlock library`, median 9666 — fails id
 before and after the Mage port, so it is not a Mage regression either. **A two-seed green
 run means "no cell failed twice", not "no cell fails".**
 
-The four failing cells at six seeds, all library:
+The failing cells at six seeds, as of the Mage port:
 
 | roster | seeds cleared | wiped | median ticks |
 |---|---|---|---|
@@ -727,6 +729,12 @@ Mage's twelve unported talents are the damage ones, so the class is currently a 
 that casts faster and crits a little harder on two spells and nothing else. Library at
 level 36 is the tightest cell in the ladder and was already the map that failed before any
 talent landed.
+
+**After the Priest port the same axis reads 33 of 36 fully clean**, and the set changed
+again: `Warrior/Druid/Mage/Rogue/Warlock` still loses 3 of 6, the two Shaman cells are now
+clean, and the two 5-of-6 cells both carry a Priest. So a healer's numbers moved cells
+whose roster contains no healer change at all — worth remembering before attributing any
+single cell to a single class.
 
 ## Working agreements this project keeps re-learning
 

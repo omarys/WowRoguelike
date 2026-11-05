@@ -3536,29 +3536,74 @@ module Content =
               CritBp = 5000
               CastTicksOff = ticks 0 } ] }
 
-  /// Priest 21/30/0, deep holy: Spiritual Healing 5/5 (+10% healing), Improved
-  /// Healing 3/3 (-15% Lesser/Greater Heal mana), Holy Specialization 5/5 (+5%
-  /// crit), Spiritual Guidance 5/5 (+25% of Spirit as bonus healing),
-  /// Meditation 3/3 (+15% mana regen while casting) and Inspiration 3/3 (+25%
-  /// armour for fifteen seconds after a heal crit). Inner Focus is in the kit as a
-  /// cooldown.
+  /// Priest Discipline 11 / Holy 40 / Shadow 0 under OctoWoW's tree — the operator's
+  /// build, decoded in `.pi/research/octowow/priest.md` §6. **Eight of sixteen talents
+  /// are expressible as data**, the highest hit rate of any class ported so far, because
+  /// a healing build spends its points on numbers this model already has.
   ///
-  /// shortcut: Power Infusion is not modelled — it is a cooldown on another
-  /// character's spell damage, and nothing in the vocabulary buffs a caster.
+  /// - Spiritual Healing 5/5: `HealDoneBp` 1000 → 3000. The largest single-line change
+  ///   in the port, and the reason porting a healing build is worth doing at all.
+  /// - Spiritual Guidance 5/5 and Inspiration 3/3 are unchanged from the old record: the
+  ///   tree says what it always said.
+  /// - Improved Healing 3/3: `CostBp 1500` on Lesser Heal and Heal.
+  /// - Improved Renew 3/3 and Mental Agility 5/5 both land on Renew, and they have to
+  ///   share one line: `Talents.spell` is a `List.tryFind`, so a second line for the same
+  ///   spell is silently dead. `CostBp 1000` beside `HealBp 1500` is one line, not two.
+  /// - Divine Fury 5/5: half a second off Smite, and off Heal as well.
+  /// - Mental Agility 5/5 also cheapens Shadow Word: Pain.
+  ///
+  /// Two talents **leave** the record, and both are deletions rather than edits, which is
+  /// the point the note makes about this tree: **Meditation 3/3** (`RegenBp` 1500 → 0) and
+  /// **Holy Specialization**, which the old comment here credited with +5% crit that its
+  /// record never carried and which OctoWoW renames to Divinity with no numbers at all. A
+  /// port that only adds leaves both of them live.
+  ///
+  /// The eight that need an axis are Unbreakable Will, Holy Focus, Empowered Recovery,
+  /// Book of Prayer, Spirit of Redemption, Reservoir of Light and Ascendance — each named
+  /// with its missing field in §5(b). Divinity is the eighth and needs nothing: it is a
+  /// rename with no numbers.
+  ///
+  /// shortcut: Power Infusion is not modelled — it is a cooldown on another character's
+  /// spell damage, and nothing in the vocabulary buffs a caster. OctoWoW deletes it, so
+  /// this line now documents a talent the class no longer has rather than one it lacks.
   let private priestTalents =
     { Talents.none with
-        HealDoneBp = 1000
-        RegenBp = 1500
+        HealDoneBp = 3000
+        RegenBp = 0
         SpiritToHealingBp = 2500
         CritArmorBp = 2500
         Spells =
-          [ for name in [ "Lesser Heal"; "Heal" ] do
+          [ // Improved Renew 3/3 and Mental Agility 5/5, deliberately one line.
+            { Spell = "Renew"
+              CostBp = 1000
+              HealBp = 1500
+              DamageBp = 0
+              CritBp = 0
+              CastTicksOff = ticks 0 }
+            { Spell = "Shadow Word: Pain"
+              CostBp = 1000
+              HealBp = 0
+              DamageBp = 0
+              CritBp = 0
+              CastTicksOff = ticks 0 }
+            // Mental Agility 5/5 plus Divine Fury 5/5 on the one row. Half a second is
+            // `secTicks 0.5` — ten ticks, because the sim runs twenty a second; `ticks 5`
+            // would be a quarter second and would halve the talent silently.
+            { Spell = "Smite"
+              CostBp = 1000
+              HealBp = 0
+              DamageBp = 0
+              CritBp = 0
+              CastTicksOff = secTicks 0.5 }
+            // Divine Fury 5/5 shortens Heal and not Lesser Heal: the tree names Heal,
+            // Greater Heal and Smite, and the downrank is not one of them.
+            for name, castOff in [ "Lesser Heal", ticks 0; "Heal", secTicks 0.5 ] do
               { Spell = name
                 CostBp = 1500
                 HealBp = 0
                 DamageBp = 0
                 CritBp = 0
-                CastTicksOff = ticks 0 } ] }
+                CastTicksOff = castOff } ] }
 
   /// Fold a build's per-spell lines into the kit: a talent that shortens a cast
   /// or cheapens a spell changes the `Ability` record once, at construction, so

@@ -846,6 +846,39 @@ both directions); `--level 60` **36/36 clean at six seeds**; level-scaled **32/3
 seeds**, and the same single library cell fails at two seeds both before and after the
 port (median 9666 either way), so the port neither caused nor fixed that one.
 
+### Priest: eight of sixteen, and the first port where deleting was the work
+
+Discipline 11 / Holy 40 / Shadow 0 — the operator's build — is the best hit rate of the
+port so far, **eight of sixteen talents**, because a healing build spends its points on
+numbers this model already has: Spiritual Healing 5/5 (`HealDoneBp` 1000 → 3000, the
+largest single line in any port), Spiritual Guidance and Inspiration unchanged, Improved
+Healing 3/3, Improved Renew 3/3, Mental Agility 5/5, Divine Fury 5/5.
+
+Two things **left** the record, and this is the pattern the notes predicted: a port that
+only adds leaves the old tree live. Meditation 3/3 is gone (`RegenBp` 1500 → 0), and Holy
+Specialization is gone too — the old comment credited it with +5% crit that its record
+never carried, and OctoWoW renames it Divinity with no numbers at all.
+
+Two traps caught in the writing, both worth knowing before the next class:
+
+- **`Talents.spell` is a `List.tryFind`, so a second `Spells` line for the same spell is
+  silently dead.** Improved Renew and Mental Agility both land on Renew; they share one
+  line (`CostBp 1000` beside `HealBp 1500`) because two lines would have looked correct and
+  done nothing.
+- **The sim runs twenty ticks a second, so a duration written as a bare `ticks N` is
+  usually wrong by a factor of two.** Divine Fury is half a second: `secTicks 0.5` (ten
+  ticks), not `ticks 5` (a quarter second). The first version of this port had it at
+  `ticks 5` and the test written from the *absolute* numbers is what caught it — the
+  assertion compared against the same wrong constant it would otherwise have agreed with.
+  `priest.md` §5 now says so explicitly, because the next note may inherit the error.
+
+Measured on a rebuilt Harness: bench **30/30** clear; `--level 60` **36/36 cells at six
+seeds**; level-scaled **33 of 36 cells fully clean at six seeds**, the three that lose
+seeds all library (`Warrior/Druid/Mage/Rogue/Warlock` 3/6, and two 5/6). Both Shaman cells
+that failed before this port are now clean, so the scaled axis went from four failing cells
+to three — the healer's numbers helped the rosters carrying a Shaman, which is the kind of
+coupling that makes a single-class diff hard to credit.
+
 ## 9. Open work, in priority order
 
 0. **The balance-and-story programme: decided with the owner, under way.** It

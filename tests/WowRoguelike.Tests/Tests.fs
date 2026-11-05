@@ -1171,6 +1171,38 @@ let ``the mage's OctoWoW build lands on his kit`` () =
   Assert.Equal(secTicks 180.0, pom.CooldownTicks)
   Assert.Equal<Effect list>([ Empowers(secTicks 20.0, { Empower.none with Instant = true }) ], pom.Effects)
 
+/// The Priest's OctoWoW build (Discipline 11 / Holy 40 / Shadow 0). Eight of sixteen
+/// talents are data — the best hit rate of the port so far — and two of the sixteen are
+/// deletions, which a port that only adds would leave live.
+[<Fact>]
+let ``the priest's OctoWoW build lands, and drops what the tree dropped`` () =
+  let priest =
+    (Content.gully 1UL).Entities |> List.find (fun e -> e.Name = "Priest")
+
+  let ability name = priest.Abilities |> List.find (fun a -> a.Name = name)
+
+  // Spiritual Healing 5/5, the single largest number in the port.
+  Assert.Equal(3000, priest.Talents.HealDoneBp)
+  // Meditation 3/3 is not in the build. This assertion is the port's other half:
+  // RegenBp was 1500 and the tree spends nothing on it.
+  Assert.Equal(0, priest.Talents.RegenBp)
+  // Improved Renew 3/3 (+15% heal) and Mental Agility 5/5 (-10% cost) share one line,
+  // because `Talents.spell` is a `List.tryFind` and a second line would be dead.
+  Assert.Equal(14500, Talents.healBp "Renew" priest.Talents)
+  Assert.Equal((AbilityDef.at 24 Content.renewRanks).Value.ResourceCost * 9000 / 10000, (ability "Renew").ResourceCost)
+  // Mental Agility 5/5 on the instant DoT: 95 mana becomes 85.
+  Assert.Equal(85, (ability "Shadow Word: Pain").ResourceCost)
+  // Divine Fury 5/5, in absolutes so a failure names the number it got. Half a second
+  // is ten ticks at this sim's twenty a second — Smite is a five-second cast in
+  // `smiteRanks` and four seconds on the kit.
+  Assert.Equal(ticks 50, (AbilityDef.at 24 Content.smiteRanks).Value.CastTicks)
+  Assert.Equal(ticks 40, (ability "Smite").CastTicks)
+  // ... and Heal likewise, six seconds down to five.
+  Assert.Equal(ticks 60, (AbilityDef.at 24 Content.healRanks).Value.CastTicks)
+  Assert.Equal(ticks 50, (ability "Heal").CastTicks)
+  // ... but not Lesser Heal: Divine Fury names Heal, Greater Heal and Smite.
+  Assert.Equal((AbilityDef.at 24 Content.lesserHealRanks).Value.CastTicks, (ability "Lesser Heal").CastTicks)
+
 /// The Warrior's OctoWoW build, landed where it lands: six of the eighteen talents
 /// it spends are expressible as data, and each one is checked on the kit the party
 /// is actually handed rather than on the talent record, because the record is the
