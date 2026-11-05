@@ -179,6 +179,66 @@ module SimCombat =
       else
         amount, w
 
+  /// Hand one proc's result to its holder. Reads the entity back out of the
+  /// world rather than trusting the caller's copy: a proc fired mid-swing must
+  /// land on the character that is standing there now.
+  let private applyProc (p: Proc) (id: EntityId) (w: World) =
+    match tryEntity id w with
+    | None -> w
+    | Some e ->
+      match p.Then with
+      // Flat, not `gainRage`: that function converts damage into a level-scaled
+      // trickle, and a talent that says "generates 5 rage" is five rage.
+      | GrantResource n when e.ResourceKind = Rage && n > 0 && e.MaxResource > 0 ->
+        w
+        |> mapEntity id (fun x -> { x with Resource = min x.MaxResource (x.Resource + n) })
+        |> logLine (sprintf "%s: %s generates %d rage" e.Name p.Talent n)
+      | GrantResource _ -> w
+      | EmpowerNext(duration, empower) ->
+        w
+        |> mapEntity id (fun x -> { x with Auras = Aura.refresh (Empowered(duration, empower)) x.Auras })
+        |> logLine (sprintf "%s: %s procs" e.Name p.Talent)
+
+  /// Fire whatever this character's build hangs off `ev`. Called where the event
+  /// is already decided — a block of `meleeStrike`, a crit of `meleeStrike`, a
+  /// hit of `spellDamage` — so no talent needs a branch of its own.
+  let procOn (ev: ProcEvent) (id: EntityId) (w0: World) : World =
+    match tryEntity id w0 with
+    | None -> w0
+    | Some e ->
+      ((w0, e), Talents.procsOf ev e.Talents)
+      ||> List.fold (fun (w, e) p ->
+        let cooling =
+          (e.Cooldowns |> Map.tryFind p.Talent |> Option.defaultValue (ticks 0)) > ticks 0
+
+        if cooling then
+          w, e
+        else
+          // A guaranteed proc draws nothing at all: the seed's stream stays
+          // where a build carrying no procs left it. Zero is the roll that cannot
+          // miss, since a draw of 9999 still fails a hundred-percent chance...
+          // which is why the shortcut cannot simply reuse the top of the range.
+          let roll, w = if p.ChanceBp >= 10000 then 0, w else rollRange 0 9999 w
+
+          if roll >= p.ChanceBp then
+            w, e
+          else
+            let w = applyProc p id w
+
+            let w =
+              if p.InternalCooldown > ticks 0 then
+                mapEntity
+                  id
+                  (fun x ->
+                    { x with
+                        Cooldowns = x.Cooldowns |> Map.add p.Talent p.InternalCooldown })
+                  w
+              else
+                w
+
+            w, (tryEntity id w |> Option.defaultValue e))
+      |> fst
+
   /// One physical hit from `attacker` on `targetId`: the attack table, then
   /// armour. A melee crit is 200% — the spell multiplier is 150% and applying it
   /// to swings too is what left physical damage short. Logs what it avoided and
@@ -215,8 +275,13 @@ module SimCombat =
       | Dodged -> 0, logLine (sprintf "%s dodges %s" t.Name attacker.Name) w
       | Parried -> 0, logLine (sprintf "%s parries %s" t.Name attacker.Name) w
       | Glanced -> mitigate (amount * glancingMultiplierBp attacker t / 10000), w
-      | Blocked -> mitigate (max 0 (amount - t.BlockValue)), w
-      | Critical -> mitigate (amount * 200 / 100), w
+      | Blocked ->
+        // A block is its own event: Shield Specialization pays on the block
+        // whether or not the hit got through the shield.
+        mitigate (max 0 (amount - t.BlockValue)), (w |> procOn OnBlock t.Id)
+      | Critical ->
+        // And a crit is the attacker's event, whatever it landed on.
+        mitigate (amount * 200 / 100), (w |> procOn OnCrit attacker.Id)
       | Hit -> mitigate amount, w
 
   /// Damage wakes a sleeper, as does any other hostile action — see `wake`. A
@@ -338,9 +403,17 @@ module SimCombat =
       // holder lands, and by nothing else — a Smite must not eat the Priest's
       // guaranteed crit. Inner Focus also pays the spell's cost. (The Paladin's
       // Divine Favor was the third of these and is gone: OctoWoW made it passive.)
+      //
+      // Free mana is the exception, and the reason it is separate: Clearcasting
+      // hangs off a *damage* spell, so the spell that drinks the rebate is the
+      // one that has to spend it. No kit row in the tree sets `FreeMana` today,
+      // so this widens nothing that already exists — it is the road a borne
+      // proc travels.
       let empowered = ability.Effects |> List.exists isHealEffect
-      let empower = if empowered then Aura.empower actor.Auras else Empower.none
-      let cost = if empower.FreeMana then 0 else ability.ResourceCost
+      let held = Aura.empower actor.Auras
+      let freeMana = held.FreeMana && ability.ResourceCost > 0
+      let empower = if empowered then held else Empower.none
+      let cost = if freeMana then 0 else ability.ResourceCost
 
       let w0 =
         mapEntity
@@ -353,7 +426,7 @@ module SimCombat =
                 // alone. Instants count: vanilla watches the cast, not its size.
                 Auras =
                   let a = Aura.refresh (RecentlyCast Content.fiveSecondRule) e.Auras
-                  if empowered then Aura.spendEmpower a else a })
+                  if empowered || freeMana then Aura.spendEmpower a else a })
           w0
 
       // One weapon strike, so Multi-Shot's second and third targets roll exactly
@@ -446,6 +519,10 @@ module SimCombat =
           let rolled = rolled * Talents.damageBp ability.Name actor.Talents / 10000
           let amount, w = spellHit ability.Name actor targetId rolled w
           let amount, w = rollCrit actor.CritChanceBp amount w
+          // A damage spell that landed is the event Clearcasting hangs off; a
+          // resisted one is not. Rolled once per landed spell, not once per
+          // ability — a wave of Arcane Missiles is five chances, as it was.
+          let w = if amount > 0 then procOn OnSpellHit actor.Id w else w
           let w = dealDamage targetId amount w
           let w = gainRage actor amount w
           let w = if actor.Faction = Party then addThreat targetId actor amount w else w

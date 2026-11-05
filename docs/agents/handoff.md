@@ -4,10 +4,11 @@ Written at commit `aba0722`, with that session's work on top as one WIP commit
 `40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**240 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
-Release`, 250 total), Release build clean — re-verified 2026-11-05 on the tree at
-`42975a1` (Hunter port `67d7c1c`, swing hook `42975a1`). The 10 skips are the operator's
-parked Bear/Cat/Moonkin specs.
+**244 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
+Release`, 254 total), Release build clean — re-verified 2026-11-05 on the tree at
+`42975a1` (Hunter port `67d7c1c`, swing hook `42975a1`) and again on the proc axis
+(§"The proc axis is built", below). The 10 skips are the operator's parked
+Bear/Cat/Moonkin specs.
 
 Everything settled — the brief, the architecture rules, the run table, and every
 decision with its reason — is in `docs/agents/domain.md`. Read that first, then §9
@@ -65,6 +66,37 @@ dropped again. The slot rule in `SimCombat`'s `Summon` is now the only thing tha
 dismisses one. Measured after the change: **32 of 36 cells clean, 4 parked seeds,
 0 wipes** — the same ladder result as before it, so this bought correctness and a
 simpler corner rule, not clearances. 223/223 tests green, `bench-30` unchanged.
+
+## The proc axis is built (the first item the axis inventory ranked)
+
+`.pi/research/octowow/axis-inventory.md` ranked the trigger/proc hook first: eighteen
+talents across eight classes need an event the character did not choose — a block, a
+crit, a hit. It is now a subsystem rather than a per-port invention. `Domain.fs` carries
+`ProcEvent` (`OnCrit`, `OnBlock`, `OnSpellHit`), `ProcResult` (`GrantResource`,
+`EmpowerNext`), `Proc = { Talent; Event; ChanceBp; InternalCooldown; Then }` and
+`Talents.Procs`; `SimCombat.procOn` is called from the three places those events are
+already decided. Three talents landed as proof, one per event and covering both result
+kinds: **Warrior Shield Specialization 5/5** (block bp 500 → 1000 and 5 flat rage on a
+block), **Druid bear Primal Fury 2/2** (5 rage on a crit — the "in Bear Form" clause is
+the rage-only guard, so it needs no form field), **Mage Arcane Concentration 5/5** (10%
+on a landed damage spell, 8 s ICD, fifteen seconds of `Empower.FreeMana`).
+
+Read `domain.md` §"The proc axis" before touching it: the four decisions (flat not
+`gainRage`, rage-only, ICD in `Entity.Cooldowns`, a 100% chance draws no random number)
+are each one edit away from being silently undone. The one existing behaviour it moved is
+the "next spell" gate in `resolveAbility`, which now reads `FreeMana` for any spell while
+instant and guaranteed-crit stay heal-only — no kit row sets `FreeMana`, so nothing that
+already existed changed.
+
+Measured on a pinned binary: `comps 2 --level 60` is **36 of 36 cells clean, 0 wipes**
+(the same answer as before, which is the only result a change that can only add rage and
+free mana is allowed to give — the Warrior's block chance did move, so it was worth
+checking). `bench-30` moved on all 30 seeds and was refreshed deliberately: the Mage's
+proc draws a die where nothing drew one before, so every climb re-rolls (ticks −60..+34,
+HP −239..+319, resource −627..+247, all 30 still cleared). The caveat to carry: the Mage
+ends every cell at **97-99% mana**, so Clearcasting's rebate is invisible to every mana
+floor — third class in a row where a level-60 caster's resource is a floor, not a
+constraint.
 
 ## CLOSED — both open bugs below were one dead totem
 

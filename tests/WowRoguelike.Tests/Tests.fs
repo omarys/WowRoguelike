@@ -1161,8 +1161,15 @@ let ``the tree's damage bonus reaches a white swing`` () =
 [<Fact>]
 let ``the warrior carries a shield`` () =
   let tank = (Content.gully 1UL).Entities |> List.find (fun e -> e.Role = Some Tank)
-  Assert.Equal(500, tank.BlockChanceBp)
+  // A shield's own five percent, plus Shield Specialization 5/5's five more.
+  Assert.Equal(1000, tank.BlockChanceBp)
   Assert.Equal(8, tank.BlockValue)
+
+  // The talent's other half is a trigger, not a number: five rage on a block.
+  Assert.True(
+    tank.Talents.Procs |> List.exists (fun p -> p.Talent = "Shield Specialization"),
+    "the warrior's Shield Specialization proc is missing from his build"
+  )
 
   for ability in [ "Shield Block"; "Shield Bash"; "Shield Wall" ] do
     Assert.True(
@@ -6448,3 +6455,137 @@ let ``a form aura reports a lifetime instead of throwing`` () =
   Assert.True(Aura.isForm (Shaped TreeForm))
   Assert.False(Aura.isForm (Rejuvenation(secTicks 3.0, 1, "Druid")))
   Assert.True(Aura.remainingSeconds (Shaped TreeForm) > 0)
+
+// ===========================================================================
+// Procs: a talent that fires off an event it did not choose (axis A1)
+// ===========================================================================
+
+/// Rage, or whatever else an entity's pool holds, straight out of the world.
+let private poolOf (id: int) (w: World) =
+  w.Entities |> List.find (fun e -> e.Id = EntityId id) |> fun e -> e.Resource
+
+/// A proc that pays five into the holder's pool, every time the event happens
+/// unless the internal cooldown says otherwise.
+let private rageProc (ev: ProcEvent) (cooldown: int<tick>) =
+  { Talent = "Test Proc"
+    Event = ev
+    ChanceBp = 10000
+    InternalCooldown = cooldown
+    Then = GrantResource 5 }
+
+/// A world holding one id-2 character with `talents` and a rage pool, and one
+/// id-1 character to hit it. Weapons are slow enough that nothing swings.
+///
+/// The `Content.heroicStrike` read is not decorative: F# stores a module's
+/// `let` values in its startup class, and calling one of its functions does not
+/// run that initialiser, so `Content.hero` would find `partyRegen` null. Every
+/// fixture in this file reads one field for that reason; `arena` does it by
+/// passing an ability.
+let private procWorld (talents: Talents) : World =
+  let _ = Content.heroicStrike
+
+  let noSwing = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
+
+  let fighter id pos =
+    Content.mob id "Fighter" CreatureType.Humanoid 20 1000 100 (Some noSwing) [] None pos
+
+  { Tick = ticks 0
+    RestTicks = ticks 0
+    Grid = Grid.create 20 10
+    Entities =
+      [ fighter 1 { X = 5; Y = 5 }
+        { fighter 2 { X = 6; Y = 5 } with
+            ResourceKind = Rage
+            Resource = 0
+            MaxResource = 100
+            Talents = talents } ]
+    Pending = []
+    Rng = Rng.streamsOf 7UL
+    PartyBuffs = []
+    Quests = []
+    Log = [] }
+
+/// The engine half: an event fires the proc, it pays into the pool, and a
+/// hundred-percent chance draws no random number at all — the seed's stream is
+/// exactly where a build carrying no procs left it.
+[<Fact>]
+let ``a proc pays its resource into the holder's pool`` () =
+  let w = procWorld { Talents.none with Procs = [ rageProc OnBlock (ticks 0) ] }
+  let rngBefore = w.Rng
+  let w = SimCombat.procOn OnBlock (EntityId 2) w
+
+  Assert.Equal(5, poolOf 2 w)
+  Assert.Equal(rngBefore, w.Rng)
+
+/// The internal cooldown lives in `Entity.Cooldowns`, the map abilities use, so
+/// `SimTick.advanceCooldowns` ages it for free. While it stands the proc is dead.
+[<Fact>]
+let ``a proc under its internal cooldown does not fire`` () =
+  let w = procWorld { Talents.none with Procs = [ rageProc OnBlock (ticks 2) ] }
+  let w = SimCombat.procOn OnBlock (EntityId 2) w
+  Assert.Equal(5, poolOf 2 w)
+
+  let again = SimCombat.procOn OnBlock (EntityId 2) w
+  Assert.Equal(5, poolOf 2 again)
+
+  // Two ticks later it is available again, with no proc-specific state at all.
+  let waited = SimTick.advanceCooldowns (SimTick.advanceCooldowns again)
+  let refired = SimCombat.procOn OnBlock (EntityId 2) waited
+  Assert.Equal(10, poolOf 2 refired)
+
+/// Primal Fury says "while in Bear or Dire Bear Form". A cat builds energy, and
+/// energy is not rage, so the clause needs no form field: the grant finds no
+/// rage to pay and does nothing.
+[<Fact>]
+let ``a rage grant is nothing to a pool that is not rage`` () =
+  let w = procWorld { Talents.none with Procs = [ rageProc OnBlock (ticks 0) ] }
+
+  let druid =
+    { (w.Entities |> List.find (fun e -> e.Id = EntityId 2)) with
+        ResourceKind = Energy
+        Resource = 100 }
+
+  let w = { w with Entities = [ for e in w.Entities -> if e.Id = EntityId 2 then druid else e ] }
+  let w = SimCombat.procOn OnBlock (EntityId 2) w
+
+  Assert.Equal(100, poolOf 2 w)
+
+/// The buff half: a `FreeMana` empower is drunk by the damage spell that lands
+/// next, not by a heal. It pays that spell's whole cost and is then spent.
+[<Fact>]
+let ``a free-mana empower pays for the damage spell that spends it`` () =
+  let bolt =
+    { Content.heroicStrike with
+        Name = "Test Bolt"
+        ResourceCost = 100
+        CastTicks = ticks 0
+        Effects = [ SpellDamage(10, 10) ] }
+
+  let w = procWorld Talents.none
+
+  let mage =
+    { (w.Entities |> List.find (fun e -> e.Id = EntityId 1)) with
+        ResourceKind = Mana
+        Resource = 500
+        MaxResource = 500
+        Abilities = [ bolt ] }
+
+  let w =
+    { w with
+        Entities =
+          [ yield mage
+            yield! w.Entities |> List.filter (fun e -> e.Id <> EntityId 1) ] }
+
+  let charged =
+    SimState.mapEntity
+      (EntityId 1)
+      (fun e ->
+        { e with
+            Auras = Aura.refresh (Empowered(secTicks 15.0, { Empower.none with FreeMana = true })) e.Auras })
+      w
+
+  let after = SimCombat.resolveAbility (EntityId 1) (EntityId 2) bolt charged
+  let caster = after.Entities |> List.find (fun e -> e.Id = EntityId 1)
+
+  Assert.Equal(500, caster.Resource)
+  Assert.False((Aura.empower caster.Auras).FreeMana)

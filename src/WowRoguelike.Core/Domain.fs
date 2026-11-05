@@ -171,6 +171,49 @@ module Empower =
       FreeMana = false
       SureCrit = false }
 
+/// What a build can fire off an event it did not choose: a block it made, a
+/// critical it landed, a damage spell that hit. These are the events the combat
+/// path already resolves and can name — the swing hook landed with the Hunter
+/// port, so a crit or a block is a case here rather than a new pipeline.
+///
+/// Adding an event is a case here and one `SimCombat.procOn` call at the place
+/// that event is decided. Nothing else in the engine has to know it exists.
+[<Struct>]
+type ProcEvent =
+  /// A physical hit of this character's landed critically.
+  | OnCrit
+  /// This character blocked a physical hit aimed at it.
+  | OnBlock
+  /// A damage spell of this character's landed. A resisted spell is not a hit.
+  | OnSpellHit
+
+/// What one proc hands over when it fires. Two shapes, because the talents that
+/// need more than these two are talents the vocabulary cannot express yet and
+/// are named in a comment beside their build instead.
+type ProcResult =
+  /// Resource in the character's own pool (rage on a block, rage on a crit).
+  /// It does nothing to a pool that is not rage, which is what makes Primal
+  /// Fury's "while in Bear or Dire Bear Form" clause the resource kind rather
+  /// than a field: a cat builds energy, and energy is not rage.
+  | GrantResource of amount: int
+  /// The "next spell" buff a caster is holding — Clearcasting's free mana.
+  | EmpowerNext of duration: int<tick> * empower: Empower
+
+/// One talent's trigger: the chance, how soon it may fire again, and what it
+/// hands over. `Talent` is the name it is logged and cooled down under — the
+/// internal cooldown lives in `Entity.Cooldowns`, the same tick map abilities
+/// use, so an ICD needs no state of its own.
+type Proc =
+  { Talent: string
+    Event: ProcEvent
+    /// Percent chance in basis points: Arcane Concentration 5/5 is 1000. A
+    /// chance of 10000 fires without drawing a random number at all, so a
+    /// deterministic talent leaves the seed's stream where it found it.
+    ChanceBp: int
+    /// Ticks before it may fire again; `ticks 0` fires whenever the event does.
+    InternalCooldown: int<tick>
+    Then: ProcResult }
+
 /// A Warrior stance or a Druid form. An ability that requires one cannot be used
 /// outside it, which is what makes Overpower a Battle Stance decision rather
 /// than a button. Declared above `Aura` because an aura carries one.
@@ -1183,7 +1226,11 @@ type Talents =
     /// Ticks taken off one named cooldown, and the spells it applies to
     /// (Improved Reincarnation: -10 min at 2/2). A list rather than a field per
     /// spell, because a talent that changes a cooldown is still just data.
-    CooldownOff: (string * int<tick>) list }
+    CooldownOff: (string * int<tick>) list
+    /// The triggers this build hangs off the combat path: rage when it blocks,
+    /// a free spell when its next hit lands. A list because a build carries
+    /// several and their order is the order they fire in.
+    Procs: Proc list }
 
 module Talents =
 
@@ -1200,9 +1247,13 @@ module Talents =
       SpiritToHealingBp = 0
       TotemEffectBp = 0
       Spells = []
-      CooldownOff = [] }
+      CooldownOff = []
+      Procs = [] }
 
   let spell (name: string) (t: Talents) = t.Spells |> List.tryFind (fun s -> s.Spell = name)
+
+  /// The procs this build hangs off one event, in the order it lists them.
+  let procsOf (ev: ProcEvent) (t: Talents) = t.Procs |> List.filter (fun p -> p.Event = ev)
 
   /// Percent this character adds to one spell's heal, in basis points: the tree's
   /// own bonus plus the spell's own line.

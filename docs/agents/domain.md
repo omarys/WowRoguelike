@@ -1032,7 +1032,95 @@ forward is the mana column: **the Hunter ends every cell at 99-100% mana**, exac
 the Warlock ends at 97-100%. Neither class is resource-limited at level 60, so no hunter
 damage talent will ever show up in a mana floor either.
 
+### The proc axis — three talents, three classes, and the vocabulary a port no longer has to invent
+
+The axis inventory (`.pi/research/octowow/axis-inventory.md` §1 A1) put the trigger/proc
+hook first by leverage: **eighteen talents across eight classes** hang off an event the
+character did not choose — a block, a crit, a hit, a tick. Every class note asked for it
+in its own words and none of them could land it, so each port either re-invented it or
+wrote the talent off. It is built, and three talents landed on it in one increment,
+chosen to exercise every part of it:
+
+| class | talent | event | result |
+|---|---|---|---|
+| Warrior | Shield Specialization 5/5 | `OnBlock` | 5 rage, flat |
+| Druid (bear) | Primal Fury 2/2 | `OnCrit` | 5 rage, flat |
+| Mage | Arcane Concentration 5/5 | `OnSpellHit` | `Empower.FreeMana` for 15 s |
+
+The vocabulary is three types in `Domain.fs` and one function in `SimCombat.fs`:
+`ProcEvent` (`OnCrit`, `OnBlock`, `OnSpellHit`), `ProcResult` (`GrantResource`,
+`EmpowerNext`), `Proc = { Talent; Event; ChanceBp; InternalCooldown; Then }`, and
+`SimCombat.procOn ev id w`. A build carries `Talents.Procs`, and the engine calls
+`procOn` at the three places it already decides those events — `meleeStrike`'s `Blocked`
+arm (on the blocker), its `Critical` arm (on the attacker), and the `SpellDamage` effect
+once the spell has landed and not been resisted. **Adding an event is one case and one
+call site**; no talent needs a branch of its own, which is the whole point of building it
+once before the remaining nine class ports.
+
+Four decisions inside it are load-bearing:
+
+- **`GrantResource` pays flat, not through `gainRage`.** That function converts *damage*
+  into a level-scaled trickle (`amount * 5 / (2 * level)`); a talent that says "generates
+  5 rage" is five rage at level 20 and five at level 60.
+- **The grant is rage-only, and that is how a form clause is modelled.** Primal Fury says
+  "while in Bear or Dire Bear Form". A cat builds energy; `GrantResource` finds no rage to
+  pay and does nothing. The clause is the resource kind, not a field.
+- **The internal cooldown is `Entity.Cooldowns`.** Arcane Concentration's page adds an
+  eight-second ICD between procs, and that map is already decremented and pruned for
+  every entity every tick (`SimTick.advanceCooldowns`), so an ICD costs no state and no
+  new tick phase — the same trick that already stores the interrupt lockout there.
+- **A hundred-percent chance draws no random number.** `ChanceBp >= 10000` skips
+  `rollRange` entirely, so Shield Specialization and Primal Fury leave the seed's stream
+  exactly where a build with no procs left it and only the Mage's dice move. (The first
+  version of this compared the shortcut's roll against `10000`, which is *not* less than
+  a hundred-percent chance — a guaranteed proc that never fired. The tests caught it.)
+
+`FreeMana` needed a road, and the road is the only existing behaviour this touched: the
+"next spell" buff was read only when the resolving ability was a heal, because Nature's
+Swiftness and Inner Focus are spent by a heal and nothing else. That gate is right for
+instant and guaranteed crit (a Smite must not eat a Priest's Inner Focus) and wrong for a
+rebate aimed at a damage spell, so the cost is now computed from `FreeMana` whatever the
+spell is while the instant/crit legs stay heal-only. **No kit row in the tree sets
+`FreeMana`**, so nothing that already existed moved: the rebate is reachable only from a
+proc.
+
+Tests: four in `tests/WowRoguelike.Tests/Tests.fs` — the pool grant and that it draws no
+random number, the ICD (dead while it stands, alive two ticks later, untouched by any
+proc-specific state), the rage-only guard, and the free-mana rebate being drunk by a
+damage spell and then spent. `the warrior carries a shield` now asserts `1000` block bp
+(base shield 5% + the talent's 5%) and that the build carries the proc. The bench
+snapshot moved — a Warrior blocking 5% more and a Mage occasionally casting free are
+visible to a bench fight — and was refreshed deliberately after reading the diff.
+
+**Measured on a pinned binary** (`dotnet build -c Release -t:Rebuild`, Core DLL sha256
+`3fb841df57bb98ecf1f768c4dbd418285ebd13fa8901a3e63d1d26da9880dba3`):
+
+- **`comps 2 --level 60` — 36 cells, 36 clean, 0 wipes, 0 parks.** Every cell
+  `cleared=2 wiped=0 unresolved=0`. The same axis read 36/36 after the swing hook, so this
+  is "no regression", which is the only result a change that can only add rage and free
+  mana is allowed to have — and it is worth checking rather than assuming, because the
+  Warrior's block chance moved 500 → 1000 bp, which does change how much damage he takes.
+- **The bench moved on all 30 seeds, and that is the stream, not a buff.** Deliberate, and
+  read before refreshing the snapshot: ticks −60..+34, party HP −239..+319, party resource
+  −627..+247, all 30 encounters still cleared. Every seed moved because the Mage's proc now
+  draws a die where nothing drew one before, so the whole climb re-rolls; that is the same
+  RNG-path sensitivity the six-seed lesson below is about. The five-signal direction is
+  "different fight", not "better fight".
+- **The honest caveat, and it is the third time this lesson has been written down:** the
+  Mage ends every cell at 97-99% mana. Clearcasting rebates mana to a class that is not
+  mana-limited, so its entire observable effect at level 60 is tempo — a spell he casts
+  instead of drinking — and no mana floor will ever show it. Same shape as the Hunter at
+  99-100% and the Warlock at 97-100%: at level 60, a caster's resource is a floor, not a
+  constraint, so a resource talent is measured in damage and ticks or not at all.
+
+What this unblocks: **fifteen of A1's eighteen entries** are now a `Procs` line on a build
+plus, at most, one new `ProcEvent` case and one `procOn` call site — Warrior's Improved
+Bloodrage and Toughness, Rogue's Relentless Strikes, the Paladin's Blessed Strikes
+cooldown reset, the Shaman's two, the Hunter's two, the Warlock's Nightfall (which needs a
+DoT-tick event, the one genuinely new hook), and the Druid's remaining four.
+
 ## 9. Open work, in priority order
+
 0. **The balance-and-story programme: decided with the owner, under way.** It
    governs items 3 to 7 below rather than replacing them.
    - **Status.** Done: the raid-gear anchor (twice cross-checked), the healer and damage

@@ -3386,11 +3386,13 @@ module Content =
   // The encounter
   // =========================================================================
 
-  // The one per-class bonus that is not a stat: a shield's own block. Every
-  // other class fights with what the gear and the formulas give it.
+  // The one per-class bonus that is not a stat: a shield's own five percent,
+  // plus Shield Specialization 5/5's five more (`.pi/research/octowow/warrior.md`
+  // §P1, where the talent's other half is a rage grant — see `warriorTalents`).
+  // Every other class fights with what the gear and the formulas give it.
   let private warriorTraits =
     { Traits.none with
-        BlockChanceBp = 500
+        BlockChanceBp = 1000
         BlockValue = 8 }
 
   // =========================================================================
@@ -3493,7 +3495,16 @@ module Content =
               HealBp = 0
               DamageBp = 0
               CritBp = 0
-              CastTicksOff = ticks 0 } ] }
+              CastTicksOff = ticks 0 } ]
+        // Shield Specialization 5/5 says "and generates five rage when a block
+        // occurs", which is the half that is a trigger rather than a number. The
+        // block chance itself is in `warriorTraits`.
+        Procs =
+          [ { Talent = "Shield Specialization"
+              Event = OnBlock
+              ChanceBp = 10000
+              InternalCooldown = ticks 0
+              Then = GrantResource 5 } ] }
 
   /// Paladin Holy 40 / Protection 0 / Retribution 11 under OctoWoW's tree — the
   /// operator's build, decoded in `.pi/research/octowow/paladin.md` §6: a healer
@@ -4195,7 +4206,18 @@ module Content =
               HealBp = 0
               DamageBp = 0
               CritBp = 600
-              CastTicksOff = ticks 0 } ] }
+              CastTicksOff = ticks 0 } ]
+        // Arcane Concentration 5/5: a damage spell that lands has a ten percent
+        // chance to make the next one free, and the page adds an eight-second
+        // internal cooldown between procs (`.pi/research/octowow/mage.md`). The
+        // buff it grants is the same `Empower` the healer cooldowns hold, with
+        // vanilla's fifteen-second life.
+        Procs =
+          [ { Talent = "Arcane Concentration"
+              Event = OnSpellHit
+              ChanceBp = 1000
+              InternalCooldown = secTicks 8.0
+              Then = EmpowerNext(secTicks 15.0, { Empower.none with FreeMana = true }) } ] }
 
   let private mage (buffs: PartyBuffKind list) (level: int) (id: int) =
     let abilities =
@@ -4263,6 +4285,23 @@ module Content =
     | CatDruid
     | MoonkinDruid
 
+  /// The feral build, of which the tank is the only body that rides it. One
+  /// talent: Primal Fury 2/2, a feral talent that hands the bear five rage every
+  /// time it lands a critical. It says "while in Bear or Dire Bear Form" and it
+  /// needs no form field — a cat builds energy, and `ProcResult.GrantResource`
+  /// pays only into rage, so the clause is the resource kind.
+  ///
+  /// Everything else a feral build wants — attack power, a hit chance, an
+  /// energy-regen multiplier — is a feral note's bucket (b) list.
+  let private bearTalents =
+    { Talents.none with
+        Procs =
+          [ { Talent = "Primal Fury"
+              Event = OnCrit
+              ChanceBp = 10000
+              InternalCooldown = ticks 0
+              Then = GrantResource 5 } ] }
+
   /// Which forms a Druid of this spec may stand in. The operator's rule: Tree of
   /// Life belongs to the healer and Moonkin to the caster damage spec, while Bear
   /// and Cat are open to every role, and every role may drop back to humanoid.
@@ -4292,7 +4331,11 @@ module Content =
     // Nature's Grace and Gift of Nature are healing talents and no balance or
     // feral tree is modelled at all, so the healer's build is the only one there
     // is: every other spec runs `Talents.none` rather than a copied healer's tree.
-    let talents = if spec = TreeDruid then druidTalents else Talents.none
+    let talents =
+      match spec with
+      | TreeDruid -> druidTalents
+      | BearDruid -> bearTalents
+      | CatDruid | MoonkinDruid -> Talents.none
 
     // Bear Form is +180% armour from items at level 10 (Dire Bear's 360% arrives at
     // at 40): 1.8 x the 444 the set carries at 24 is 799. `Traits.ArmorBonus` is the
