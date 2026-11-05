@@ -458,8 +458,9 @@ not measured. No ladder or `comps` cell seats them either, so nothing else needs
 | class | built | landed | notes |
 |---|---|---|---|
 | Warrior | Prot 3/0/48 | **6 of 18** | all six data-only; 12 need axes |
+| Rogue | 17/34/0 | **6 of 18** | six data-only, plus two flat energy costs from the baseline changes |
 | Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
-| Rogue, Mage, Priest, Paladin, Hunter, Warlock, Druid | — | 0 | notes written, nothing ported |
+| Mage, Priest, Paladin, Hunter, Warlock, Druid | — | 0 | notes written, nothing ported |
 
 The Warrior port is the template: each (a)-bucket talent lands as a field, each (b)-bucket
 talent is left out and named with the axis it needs. Two findings from it are recorded in
@@ -695,28 +696,21 @@ The ladder has two axes and only one of them has been watched. `comps N` with no
 seats each map at its own level (graveyard 33, library 36, armory 39); `comps N --level 60`
 seats everything on the level-60 sheets, which is the axis every "36/36 clean" claim in
 this document was measured on. At `--level 60`: 36 of 36 clean, including with the Shaman
-change below. At the level-scaled axis, one cell:
+change below. Both axes are now clean: **36/36 at `--level 60` and 36/36 level-scaled**,
+which is the first time the scaled axis has been fully green.
 
-| roster | map | result |
-|---|---|---|
-| Warrior/Druid/Mage/Rogue/Warlock | library 36 | **wiped 2 of 2**, deaths 0 alive |
+The scaled axis had one failing cell for most of this work —
+`Warrior/Druid/Mage/Rogue/Warlock library`, wiped 2 of 2 at ~7100 ticks. Two changes moved
+it. First, **pricing a Druid form's entry** cleared the graveyard park next door
+(`Warrior/Priest/Druid/Mage/Warlock graveyard`, one of two runs unresolved at the 24000
+cap): with a free shift the healer kept re-entering Tree of Life and starved the party,
+which is the shape a "nobody dies but nothing dies either" park has. Second, the **Rogue
+port** cleared the library wipe itself — it now clears at 9136 ticks with 5 alive.
 
-A second cell used to fail here — `Warrior/Priest/Druid/Mage/Warlock graveyard`, one of
-two runs unresolved at the 24000 cap — and it cleared once **entering** a Druid form was
-priced (leaving stays free, per the operator's rule). That is evidence for the diagnosis
-rather than a coincidence: with a free shift the healer kept re-entering Tree of Life and
-starved the party of heals, which is exactly the shape a "nobody dies but nothing dies
-either" park has.
-
-The library wipe survived that fix and takes the whole party (0 alive, ~7100 ticks),
-which is a shape no single gear line produces. **Unmeasured**: nothing yet distinguishes a
-healing shortfall from a positioning failure, and the next step is the log of one library
-run rather than another theory. The hypothesis that the Druid's *stance* was at fault is
-refuted — the cell is unchanged cell-for-cell by the form work, while the graveyard one
-moved.
-
-Until this is closed, "the ladder is green" means the level-60 axis and should be written
-that way.
+Do not read that as "the Rogue was the bug". The whole party's numbers moved in the same
+commit, the run is one seed, and the cause was never isolated. What is true is narrower and
+more useful: there is no failing cell left to debug, and the two failures that were chased
+for several sessions are both gone with measurements attached.
 
 ## Working agreements this project keeps re-learning
 

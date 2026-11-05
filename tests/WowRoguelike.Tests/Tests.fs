@@ -211,7 +211,16 @@ let ``an interrupt cancels an interruptible cast and locks it out`` () =
 
 [<Fact>]
 let ``an interrupt cannot cancel a cast that is not interruptible`` () =
-  let w = casterWorld Content.serpentForm
+  // Kick now carries Improved Kick's silence, and a silence does end a cast — that is
+  // what a silence is for. This test is about `Interrupt`, so it hands the rogue a
+  // Kick with the silence stripped and asks only the question it names.
+  let interruptOnly =
+    { (AbilityDef.at 24 Content.kick).Value with
+        Effects = [ Interrupt ] }
+
+  let w =
+    casterWorld Content.serpentForm
+    |> SimState.mapEntity (EntityId 3) (fun e -> { e with Abilities = [ interruptOnly ] })
 
   let w =
     SimCombat.applyCommand
@@ -1114,6 +1123,29 @@ let ``the warrior carries a shield`` () =
       sprintf "the warrior should have %s" ability
     )
 
+/// The Rogue's OctoWoW build, checked on the kit the party is handed rather than on
+/// the record holding it, for the same reason the Warrior's test does below.
+[<Fact>]
+let ``the rogue's OctoWoW build lands on his kit`` () =
+  let rogue =
+    (Content.gully 1UL).Entities |> List.find (fun e -> e.Role = Some Dps)
+
+  let ability name = rogue.Abilities |> List.find (fun a -> a.Name = name)
+
+  // OctoWoW's flat energy costs, against the 45/35 the file carried.
+  Assert.Equal(40, (ability "Sinister Strike").ResourceCost)
+  Assert.Equal(30, (ability "Eviscerate").ResourceCost)
+  // Malice 5/5 and Close Quarters Combat 2/2, both crit, and both on the hero.
+  Assert.Equal(2540, rogue.CritChanceBp)
+  Assert.Equal(3000, rogue.BackstabCritBonusBp)
+  // Improved Eviscerate 3/3: +15% on the one-point pair and the step. The gully
+  // party is level 24, so rank 4 is 41/61/31 and becomes 47/70/35 on truncation.
+  // Ruthlessness 3/3 sits beside the finisher and after it, because `Finisher`
+  // zeroes the pool and `ComboPoint` re-adds to it.
+  Assert.Equal<Effect list>([ Finisher(47, 70, 35); ComboPoint 1 ], (ability "Eviscerate").Effects)
+  // Improved Kick 2/2 adds the silence beside the school lockout.
+  Assert.Contains(Silence(secTicks 2.0), (ability "Kick").Effects)
+
 /// The Warrior's OctoWoW build, landed where it lands: six of the eighteen talents
 /// it spends are expressible as data, and each one is checked on the kit the party
 /// is actually handed rather than on the talent record, because the record is the
@@ -1196,9 +1228,11 @@ let ``pushback resistance stops damage interrupting a cast`` () =
 let ``agility drives crit and dodge`` () =
   let rogue = (Content.gully 1UL).Entities |> List.find (fun e -> e.Name = "Rogue")
   // Agility 100 + Mark of the Wild 4 = 104 -> 5% + 10.4% crit, 5% + 5.2% dodge.
-  Assert.Equal(1540, rogue.CritChanceBp)
+  // Plus 1000 bp from Malice 5/5 and Close Quarters Combat 2/2, and 3000 from
+  // Improved Backstab 3/3; see `rogueTraits`.
+  Assert.Equal(2540, rogue.CritChanceBp)
   Assert.Equal(1020, rogue.DodgeChanceBp)
-  Assert.Equal(0, rogue.BackstabCritBonusBp)
+  Assert.Equal(3000, rogue.BackstabCritBonusBp)
 
 /// Backstab is 150% weapon damage plus a flat bonus, scaled by Strength the way
 /// a swing is. The crit half of the trait is pinned by the test above.
@@ -4304,7 +4338,8 @@ let ``sinister strike builds combo points up to five and no further`` () =
   Assert.Equal(3, (entBy 1 (swing 3 w)).ComboPoints)
   Assert.Equal(5, (entBy 1 (swing 7 w)).ComboPoints)
 
-/// Five points of Eviscerate at rank 4 is 165-185, and the points are gone.
+/// Five points of Eviscerate at rank 4 is 165-185, improved 15% by Improved Eviscerate
+/// 3/3 to 189-212, and the points are gone.
 [<Fact>]
 let ``eviscerate cashes in the combo points for its five-point damage`` () =
   let w =
@@ -4315,8 +4350,9 @@ let ``eviscerate cashes in the combo points for its five-point damage`` () =
   let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) (AbilityDef.at 24 Content.eviscerate).Value w
   let dealt = before - (mobOf w).Health
 
-  Assert.True(dealt >= 165 && dealt <= 185, sprintf "dealt %d" dealt)
-  Assert.Equal(0, (entBy 1 w).ComboPoints)
+  Assert.True(dealt >= 189 && dealt <= 212, sprintf "dealt %d" dealt)
+  // Ruthlessness 3/3: the finisher zeroes the pool and then hands one point back.
+  Assert.Equal(1, (entBy 1 w).ComboPoints)
 
 /// Energy is 20 per 2 s on its own clock: 20 Ticks to the second, so 40 Ticks
 /// puts a rogue who spent everything back at 20.

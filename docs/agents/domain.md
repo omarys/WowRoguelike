@@ -783,6 +783,34 @@ Measured after the port: bench 30/30 still `EncounterCleared`, every seed moved 
 35/36 with the same single library wipe. So the tank's six talents cost no cell —
 which is what a data-only port should cost.
 
+### Rogue: the OctoWoW build, six of eighteen, and two costs
+
+The operator's build (`?points=aoYDI-FAroIAQoRCCAB-`, Assassination 17 / Combat 34 /
+Subtlety 0) is part-landed, same shape as the Warrior's: Malice 5/5 and Close Quarters
+Combat 2/2 as `CritBonusBp = 1000`, Improved Backstab 3/3 as `BackstabCritBonusBp`, and
+the other four baked into the rows they edit — Improved Eviscerate (+15% on the finisher's
+one-point pair and its step), Ruthlessness (`ComboPoint 1` appended **after** `Finisher`,
+the only order that survives `Finisher` zeroing the pool), and Improved Kick
+(`Silence 2 s` beside the lockout).
+
+**The two flat costs are the interesting part**, because they are the OctoWoW *baseline*
+change rather than a talent: Sinister Strike 45 → 40 energy and Eviscerate 35 → 30, where
+the file's own comment claimed "Energy costs do not vary by rank: Sinister Strike is 45".
+Five energy off a generator is not cosmetic on a 100-energy pool — it is a whole extra
+Sinister Strike per fifteen seconds, which is what moved the bench.
+
+**One test had to change shape, not numbers.** `an interrupt cannot cancel a cast that is
+not interruptible` used Kick, and Kick now carries Improved Kick's silence — and a silence
+*does* end a cast (`SimCombat.fs` sets `Casting = None`), because that is what a silence is.
+The rule the test guards is about `Interrupt`, so it now hands the rogue a Kick with the
+silence stripped and asks only its own question. That is the second time a port has exposed
+a test asserting more than it claimed.
+
+Measured: bench 30/30 clear, every seed within ~5% either way; `--level 60` 36/36; the
+level-scaled axis **36/36 for the first time**, including the library cell that had wiped
+2 of 2. That cell is not "fixed by the Rogue" in any proven sense — the whole party's
+numbers moved, and this is a one-seed run — but there is no failing cell left to debug.
+
 ## 9. Open work, in priority order
 
 0. **The balance-and-story programme: decided with the owner, under way.** It

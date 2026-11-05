@@ -1039,7 +1039,10 @@ module Content =
   // Every rank from the vanilla 1.12 tables in .pi/research/ranks/rogue.md
   // (per-rank rows read off the Classic Era client, magnitudes cross-checked
   // against classicdb spell ids). Energy costs do not vary by rank: Sinister
-  // Strike is 45 and Backstab 60 from level 1 to 60.
+  // Strike is 40 and Backstab 60 from level 1 to 60, and Eviscerate 30 — the first
+  // two are OctoWoW's flat costs, which the page states outright ("Sinister Strike
+  // costs 40 Energy at every rank, Eviscerate 30") against the 45/35 this file
+  // carried from the classic client.
 
   /// Sinister Strike: 100% weapon damage plus a flat step that grows by rank.
   let sinisterStrike: AbilityDef =
@@ -1052,7 +1055,7 @@ module Content =
         [ for level, bonus in
             [ 1, 3; 6, 6; 14, 10; 22, 15; 30, 22; 38, 33; 46, 52; 54, 68 ] do
             { Level = level
-              Cost = 45
+              Cost = 40
               CastTicks = ticks 0
               CooldownTicks = ticks 0
               Range = 1
@@ -1103,6 +1106,18 @@ module Content =
   /// Eviscerate: the finisher. Damage is exactly linear in combo points (rank 4:
   /// 41-61 at one point, +31 a point to 165-185 at five), so a rank only needs
   /// its one-point pair and its step.
+  ///
+  /// Two of the Rogue's OctoWoW talents are baked into this row rather than carried
+  /// on the hero, because both are statements about the finisher itself: Improved
+  /// Eviscerate 3/3 is `+15%` on every term, and Ruthlessness 3/3 appends a combo
+  /// point **after** the `Finisher`, which is the only order that works — `Finisher`
+  /// zeroes the pool and `ComboPoint` re-adds it, so a point placed first would be
+  /// erased by the same ability that earned it.
+  ///
+  /// shortcut: Ruthlessness is a 60% chance at 3/3 and effects here are
+  /// deterministic, so it always procs. That is a 40% overstatement of a rogue's
+  /// energy economy; the alternative was leaving the talent out of a build that
+  /// spends three points on it.
   let eviscerate: AbilityDef =
     { Name = "Eviscerate"
       Resource = Energy
@@ -1120,11 +1135,11 @@ module Content =
               48, 144, 212, 110
               56, 199, 295, 151 ] do
             { Level = level
-              Cost = 35
+              Cost = 30
               CastTicks = ticks 0
               CooldownTicks = ticks 0
               Range = 1
-              Effects = [ Finisher(lo, hi, step) ] } ] }
+              Effects = [ Finisher(lo * 115 / 100, hi * 115 / 100, step * 115 / 100); ComboPoint 1 ] } ] }
 
   /// Gouge: 45 energy, a 4 s incap, and it builds a combo point. The incap is a
   /// `Sleep` rather than a `Stun`: any damage breaks it, so Gouge buys a re-pull
@@ -1145,6 +1160,11 @@ module Content =
               Effects = [ Damage(damage, damage); Sleep(secTicks 4.0); ComboPoint 1 ] } ] }
 
   /// Kick: 25 energy, 10 s cooldown, five-second school lockout.
+  ///
+  /// Improved Kick 2/2 adds a two-second silence on top. Vanilla's talent does
+  /// exactly that, so this is the talent as written rather than an invention, and it
+  /// lands on the row rather than in `Spells` because `Silence` is an effect and
+  /// `SpellTalent` has no "append" case.
   let kick: AbilityDef =
     { Name = "Kick"
       Resource = Energy
@@ -1158,7 +1178,7 @@ module Content =
               CastTicks = ticks 0
               CooldownTicks = secTicks 10.0
               Range = 1
-              Effects = [ Damage(damage, damage); Interrupt ] } ] }
+              Effects = [ Damage(damage, damage); Interrupt; Silence(secTicks 2.0) ] } ] }
 
   /// Sap: 65 energy, 3 tiles, and a 30 s incap that starts nothing. No cooldown,
   /// deliberately: being out of combat only *is* the limiter, so a second Sap can
@@ -3883,6 +3903,23 @@ module Content =
   /// Night Elf Rogue: 221 armour from the set plus 200 from Agility, Assassin's
   /// Blade 20-39 at 1.90 s, 100 energy. The one class whose ability ranks are
   /// levelled, so his damage falls off properly below 24.
+  /// Rogue 17/34/0 under OctoWoW's tree — the operator's build
+  /// (`?points=aoYDI-FAroIAQoRCCAB-`: Assassination 17, Combat 34, Subtlety 0). Six of
+  /// its eighteen talents are expressible as data; the other twelve each need a model
+  /// axis and are named with it in `.pi/research/octowow/rogue.md` §5(b).
+  ///
+  /// These ride on `Traits` rather than on `Talents` because that is where crit lives
+  /// for a rogue: Malice 5/5 is +5% and Close Quarters Combat 2/2 another +5%, so the
+  /// pair is 1000 bp. CQC is dagger-only and the kit always holds a dagger, so folding
+  /// the two together is faithful here and would not be on a hero that could swap.
+  ///
+  /// Improved Backstab is crit-only in OctoWoW's tree as the note reads it, and that
+  /// is the half `SimCombat` already special-cases by name.
+  let private rogueTraits =
+    { Traits.none with
+        CritBonusBp = 1000
+        BackstabCritBonusBp = 3000 }
+
   let private rogue (buffs: PartyBuffKind list) (level: int) (id: int) =
     heroStats
       buffs
@@ -3891,7 +3928,7 @@ module Content =
       "Rogue"
       Dps
       Leather
-      Traits.none
+      rogueTraits
       { Base = nightElfRogueBase
         Talents = Talents.none
         Gear =
