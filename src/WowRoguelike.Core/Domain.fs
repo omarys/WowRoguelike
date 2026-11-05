@@ -150,9 +150,11 @@ module CreatureType =
 type EntityId = EntityId of int
 
 /// What a "your next spell" talent changes about the spell it lands on. The
-/// three 1.12 cooldowns of that shape — Nature's Swiftness, Divine Favor and
-/// Inner Focus — differ only in which of these three things they set, so they
-/// are one buff with three fields rather than three buffs.
+/// 1.12 cooldowns of that shape — Nature's Swiftness, Divine Favor, Inner Focus —
+/// differ only in which of these three things they set, so they are one buff with
+/// three fields rather than three buffs. Divine Favor's kit row is gone since the
+/// OctoWoW port made it a passive (`.pi/research/octowow/paladin.md` §5(c)), but
+/// the shape stays: `SureCrit` is what Inner Focus sets.
 [<Struct>]
 type Empower =
   { /// Cast it instantly whatever its cast time says.
@@ -267,9 +269,8 @@ type Aura =
   /// target, in basis points. Same case for both talents — the number in it is
   /// whichever tree's rank applies.
   | Inspired of remaining: int<tick> * armorBp: int
-  /// Nature's Swiftness, Divine Favor or Inner Focus sitting on the caster,
-  /// waiting to be spent on the next spell. It falls off when it is used and
-  /// when it times out.
+  /// Nature's Swiftness or Inner Focus sitting on the caster, waiting to be spent
+  /// on the next spell. It falls off when it is used and when it times out.
   | Empowered of remaining: int<tick> * empower: Empower
   /// Vanilla's five-second rule: time since the last spell left this character's
   /// hands. While it stands, regeneration is the trickle rather than the rate —
@@ -846,7 +847,7 @@ type Effect =
   /// friendly fire, and not mitigated by armour.
   | AreaDamage of radius: int * min: int * max: int
   /// A buff on the caster that changes the next spell it lands: Nature's
-  /// Swiftness, Divine Favor, Inner Focus (`.pi/research/levelscale/healer-procs.md`).
+  /// Swiftness, Inner Focus (`.pi/research/levelscale/healer-procs.md`).
   | Empowers of duration: int<tick> * empower: Empower
   /// This ability's own crit chance, above the caster's (Improved Regrowth's +50%
   /// on Regrowth). A crit heal is worth half again as much, so this is a healing

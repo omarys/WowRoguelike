@@ -334,9 +334,10 @@ module SimCombat =
     | Some actor ->
       let targetName = nameOf targetId w0
 
-      // Nature's Swiftness, Divine Favor and Inner Focus are spent by the first
-      // *heal* their holder lands, and by nothing else — a Smite must not eat
-      // the Paladin's guaranteed crit. Inner Focus also pays the spell's cost.
+      // Nature's Swiftness and Inner Focus are spent by the first *heal* their
+      // holder lands, and by nothing else — a Smite must not eat the Priest's
+      // guaranteed crit. Inner Focus also pays the spell's cost. (The Paladin's
+      // Divine Favor was the third of these and is gone: OctoWoW made it passive.)
       let empowered = ability.Effects |> List.exists isHealEffect
       let empower = if empowered then Aura.empower actor.Auras else Empower.none
       let cost = if empower.FreeMana then 0 else ability.ResourceCost

@@ -462,7 +462,8 @@ not measured. No ladder or `comps` cell seats them either, so nothing else needs
 | Mage | Arcane 40/Frost 11 | **4 of 19** | four data-only, incl. Presence of Mind as a kit row; 15 need axes |
 | Priest | Disc 11/Holy 40 | **8 of 16** | best hit rate of the port; two talents had to be *deleted* |
 | Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
-| Paladin, Hunter, Warlock, Druid | — | 0 | notes written, nothing ported |
+| Paladin | 40/0/11 | **7 of 17** | five lines and one deletion; Illumination is a **nerf** (10000 → 6000) and Divine Favor's cooldown row is gone; `comps 6 --level 60` 36/36 clean, bench 30/30 with the snapshot unmoved |
+| Hunter, Warlock, Druid | — | 0 | notes written, nothing ported |
 
 The Warrior port is the template: each (a)-bucket talent lands as a field, each (b)-bucket
 talent is left out and named with the axis it needs. Two findings from it are recorded in

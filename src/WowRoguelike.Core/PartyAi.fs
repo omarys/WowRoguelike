@@ -498,11 +498,15 @@ module PartyAi =
     let projected (t: Entity) = t.Health + Aura.healOverTimePending t.Auras
     let projectedPct (t: Entity) = projected t * 100 / t.MaxHealth
 
-    // The cooldown buttons — Nature's Swiftness, Divine Favor, Swiftmend, Inner
-    // Focus. None of them is a heal, so the selection above cannot see them: they
-    // are cast on the way *into* a heal, and only when the hole is big enough to
-    // be worth a two- or three-minute cooldown. A healer who has none of them
-    // (every class but these four) finds nothing here and is unaffected.
+    // The cooldown buttons — Nature's Swiftness, Swiftmend, Inner Focus. None of
+    // them is a heal, so the selection above cannot see them: they are cast on the
+    // way *into* a heal, and only when the hole is big enough to be worth a two- or
+    // three-minute cooldown. A healer who has none of them (every class but these
+    // three) finds nothing here and is unaffected.
+    //
+    // The Paladin used to be the fourth, through Divine Favor. OctoWoW turns Divine
+    // Favor into a passive Holy Shock talent, so the kit row is gone and the class
+    // has no button to press — its absence here is the port, not an oversight.
     //
     // The trip point is 60% and not 40%, because the whole point of an instant is
     // the cast time it skips: a Druid's Regrowth takes two seconds, so a button

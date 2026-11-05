@@ -3482,21 +3482,78 @@ module Content =
               CritBp = 0
               CastTicksOff = ticks 0 } ] }
 
-  /// Paladin 31/20/0, the standard PvE holy build: Divine Intellect 5/5 (+10%
-  /// Int), Spiritual Focus 5/5 (-70% pushback), Healing Light 3/3 (+12% Flash of
-  /// Light), Illumination 5/5 (a heal crit refunds its whole cost) and Holy Power
-  /// 5/5 (+5% crit). Divine Favor is in the kit as a cooldown.
+  /// Paladin Holy 40 / Protection 0 / Retribution 11 under OctoWoW's tree — the
+  /// operator's build, decoded in `.pi/research/octowow/paladin.md` §6: a healer
+  /// build whose 31-point talent is Daybreak rather than the old 31/20/0. **Seven of
+  /// the seventeen talents** it takes are expressible as data; the other nine are
+  /// named with the axis each needs in that note's §5(b).
+  ///
+  /// - Divine Intellect 5/5: `IntellectBp 1000`.
+  /// - Spiritual Focus 2/2: `healerTraits 500 7000` — OctoWoW cut the talent to two
+  ///   ranks and kept the 70% endpoint, so the trait survives a rank change.
+  /// - Healing Light 3/3: `HealBp 1200` on Flash of Light and Holy Light. Holy Shock
+  ///   is the talent's third target and has no kit row (§5(b)).
+  /// - Illumination 5/5: `ManaRefundOnCritBp 6000`, which is a **nerf** — the sim
+  ///   refunded the whole cost of a crit heal, OctoWoW refunds 60% at five ranks.
+  /// - Holy Power 3/3: `CritBp 600` on Holy Light and Flash of Light. The comment
+  ///   here used to claim Holy Power 5/5 while the record set no crit at all.
+  /// - Benediction 3/5: `CostBp 900` on Judgement.
+  /// - Improved Judgement 2/2: `CooldownOff [ "Judgement", secTicks -2.0 ]`.
+  ///
+  /// **Divine Favor is gone from the kit, not retuned.** 1.12's Divine Favor is a
+  /// two-minute cooldown that makes the next heal a guaranteed crit; OctoWoW's is a
+  /// passive five-rank Holy Shock crit talent gated behind Holy Shock. Same name,
+  /// different ability — so the row is deleted and nothing replaces it, because Holy
+  /// Shock is not in the kit either. The Paladin therefore has no panic button, which
+  /// is a real loss of power and shows up on the ladder rather than being argued away.
+  /// Paladin Holy 40 / Protection 0 / Retribution 11 under OctoWoW's tree — the
+  /// operator's build, decoded in `.pi/research/octowow/paladin.md` §6. **Seven of the
+  /// seventeen talents in it are expressible as data**, and two of the seven (Divine
+  /// Intellect, Spiritual Focus) were already here, so the port itself is five lines and
+  /// one deletion.
+  ///
+  /// - Illumination 5/5: `ManaRefundOnCritBp` 10000 → 6000. **This is a nerf to live
+  ///   behaviour**: payload 5/5 refunds sixty per cent of the cost, not all of it, and the
+  ///   old record claimed the whole cost. The port keeps the nerf on purpose — OctoWoW is
+  ///   the content this project follows, so a cheaper Paladin than the reference is a bug.
+  /// - Holy Power 3/3: `CritBp 600` on Holy Light **and** Flash of Light. The old comment
+  ///   here claimed "Holy Power 5/5 (+5% crit)" while the record set no `CritBp` at all,
+  ///   so comment and record had disagreed since before this port started.
+  /// - Benediction 3/5: `CostBp 900` on Judgement. Improved Judgement 2/2:
+  ///   `CooldownOff = [ "Judgement", secTicks -2.0 ]`, 10 s → 8 s.
+  /// - Healing Light 3/3 and Divine Intellect 5/5 were already right; Spiritual Focus 2/2
+  ///   is carried by `healerTraits` rather than by this record.
+  ///
+  /// **Divine Favor leaves the kit entirely.** The sim shipped a `divineFavor` cooldown
+  /// row — "the next healing spell is a guaranteed crit", 2 min, 21 mana — and OctoWoW's
+  /// Divine Favor is a passive Holy Shock crit talent behind the same name. A port that
+  /// adds the crit line without deleting the row leaves two Divine Favors live, so the row
+  /// is gone and `SureCrit` is now set only by the Priest's Inner Focus.
+  ///
+  /// The nine that need an axis are named with their missing field in §5(b) — they are
+  /// concentrated in the Paladin because its interesting talents are all triggers: Holy
+  /// Shock's either-target cast, Daybreak's reactive heal, Blessed Strikes' reset proc,
+  /// Ironclad's armour-to-healing conversion, Blessing of Kings' multiplicative party buff.
+  ///
+  /// shortcut: seals are still not modelled, so Judgement remains the comment's plain Holy
+  /// nuke (see `judgementRanks`). That is the Paladin's largest remaining gap and it is
+  /// deliberately unbuilt, not forgotten.
   let private paladinTalents =
     { Talents.none with
         IntellectBp = 1000
-        ManaRefundOnCritBp = 10000
+        ManaRefundOnCritBp = 6000
+        CooldownOff = [ "Judgement", secTicks -2.0 ]
         Spells =
-          [ { Spell = "Flash of Light"
-              CostBp = 0
-              HealBp = 1200
-              DamageBp = 0
-              CritBp = 0
-              CastTicksOff = ticks 0 } ] }
+          [ for spell, healBp, critBp, costBp in
+              [ "Flash of Light", 1200, 600, 0
+                "Holy Light", 1200, 600, 0
+                "Judgement", 0, 0, 900 ] ->
+              { Spell = spell
+                CostBp = costBp
+                HealBp = healBp
+                DamageBp = 0
+                CritBp = critBp
+                CastTicksOff = ticks 0 } ] }
 
   /// Druid 5/0/46, Moonglow into Swiftmend: Gift of Nature 5/5 (+10% healing),
   /// Tranquil Spirit 5/5 (-10% Healing Touch mana), Improved Rejuvenation 3/3
@@ -3708,10 +3765,6 @@ module Content =
       Range = 0
       TargetKind = Self
       Effects = [ TakeStance HumanForm ] }
-
-  /// Divine Favor: the next healing spell is a guaranteed crit.
-  let private divineFavor =
-    nextSpell "Divine Favor" (secTicks 120.0) 21 { Empower.none with SureCrit = true }
 
   /// Inner Focus: the next spell is free and a guaranteed crit.
   /// shortcut: 1.12 makes it +25% critical effect chance, not a guarantee; the
@@ -4448,8 +4501,7 @@ module Content =
             holyLightRanks
             judgementRanks
             paladinHammerOfJusticeRanks
-            divineProtectionRanks ]
-        @ [ divineFavor ]))
+            divineProtectionRanks ]))
       { X = 1; Y = 8 }
 
   /// Gnome Warlock: cloth, the same washed-out set as the Mage — five of the

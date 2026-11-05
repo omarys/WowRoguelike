@@ -253,8 +253,9 @@ A "headless run" that forgets this measures a party standing still.
 cooldown, and it fires on exactly two effect shapes: `Empowers` while the target is
 under 60% health (`needsFastHeal`, `PartyAi.fs:395`), and `ConsumeHealOverTime` when a
 Rejuvenation is worth eating. That
-reaches Nature's Swiftness, Divine Favor, Inner Focus and Swiftmend — every one of
-them a button "cast on the way into a heal", as the comment there says. **Innervate
+reaches Nature's Swiftness, Inner Focus and Swiftmend — every one of them a button
+"cast on the way into a heal", as the comment there says. (Divine Favor used to be the
+fourth; the OctoWoW port deleted its kit row, so the Paladin now has none.) **Innervate
 and Mana Tide Totem matched neither branch, so they were never cast** — not because
 the AI did not know their names, but because the matcher had no shape for a cooldown
 that restores mana. The lesson is the fix that worked: a new **effect shape**, not a
@@ -879,8 +880,49 @@ that failed before this port are now clean, so the scaled axis went from four fa
 to three — the healer's numbers helped the rosters carrying a Shaman, which is the kind of
 coupling that makes a single-class diff hard to credit.
 
-## 9. Open work, in priority order
+### Paladin: seven of seventeen, one deletion, and a nerf kept on purpose
 
+Holy 40 / Protection 0 / Retribution 11 — the operator's build — lands **seven of
+seventeen talents**, and two of the seven were already in the record, so the diff is five
+lines and one deletion. The Paladin is the first class where the port *lowered* a number:
+
+- **Illumination 5/5 is `ManaRefundOnCritBp` 10000 → 6000.** The old record refunded the
+  whole cost of a crit heal; payload refunds sixty per cent. The test that used to assert
+  "mana back to 100" now asserts "100 − cost + 60% of cost", which is the shape of every
+  talent-nerf assertion after this one.
+- **Divine Favor's kit row is deleted.** The sim shipped a 2-minute cooldown that made the
+  next heal a guaranteed crit; OctoWoW's Divine Favor is a passive Holy Shock crit talent
+  wearing the same name. Adding the passive without deleting the cooldown would have left
+  two Divine Favors live — the same trap the Priest port hit with Meditation. `SureCrit`
+  is now set only by Inner Focus, and the three `Domain.fs`/`SimCombat.fs` comments that
+  listed "Nature's Swiftness, Divine Favor, Inner Focus" as one shape were corrected rather
+  than left to mislead.
+- **Comment and record had already disagreed.** The old `paladinTalents` comment claimed
+  "Holy Power 5/5 (+5% crit)" while the record set no `CritBp` at all. Before porting a
+  class, diff its own comment against its own record: this one was wrong for months.
+
+The nine unlanded talents are the trigger-shaped ones — Holy Shock's either-target cast,
+Daybreak's reactive heal, Blessed Strikes' reset proc, Ironclad's armour-to-healing,
+Blessing of Kings' *multiplicative* party buff (every `buffed` branch today adds a flat
+number). Seals stay unmodelled, so Judgement is still a plain Holy nuke.
+
+Two traps in the tests, both from content that is level-gated:
+
+- **`Content.gully 1UL` gives the Paladin no Holy Light.** It is a level-22 ability, so the
+  "build lands on his kit" test had nothing to land three of its five rows on and threw
+  `KeyNotFoundException`. Level-24 content (`Content.partyOf [ ... ] 24`) is what that test
+  needs, and any future per-class kit test should start there.
+- **`Talents.healBp` returns the multiplier including the 10000 baseline.** 11200, not 1200.
+
+Measured on a rebuilt Harness: bench **30/30** clear and the snapshot **did not move** —
+which is itself informative, since the bench roster is `gully` at L24 where the Paladin's
+crit heal is a rounding error. `comps 6 --level 60` is **36 of 36 cells fully clean at six
+seeds**, identical to the Priest port's record, so the Illumination nerf did not cost a
+single cell at the level the balance question is asked at. Do not read that as "the nerf
+is free": the axis that would show it is one where a Paladin runs out of mana, and no cell
+came close (the Paladin seat ends every arm above 60% mana).
+
+## 9. Open work, in priority order
 0. **The balance-and-story programme: decided with the owner, under way.** It
    governs items 3 to 7 below rather than replacing them.
    - **Status.** Done: the raid-gear anchor (twice cross-checked), the healer and damage

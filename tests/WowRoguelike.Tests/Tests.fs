@@ -1855,22 +1855,56 @@ let ``the paladin's kit is the level-24 one`` () =
     (paladin.Abilities |> List.find (fun a -> a.Name = name)).Effects
 
   // Holy Light rank 4 (level 22) and Flash of Light rank 1 (level 20) on the
-  // 1.15.9 client this content follows.
-  Assert.Equal<Effect list>([ Heal(322, 368) ], effectsOf "Holy Light")
-  Assert.Equal<Effect list>([ Heal(67, 77) ], effectsOf "Flash of Light")
-  // Judgement with Seal of Righteousness rank 3 up.
+  // 1.15.9 client this content follows. Each carries its Holy Power 3/3 crit.
+  Assert.Equal<Effect list>([ Heal(322, 368); CritBonus 600 ], effectsOf "Holy Light")
+  Assert.Equal<Effect list>([ Heal(67, 77); CritBonus 600 ], effectsOf "Flash of Light")
+  // Judgement with Seal of Righteousness rank 3 up, and no crit: Holy Power names
+  // the two heals only.
   Assert.Equal<Effect list>([ SpellDamage(53, 57) ], effectsOf "Judgement")
   // Hammer of Justice rank 2 is a 4 s stun, Divine Protection rank 2 is 8 s of
   // immunity.
   Assert.Equal<Effect list>([ Stun(secTicks 4.0) ], effectsOf "Hammer of Justice")
   Assert.Equal<Effect list>([ ReducesDamage(secTicks 8.0, 10000) ], effectsOf "Divine Protection")
-  // Divine Favor is the tree's cooldown button: two minutes, 4% of base mana.
-  let divineFavor =
-    paladin.Abilities |> List.find (fun a -> a.Name = "Divine Favor")
+  // Divine Favor is not in the kit any more: OctoWoW's Divine Favor is a passive
+  // Holy Shock crit talent, so the 1.12 cooldown row was deleted rather than tuned
+  // (`.pi/research/octowow/paladin.md` §5(c)). Five abilities, not six.
+  Assert.DoesNotContain(paladin.Abilities, fun a -> a.Name = "Divine Favor")
+  Assert.Equal(5, List.length paladin.Abilities)
 
-  Assert.Equal(secTicks 120.0, divineFavor.CooldownTicks)
-  Assert.Equal(21, divineFavor.ResourceCost)
-  Assert.Equal(6, List.length paladin.Abilities)
+/// The Paladin's OctoWoW build — Holy 40 / Protection 0 / Retribution 11, decoded in
+/// `.pi/research/octowow/paladin.md` §6. Seven of its seventeen talents are data;
+/// the other nine need axes the model does not have (§5(b)), and one 1.12 kit row had
+/// to be deleted rather than tuned (§5(c)).
+[<Fact>]
+let ``the paladin's OctoWoW build lands on his kit`` () =
+  // Level 24, the roster's level: at level 1 the Paladin has no Holy Light, so three
+  // of the record's five spell rows would have nothing to land on.
+  let paladin =
+    Content.partyOf [ "Warrior"; "Paladin" ] 24
+    |> List.find (fun e -> e.Name = "Paladin")
+
+  let ability name = paladin.Abilities |> List.find (fun a -> a.Name = name)
+
+  // Divine Intellect 5/5, and Illumination 5/5 which is a **nerf**: the sim used to
+  // refund a crit heal's whole cost and OctoWoW refunds sixty per cent of it.
+  Assert.Equal(1000, paladin.Talents.IntellectBp)
+  Assert.Equal(6000, paladin.Talents.ManaRefundOnCritBp)
+  // Healing Light 3/3 on both casts the kit carries. Holy Shock is the talent's third
+  // target and there is no row for it, so it is absent by construction rather than
+  // by omission.
+  // `Talents.healBp` returns the multiplier including the 10000 baseline, so 11200
+  // is the 12% Healing Light 3/3 on top of an unmodified heal.
+  Assert.Equal(11200, Talents.healBp "Flash of Light" paladin.Talents)
+  Assert.Equal(11200, Talents.healBp "Holy Light" paladin.Talents)
+  // Holy Power 3/3 — the old comment claimed it while the record set no crit at all.
+  Assert.Contains(CritBonus 600, (ability "Holy Light").Effects)
+  Assert.Contains(CritBonus 600, (ability "Flash of Light").Effects)
+  Assert.DoesNotContain((ability "Judgement").Effects, fun e -> e = CritBonus 600)
+  // Improved Judgement 2/2: ten seconds becomes eight, and never below the 1.5 s floor.
+  Assert.Equal(secTicks 8.0, (ability "Judgement").CooldownTicks)
+  // Benediction 3/5: nine per cent off Judgement's mana.
+  let stock = (AbilityDef.at 24 Content.judgementRanks).Value
+  Assert.Equal(stock.ResourceCost * 9100 / 10000, (ability "Judgement").ResourceCost)
 
 /// The researched set, put through the sim's own formulas. Every number here is
 /// derived by hand from `.pi/research/level24/paladin.md` rather than read back
@@ -2571,17 +2605,21 @@ let ``the druid waits for the last tick before Swiftmending`` () =
   // Regrowth is the other buff it eats: 18 s of 4 a second is 72, which fits.
   Assert.Contains("Swiftmend", druidCasts (world 85 20 4 "Regrowth"))
 
-/// The talent cooldowns are buttons, not passives: Divine Favor is spent on the
-/// first heal after the Tank drops under 40% and then waits out its two minutes.
-/// The run below is 45 s of Ticks against a mob that swings for nothing, so the
-/// Tank sits at 30% and the Paladin heals it over and over while the cooldown is
-/// still running — one cast, and not a second one.
+/// The talent cooldowns are buttons, not passives: Inner Focus is spent on the first
+/// heal after the Tank drops under 60% and then waits out its three minutes. The run
+/// below is 45 s of Ticks against a mob that swings for nothing, so the Tank sits at
+/// 30% and the Priest heals it over and over while the cooldown is still running —
+/// one cast, and not a second one.
+///
+/// This test used the Paladin's Divine Favor until the OctoWoW port deleted that row
+/// (`paladin.md` §5(c)): a passive crit talent cannot be "spent on the first heal", so
+/// the button moved to the Priest rather than being asserted back into existence.
 [<Fact>]
 let ``a talent cooldown fires once and then waits for its cooldown`` () =
-  let party = Content.partyOf [ "Warrior"; "Paladin" ] 24
+  let party = Content.partyOf [ "Warrior"; "Priest" ] 24
   let tank = { party.[0] with Pos = { X = 5; Y = 5 } }
 
-  let paladin =
+  let priest =
     { party.[1] with
         Pos = { X = 5; Y = 6 }
         Resource = 4000
@@ -2599,7 +2637,7 @@ let ``a talent cooldown fires once and then waits for its cooldown`` () =
     { Tick = ticks 0
       RestTicks = ticks 0
       Grid = Grid.create 12 10
-      Entities = [ wounded; paladin; enemy ]
+      Entities = [ wounded; priest; enemy ]
       Pending = []
       Rng = Rng.streamsOf 5UL
       PartyBuffs = []
@@ -2607,7 +2645,7 @@ let ``a talent cooldown fires once and then waits for its cooldown`` () =
       Log = [] }
 
   // 900 Ticks is 45 s: comfortably more than the instant button needs to be
-  // pressed, and well under the two-minute cooldown it starts.
+  // pressed, and well under the three-minute cooldown it starts.
   let mutable fires = 0
   let mutable was = ticks 0
 
@@ -2615,8 +2653,8 @@ let ``a talent cooldown fires once and then waits for its cooldown`` () =
     w <- SimTick.step (Bench.autoPilot w) w
 
     let now =
-      (SimState.tryEntity paladin.Id w).Value.Cooldowns
-      |> Map.tryFind "Divine Favor"
+      (SimState.tryEntity priest.Id w).Value.Cooldowns
+      |> Map.tryFind "Inner Focus"
       |> Option.defaultValue (ticks 0)
 
     // A cast resets the timer upward; a tick that only counts down does not.
@@ -2625,8 +2663,8 @@ let ``a talent cooldown fires once and then waits for its cooldown`` () =
     was <- now
 
   let remaining =
-    (SimState.tryEntity paladin.Id w).Value.Cooldowns
-    |> Map.tryFind "Divine Favor"
+    (SimState.tryEntity priest.Id w).Value.Cooldowns
+    |> Map.tryFind "Inner Focus"
     |> Option.defaultValue (ticks 0)
 
   Assert.Equal(1, fires)
@@ -2701,8 +2739,12 @@ let ``Illumination returns a crit heal's mana`` () =
 
   let withIllumination = manaAfter party.[1]
   let without = manaAfter { party.[1] with Talents = Talents.none }
+  let cost = 100 - without
 
-  Assert.Equal(100, withIllumination)
+  // OctoWoW's Illumination 5/5 refunds sixty per cent of the cost where 1.12
+  // refunded all of it, so the cast is cheaper than a plain Paladin's and still
+  // not free. That is a nerf the port keeps on purpose.
+  Assert.Equal(100 - cost + cost * 6000 / 10000, withIllumination)
   Assert.True(without < 100, sprintf "the plain Paladin should have paid: %d" without)
 
 /// A totem is scenery, not a body: it claims no tile, so the party walks over it,
