@@ -358,6 +358,17 @@ rank, so "cast the cheaper rank" has nothing to pick from. Both are content gaps
 AI gaps; the free-shot branch in `rangedOrders` is already written and will fire the
 day an ability with `ResourceCost = 0` exists for a caster.
 
+`damageOf` is the ranking's blind spot, and Nightfall is what walked into it: it counts
+an ability's *direct* `SpellDamage` and ignores `DamageOverTime` and `CritBonus`, so a dot
+scores nothing and an immolate-with-a-rider is scored as its direct hit divided by a short
+cast. That is why a `sim` Warlock casts Immolate 115 times and Shadow Bolt never
+(4900 against 4780 per cast tick), and why Corruption and Curse of Agony — score 0 — are
+never cast at all. A held `Empower` that names a spell now outranks the whole ranking
+(§"The rotation never reached the spell the talent names"), which fixes the reachability
+of a *named* ability without re-tuning the heuristic; the heuristic itself still scores
+dots at zero, so any dot-driven rotation question is being asked of an AI that will not
+cast the dot.
+
 **Mana Tide is untrained at every dungeon level, so the Shaman has no mana reserve
 in the only fights that are measured.** The totem ladder trains Stoneskin at 16,
 Healing Stream at 20, Mana Spring at 26, Mana Tide at 40 and Grace of Air at 42
@@ -1032,7 +1043,7 @@ forward is the mana column: **the Hunter ends every cell at 99-100% mana**, exac
 the Warlock ends at 97-100%. Neither class is resource-limited at level 60, so no hunter
 damage talent will ever show up in a mana floor either.
 
-### The proc axis — three talents, three classes, and the vocabulary a port no longer has to invent
+### The proc axis — four talents, four classes, and the vocabulary a port no longer has to invent
 
 The axis inventory (`.pi/research/octowow/axis-inventory.md` §1 A1) put the trigger/proc
 hook first by leverage: **eighteen talents across eight classes** hang off an event the
@@ -1046,16 +1057,18 @@ chosen to exercise every part of it:
 | Warrior | Shield Specialization 5/5 | `OnBlock` | 5 rage, flat |
 | Druid (bear) | Primal Fury 2/2 | `OnCrit` | 5 rage, flat |
 | Mage | Arcane Concentration 5/5 | `OnSpellHit` | `Empower.FreeMana` for 15 s |
+| Warlock | Nightfall 2/2 | `OnDoTTick` | `Empower.Instant`, scoped to Shadow Bolt, 10 s |
 
 The vocabulary is three types in `Domain.fs` and one function in `SimCombat.fs`:
-`ProcEvent` (`OnCrit`, `OnBlock`, `OnSpellHit`), `ProcResult` (`GrantResource`,
-`EmpowerNext`), `Proc = { Talent; Event; ChanceBp; InternalCooldown; Then }`, and
-`SimCombat.procOn ev id w`. A build carries `Talents.Procs`, and the engine calls
-`procOn` at the three places it already decides those events — `meleeStrike`'s `Blocked`
-arm (on the blocker), its `Critical` arm (on the attacker), and the `SpellDamage` effect
-once the spell has landed and not been resisted. **Adding an event is one case and one
-call site**; no talent needs a branch of its own, which is the whole point of building it
-once before the remaining nine class ports.
+`ProcEvent` (`OnCrit`, `OnBlock`, `OnSpellHit`, `OnDoTTick`), `ProcResult`
+(`GrantResource`, `EmpowerNext`), `Proc = { Talent; Event; ChanceBp; InternalCooldown;
+Then }`, and `SimCombat.procOn ev id w`. A build carries `Talents.Procs`, and the engine
+calls `procOn` at the four places it already decides those events — `meleeStrike`'s
+`Blocked` arm (on the blocker), its `Critical` arm (on the attacker), the `SpellDamage`
+effect once the spell has landed and not been resisted, and `SimTick.advanceAuraDamage`
+(on the *applier*, once per dot that fired). **Adding an event is one case and one call
+site**; no talent needs a branch of its own, which is the whole point of building it once
+before the remaining nine class ports.
 
 Four decisions inside it are load-bearing:
 
@@ -1091,6 +1104,99 @@ damage spell and then spent. `the warrior carries a shield` now asserts `1000` b
 (base shield 5% + the talent's 5%) and that the build carries the proc. The bench
 snapshot moved — a Warrior blocking 5% more and a Mage occasionally casting free are
 visible to a bench fight — and was refreshed deliberately after reading the diff.
+
+### The tick that belongs to the applier
+
+Nightfall (Warlock MM 2/2, `ChanceBp = 400`) hangs off a damage-over-time tick, and the
+tick had no owner: `Corrupted of remaining * damagePerTick` carried no caster, so
+`advanceAuraDamage` could damage but never knew whose build to consult. The field it
+gained is the whole mechanism:
+
+```fsharp
+| Corrupted of remaining: int<tick> * damagePerTick: int * caster: EntityId option
+```
+
+`None` is a real value, not a placeholder: `Aura.dotCaster` returns `Some` only for a dot
+that names one, so a fixture or an ability that does not know its applier still builds and
+still does damage — the tick is real, it just has no talent to fire. What the caster
+therefore cannot be read off is the *target*: a dot on the Warrior says nothing about who
+applied it, and by the time it fires the applier may be dead. `advanceAuraDamage` now runs
+two folds over the pre-damage `burning` list — damage first, then `procOn OnDoTTick` per
+`dotCaster` — so the last tick of a Corruption fires even if it kills, and `procOn`
+already refuses an id that is no longer in the world.
+
+The other half of Nightfall is scoping: the page says "your next **Shadow Bolt**", while
+every `Empower` in the tree was "your next spell" at large. A free heal must never eat a
+damage rebate (that is why `FreeMana` is read for every spell, above), but a free Fireball
+must not eat a *Shadow Bolt* instant either. `Empower` gained one field,
+`Only: string option`, and one test, `Empower.appliesTo`; `None` rides whatever comes next
+and `Some named` waits for that spell. The instant/crit/rebate gate in the cast path is
+now `scoped && (empowered || named) && (held.Instant || held.FreeMana || held.SureCrit)` —
+which keeps Inner Focus heal-only *and* stops Corruption from spending Nightfall, since
+the Warlock's best while-you-wait spell is exactly the one that would otherwise eat it.
+The duration and the scope ride `EmpowerNext`'s existing payload — `procOn`'s signature did not
+change, and the ten seconds are just `secTicks 10.0` on an `Empowered` aura, which the
+generic aura tick already counts down and drops at zero. Nightfall is the tree's first
+*scoped* empower, so `describe` gained a `>` marker for it: a fingerprint that cannot tell
+`empowered(i)` from `empowered(i,>Shadow Bolt)` would have hidden the one new state the
+increment adds. It prints nothing extra for an unscoped buff, so no existing golden text
+moved.
+
+Tests: four in `tests/WowRoguelike.Tests/Tests.fs` — ``a dot tick fires the applier's
+talent on the applier`` (the damage lands on the target and the `Instant`+`Only` buff on
+the caster), ``a dot applied by nobody fires nothing at all`` (the damage is still dealt),
+``a scoped instant waits for its own spell`` (Shadow Bolt goes off with no cast and spends
+the buff; Corruption casts normally and keeps it), and ``the warlock's build carries
+Nightfall`` (the row is `OnDoTTick` at 400 bp), plus ``the warlock reaches for the spell
+its buff names`` for the AI half. The scoped-cast test builds the caster from
+`Content.partyOf [ "Warlock" ] 60` on purpose: a hand-built entity is refused by
+`applyCommand` as "invalid or out of range", and a fixture that skips the roster makes the
+cast assertion pass without ever casting.
+
+**The bench snapshot does not move, and that is the finding, not an accident.**
+`Content.defaultRoster` is `Warrior/Priest/Rogue/Mage/Druid` — no Warlock — so the bench
+fight can never fire Nightfall; `sim snapshots 30` reprinted the file byte-identical. The
+instrument that can see this talent is `comps`, which swaps a Warlock in.
+
+### The rotation never reached the spell the talent names
+
+`comps` cannot see a proc either, so the increment was checked with a throwaway
+`dotnet fsi` probe against the built `WowRoguelike.Core.dll`: seat the Warlock roster at
+60 on the three medians, step `SimTick.step (Bench.autoPilot w)`, count `Nightfall procs`
+and `Shadow Bolt hits` in `w.Log`, and time how long the scoped buff is held. The first
+run answered a different question than the one being asked: **26 procs, and every one of
+the 21 observed buffs expired at the full ten seconds unspent**.
+
+The cause is not in the proc, it is in `PartyAi.rangedOrders`. A kit's paid spells are
+ranked `damageOf a * 1000 / castTicks`, and `damageOf` counts an ability's *direct*
+`SpellDamage` and ignores its `DamageOverTime`. So at level 60 Immolate is
+`SpellDamage(147,147) + DamageOverTime(300, 17 s)` over a 30-tick cast = **4900**, and
+Shadow Bolt is `SpellDamage(213,239)` over 50 ticks = **4780**: Immolate wins by 2.5%,
+and a `sim` Warlock casts Immolate 115 times and **Shadow Bolt zero times**, before this
+change and in every roster. Corruption and Curse of Agony score 0 — no `SpellDamage` at
+all — so they are never cast either, and every dot the sim logs is Immolate's rider.
+
+So the fix is one rule, and it is not a re-tune of the ranking: **a held `Empower` whose
+`Only` names a spell is a reason to cast that spell**, placed above the damage ranking and
+below the interrupt and the sting. It cannot move a rotation that exists today — `Only` is
+`None` for every other buff, and no other class has a scoped empower — so the blast radius
+is the Warlock-with-Nightfall cells. Re-probed on the pinned DLL
+(`d5e8db4873a3590d571dac80c2dee3040b521a9d88d41c2133519e006c05daa1`): 26 procs → **26
+Shadow Bolt hits, all 26 while holding the buff**, mean 25 ticks held (the AI asks for it
+on the very next tick) against 200 before. Two procs still become nothing — one lands on
+the last exchange of a fight with no target left — which is content, not a defect.
+
+The general lesson, worth carrying into the next port: **a talent that names an ability is
+only as reachable as the AI's ability ranking.** None of the three earlier talents names
+one (`GrantResource`, `FreeMana` apply to whatever comes next), which is why the same
+blindness could sit in the tree unnoticed. Any future "your next X" needs both halves —
+the scoped buff and an AI rule that reaches for X — or it ships as a unit test and nothing
+else.
+
+`comps 2 --level 60` after the AI rule is **36 of 36 cells clean**, and the same table shows
+the rule's reach: the three `Warrior/Priest/Mage/Rogue/Hunter` cells (no Warlock in the
+roster) came back byte-identical, while all thirty Warlock cells moved on ticks alone,
+mostly faster. A rule about a scoped buff moves exactly the rosters that can hold one.
 
 **Measured on a pinned binary** (`dotnet build -c Release -t:Rebuild`, Core DLL sha256
 `3fb841df57bb98ecf1f768c4dbd418285ebd13fa8901a3e63d1d26da9880dba3`):
@@ -1135,11 +1241,11 @@ landed kits do not have:
 | Shaman Undertow, Tidal Surge | payload numbers | **no source gives numbers** (both marked unverified in `shaman.md`) |
 | Hunter Piercing Shots | a bleed on a *crit* shot | `spellDamage` fires `OnSpellHit` without telling the proc whether it crit; needs a crit flag on that call and `ApplyAura` as a result kind |
 | Hunter Lock and Load | reset Aimed Shot, "line AoE" | the note's payload is self-contradictory; does not port until the ability's shape is settled |
-| Warlock Nightfall | 2/4% per DoT tick → instant Shadow Bolt | **a DoT does not know its caster**: `Aura.DamageOverTime of duration * damagePerTick` (`Domain.fs:917`) carries no owner, and `advanceAuraDamage` (`SimTick.fs:102`) ticks the *target*. Adding `caster` to that case is a schema change across every construction site and match |
+| ~~Warlock Nightfall~~ | 2/4% per DoT tick → instant Shadow Bolt | **landed** — `Corrupted` carries `caster: EntityId option`, `OnDoTTick` fires on the applier, `Empower.Only` scopes the buff. See §"The tick that belongs to the applier" |
 | Mage Resonance Cascade | a self-recursive chance to cast again | needs an extra-cast result *and* a recursion policy; not a data row |
 | Mage Arcane Instability | [16..25]% damage | a flat multiplier, not a proc — A9 axis |
 | Mage Temporal Convergence | — | the note records "no coefficient"; nothing to port |
-| Druid Ancient Brutality | rage/energy from bleed ticks | same missing DoT caster as Nightfall, plus a resource-over-time result |
+| Druid Ancient Brutality | rage/energy from bleed ticks | **unblocked by the Nightfall increment** (a dot now knows its applier) and blocked on the rest: `GrantResource` pays rage only, so an energy tick needs Cat, which is parked; still needs a bleed that ticks
 | Druid Omen of Clarity | a free-cast proc | the source gives no chance percentage |
 | Druid Sylvan Blessing, Owlkin Frenzy | auras on damage taken | Moonkin is one of the three **parked** specs (10 skipped tests); Owlkin Frenzy also needs `OnDamageTaken` |
 

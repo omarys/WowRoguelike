@@ -3645,7 +3645,20 @@ module Content =
               HealBp = 0
               DamageBp = 600
               CritBp = 500
-              CastTicksOff = secTicks 0.5 } ] }
+              CastTicksOff = secTicks 0.5 } ]
+        // Nightfall 2/2: two percent per rank that a damage-over-time this
+        // Warlock applied makes the next Shadow Bolt instant. The page's buff is
+        // "instant and cannot miss"; only the instant half is modelled, because a
+        // spell here is resisted or it is not and there is no miss roll to waive.
+        // The source gives no window, so ten seconds is this model's assumption
+        // (`.pi/research/octowow/warlock.md` §5). `Only` is the load-bearing part:
+        // the buff waits for Shadow Bolt and a Corruption cast keeps holding it.
+        Procs =
+          [ { Talent = "Nightfall"
+              Event = OnDoTTick
+              ChanceBp = 400
+              InternalCooldown = ticks 0
+              Then = EmpowerNext(secTicks 10.0, { Empower.none with Instant = true; Only = Some "Shadow Bolt" }) } ] }
 
   /// Fel Concentration 2/2: a 70% chance not to lose casting time to damage.
   let private warlockTraits = { Traits.none with PushbackResistanceBp = 7000 }

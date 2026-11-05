@@ -99,15 +99,27 @@ module SimTick =
 
   /// Damage-over-time ticks down once a second, applied unmitigated. It routes
   /// through dealDamage so the target wakes and, if it dies, drops its orders.
+  ///
+  /// The tick then offers the *applier* its own event, once per aura that fired:
+  /// Nightfall rolls per tick of a Corruption, not per burning target per second,
+  /// and it rolls on the caster because the damage lands on the target. A dot
+  /// applied by nobody (`caster = None`, which is every mob's) offers nothing.
   let advanceAuraDamage (w: World) =
+    let ticking (e: Entity) = e.Auras |> List.filter Aura.firesThisTick
+
     let perTick (e: Entity) =
-      e.Auras
-      |> List.filter Aura.firesThisTick
-      |> List.sumBy (fun a -> Aura.flatDamagePerTick a + Aura.poisonTick a)
+      ticking e |> List.sumBy (fun a -> Aura.flatDamagePerTick a + Aura.poisonTick a)
 
     let burning = w.Entities |> List.filter (fun e -> alive e && perTick e > 0)
 
-    (w, burning) ||> List.fold (fun w e -> dealDamage e.Id (perTick e) w)
+    let w = (w, burning) ||> List.fold (fun w e -> dealDamage e.Id (perTick e) w)
+
+    // After the damage, so a tick that kills still ticks: the last tick of a
+    // Corruption is a tick. `burning` is the pre-damage list on purpose.
+    (w, burning)
+    ||> List.fold (fun w e ->
+      (w, ticking e |> List.choose Aura.dotCaster)
+      ||> List.fold (fun w caster -> SimCombat.procOn OnDoTTick caster w))
 
   let advanceCooldowns (w: World) =
     mapAll

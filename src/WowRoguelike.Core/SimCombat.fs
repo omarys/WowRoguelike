@@ -411,8 +411,16 @@ module SimCombat =
       // proc travels.
       let empowered = ability.Effects |> List.exists isHealEffect
       let held = Aura.empower actor.Auras
-      let freeMana = held.FreeMana && ability.ResourceCost > 0
-      let empower = if empowered then held else Empower.none
+      // What a held buff is allowed to touch. Instant and the guaranteed crit
+      // ride a heal; they ride a *damage* spell only when the buff names it, and
+      // `Only` is the field that names one (Nightfall's Shadow Bolt). A buff with
+      // `Only = None` therefore cannot be spent by a Smite, which is the whole
+      // reason `isHealEffect` guards this gate at all.
+      let scoped = Empower.appliesTo ability.Name held
+      let named = held.Only |> Option.exists (fun n -> n = ability.Name)
+      let waived = scoped && (empowered || named) && (held.Instant || held.FreeMana || held.SureCrit)
+      let freeMana = scoped && held.FreeMana && ability.ResourceCost > 0
+      let empower = if empowered && scoped then held else Empower.none
       let cost = if freeMana then 0 else ability.ResourceCost
 
       let w0 =
@@ -426,7 +434,7 @@ module SimCombat =
                 // alone. Instants count: vanilla watches the cast, not its size.
                 Auras =
                   let a = Aura.refresh (RecentlyCast Content.fiveSecondRule) e.Auras
-                  if empowered || freeMana then Aura.spendEmpower a else a })
+                  if waived || freeMana then Aura.spendEmpower a else a })
           w0
 
       // One weapon strike, so Multi-Shot's second and third targets roll exactly
@@ -893,18 +901,19 @@ module SimCombat =
 
         | DamageOverTime(duration, perTick) ->
           // The tree's per-spell damage share is fixed at cast time, not read on every
-          // tick. By the time a `Corrupted` fires it carries no caster and no ability
-          // name (`Domain.fs:234`), and a build never respecs inside a run, so baking
-          // the multiplier into `perTick` here is the same number as multiplying a
-          // second later — without an aura that has to remember who applied it.
-          // Improved Curse of Agony and Shadow Mastery are the two that need it.
+          // tick. By the time a `Corrupted` fires, its ability name is gone and
+          // `perTick` is the only place that multiplier can survive — and a build
+          // never respecs inside a run, so baking it here is the same number as
+          // multiplying a second later. Improved Curse of Agony and Shadow Mastery
+          // are the two that need it. The caster is kept, because a proc can hang
+          // off the tick (Nightfall) and the target cannot tell you who applied it.
           let perTick = perTick * Talents.damageBp ability.Name actor.Talents / 10000
 
           match tryEntity targetId w with
           | Some t ->
             w
             |> mapEntity targetId (fun e ->
-              { e with Auras = Aura.refresh (Corrupted(duration, perTick)) e.Auras })
+              { e with Auras = Aura.refresh (Corrupted(duration, perTick, Some actor.Id)) e.Auras })
             |> logLine (sprintf "%s afflicts %s" actor.Name t.Name)
           | None -> w
 
@@ -1137,7 +1146,18 @@ module SimCombat =
               StallTicks = ticks 0 })
         w
 
-    if ability.CastTicks <= ticks 0 || (ability.Effects |> List.exists isHealEffect && (Aura.empower actor.Auras).Instant) then
+    let held = Aura.empower actor.Auras
+
+    // Instant if the kit says so, or if the caster holds an instant empower that
+    // is allowed to touch this ability. Unscoped (`Only = None`) stays heal-only,
+    // which is what keeps a Smite from eating a Priest's Inner Focus; a scoped one
+    // names its spell, which is how Nightfall makes Shadow Bolt instant.
+    let instant =
+      held.Instant
+      && ((ability.Effects |> List.exists isHealEffect)
+          || (held.Only |> Option.exists (fun named -> named = ability.Name)))
+
+    if ability.CastTicks <= ticks 0 || instant then
       resolveAbility actor.Id targetId ability w
     else
       mapEntity

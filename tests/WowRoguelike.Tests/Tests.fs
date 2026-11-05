@@ -2308,7 +2308,7 @@ let ``the warlock's damage talents reach direct hits and the dot alike`` () =
   let perTick =
     (cursed.Entities |> List.find (fun e -> e.Id = mob.Id)).Auras
     |> List.pick (function
-      | Corrupted(_, n) -> Some n
+      | Corrupted(_, n, _) -> Some n
       | _ -> None)
 
   Assert.Equal(13, perTick)
@@ -2363,7 +2363,7 @@ let ``the shaman's kit is the level-24 one`` () =
   )
   Assert.Equal<Effect list>([ Heal(389, 453) ], effectsOf "Healing Wave")
   Assert.Equal<Effect list>(
-    [ Empowers(secTicks 20.0, { Instant = true; FreeMana = false; SureCrit = false }) ],
+    [ Empowers(secTicks 20.0, { Instant = true; FreeMana = false; SureCrit = false; Only = None }) ],
     effectsOf "Nature's Swiftness"
   )
   Assert.Equal<string list>(
@@ -6630,3 +6630,173 @@ let ``a rostered warrior's shield pays him rage on a block`` () =
     w.Log |> List.exists (fun l -> l.Contains "Shield Specialization"),
     "the block paid rage without naming the talent"
   )
+
+/// The DoT half of a proc: the damage lands on the target and the talent belongs
+/// to whoever applied it, so the tick has to be able to name its caster.
+[<Fact>]
+let ``a dot tick fires the applier's talent on the applier`` () =
+  let nightfall =
+    { Talent = "Nightfall"
+      Event = OnDoTTick
+      ChanceBp = 10000
+      InternalCooldown = ticks 0
+      Then = EmpowerNext(secTicks 10.0, { Empower.none with Instant = true; Only = Some "Shadow Bolt" }) }
+
+  let w = procWorld { Talents.none with Procs = [ nightfall ] }
+
+  // Fighter 1 carries a dot fighter 2 applied. `firesThisTick` pays every
+  // twentieth Tick, and a six-second aura is 120 of them.
+  let w =
+    SimState.mapEntity (EntityId 1) (fun e ->
+      { e with Auras = [ Corrupted(secTicks 6.0, 5, Some(EntityId 2)) ] })
+      w
+
+  let w = SimTick.advanceAuraDamage w
+
+  Assert.Equal(995, (w.Entities |> List.find (fun e -> e.Id = EntityId 1)).Health)
+
+  let caster = w.Entities |> List.find (fun e -> e.Id = EntityId 2)
+  let held = Aura.empower caster.Auras
+  Assert.True(held.Instant)
+  Assert.Equal(Some "Shadow Bolt", held.Only)
+
+[<Fact>]
+let ``a dot applied by nobody fires nothing at all`` () =
+  let nightfall =
+    { Talent = "Nightfall"
+      Event = OnDoTTick
+      ChanceBp = 10000
+      InternalCooldown = ticks 0
+      Then = EmpowerNext(secTicks 10.0, { Empower.none with Instant = true }) }
+
+  let w = procWorld { Talents.none with Procs = [ nightfall ] }
+
+  let w =
+    SimState.mapEntity (EntityId 1) (fun e -> { e with Auras = [ Corrupted(secTicks 6.0, 5, None) ] }) w
+
+  let w = SimTick.advanceAuraDamage w
+
+  // The damage is still dealt — the tick is real, it just has no caster to tell.
+  Assert.Equal(995, (w.Entities |> List.find (fun e -> e.Id = EntityId 1)).Health)
+  let bystander = w.Entities |> List.find (fun e -> e.Id = EntityId 2)
+  Assert.False((Aura.empower bystander.Auras).Instant)
+
+/// Nightfall names Shadow Bolt, so the buff is the Warlock's next cast and not
+/// whatever else is on the bar. A damage spell spending a heal-only instant is
+/// the failure mode this test exists for: the while-you-wait is a Corruption that
+/// would otherwise eat the proc and grant nothing.
+[<Fact>]
+let ``a scoped instant waits for its own spell`` () =
+  let _ = Content.heroicStrike
+
+  let shadowBolt = Content.shadowBolt
+  let corruption = Content.corruption
+  Assert.True(shadowBolt.CastTicks > ticks 0)
+  Assert.True(corruption.CastTicks > ticks 0)
+
+  let holding =
+    { Empower.none with
+        Instant = true
+        Only = Some "Shadow Bolt" }
+
+  // The caster is a real Warlock off a roster, because a caster's faction, pool
+  // and kit are what the command path checks before it resolves anything — a
+  // hand-built entity is refused as "invalid or out of range" and the test then
+  // passes without ever casting.
+  let worldWith () =
+    let warlock = Content.partyOf [ "Warlock" ] 60 |> List.head
+    let w = procWorld Talents.none
+
+    w
+    |> SimState.mapEntity (EntityId 2) (fun e ->
+      { warlock with
+          Id = e.Id
+          Pos = e.Pos
+          Auras = [ Empowered(secTicks 10.0, holding) ] })
+
+  let cast ability =
+    SimCombat.applyCommand
+      { ApplyAt = ticks 0
+        Kind = UseAbility(EntityId 2, ability, EntityId 1) }
+      (worldWith ())
+
+  let boltWorld = cast "Shadow Bolt"
+  let bolt = boltWorld |> SimState.tryEntity (EntityId 2) |> Option.get
+  Assert.True(bolt.Casting.IsNone, "the instance the buff names did not go off instantly")
+
+  Assert.True(
+    (boltWorld.Entities |> List.find (fun e -> e.Id = EntityId 1)).Health < 1000,
+    sprintf "Shadow Bolt never landed (log %A)" boltWorld.Log
+  )
+
+  Assert.False((Aura.empower bolt.Auras).Instant, "the buff survived the spell it named")
+
+  let dot = cast "Corruption" |> SimState.tryEntity (EntityId 2) |> Option.get
+  Assert.True(dot.Casting.IsSome, "a spell the buff does not name was cast instantly")
+  Assert.True((Aura.empower dot.Auras).Instant, "the wrong spell spent the buff")
+
+/// The other half of a talent that names a spell: the rotation has to reach for it.
+/// `rangedOrders` ranks a kit by direct damage per cast tick, where Immolate scores
+/// 4900 and Shadow Bolt 4780, so without this rule the Warlock never casts the spell
+/// Nightfall names and the proc ages out unspent (26 procs, 0 spent, measured on the
+/// harness). The ranking itself is untouched — see the second assertion.
+[<Fact>]
+let ``the warlock reaches for the spell its buff names`` () =
+  let _ = Content.heroicStrike
+
+  let members = Content.partyOf [ "Warrior"; "Warlock" ] 60
+  let warlock = members |> List.find (fun e -> e.Name = "Warlock")
+  let warrior = members |> List.find (fun e -> e.Name = "Warrior")
+
+  let world (holding: bool) =
+    let mob =
+      { Content.mob 100 "Fighter" CreatureType.Humanoid 20 1000 0 None [] None { X = 8; Y = 5 } with
+          Engaged = true
+          Target = Some warrior.Id }
+
+    let scoped =
+      Empowered(secTicks 10.0, { Empower.none with Instant = true; Only = Some "Shadow Bolt" })
+
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 14 12
+      Entities =
+        (members
+         |> List.map (fun e ->
+           if e.Id = warlock.Id then
+             { e with
+                 Target = Some mob.Id
+                 Auras = (if holding then [ scoped ] else []) }
+           else
+             e))
+        @ [ mob ]
+      Pending = []
+      Rng = Rng.streamsOf 1UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let casts (holding: bool) =
+    PartyAi.decide (world holding)
+    |> List.choose (fun c ->
+      match c.Kind with
+      | UseAbility(actor, name, _) when actor = warlock.Id -> Some name
+      | _ -> None)
+
+  Assert.Contains("Shadow Bolt", casts true)
+  Assert.DoesNotContain("Shadow Bolt", casts false)
+
+[<Fact>]
+let ``the warlock's build carries Nightfall`` () =
+  let _ = Content.heroicStrike
+
+  let warlock =
+    Content.partyOf [ "Warlock"; "Priest" ] 60
+    |> List.find (fun e -> e.Talents.Procs |> List.exists (fun p -> p.Talent = "Nightfall"))
+
+  let nightfall =
+    warlock.Talents.Procs |> List.tryFind (fun p -> p.Talent = "Nightfall")
+
+  Assert.True(nightfall.IsSome)
+  Assert.Equal(OnDoTTick, (Option.get nightfall).Event)
+  Assert.Equal(400, (Option.get nightfall).ChanceBp)

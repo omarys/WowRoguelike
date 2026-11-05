@@ -1046,9 +1046,30 @@ module PartyAi =
         |> List.tryHead
         |> Option.orElse (free |> List.sortByDescending damageOf |> List.tryHead)
 
+      // A buff that names its spell is a reason to cast that spell. Nightfall
+      // makes the next Shadow Bolt instant and free of cast time, and the ranking
+      // above never picks Shadow Bolt at all: `damageOf` counts only an ability's
+      // direct hit, so Immolate's 147 over a 30-tick cast scores 4900 per cast
+      // tick against Shadow Bolt's 4780 and wins every time. A Warlock therefore
+      // casts Immolate and nothing else, and the proc would expire unused on a
+      // spell the rotation never reaches. Only a scoped buff gets here (`Only` is
+      // `Some` for Nightfall and nothing else), so no rotation that exists today
+      // moves.
+      let scopedShot =
+        let held = Aura.empower e.Auras
+
+        if held.Instant then
+          held.Only
+          |> Option.bind (fun named ->
+            e.Abilities |> List.tryFind (fun a -> a.Name = named && canUse e a.Name))
+        else
+          None
+
       match counterspell, casting with
       | Some a, Some c when canUse e a.Name -> cmd at (UseAbility(e.Id, a.Name, c.Id))
       | _ when worthStinging -> cmd at (UseAbility(e.Id, sting.Value.Name, f.Id))
+      | _ when scopedShot |> Option.exists (fun a -> SimState.canReach a.Range e f w) ->
+        cmd at (UseAbility(e.Id, scopedShot.Value.Name, f.Id))
       | _ ->
         match shot with
         | Some a when SimState.canReach a.Range e f w -> cmd at (UseAbility(e.Id, a.Name, f.Id))

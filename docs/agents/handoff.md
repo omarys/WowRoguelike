@@ -4,11 +4,11 @@ Written at commit `aba0722`, with that session's work on top as one WIP commit
 `40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**245 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
-Release`, 255 total), Release build clean — re-verified 2026-11-05 on the tree at
+**250 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
+Release`, 260 total), Release build clean — re-verified 2026-11-05 on the tree at
 `42975a1` (Hunter port `67d7c1c`, swing hook `42975a1`) and again on the proc axis
-(§"The proc axis is built", below). The 10 skips are the operator's parked
-Bear/Cat/Moonkin specs.
+(§"The proc axis is built", below) and on Nightfall (§"Nightfall is built", below). The
+10 skips are the operator's parked Bear/Cat/Moonkin specs.
 
 Everything settled — the brief, the architecture rules, the run table, and every
 decision with its reason — is in `docs/agents/domain.md`. Read that first, then §9
@@ -101,12 +101,47 @@ constraint.
 And the part worth knowing before the next session plans anything: **the rest of A1 is
 blocked by content, not by the vocabulary.** `domain.md` §"What is left of A1" has the
 table — no Bloodrage in the Warrior kit, no Crusader Strike or Holy Shock in the Paladin's,
-no source giving the Shaman's two numbers, a DoT that does not know who cast it (which
-blocks Nightfall and Ancient Brutality), and Moonkin parked. A8 (haste) and A9 (percent
+no source giving the Shaman's two numbers, and Moonkin parked. A8 (haste) and A9 (percent
 multipliers) were ranked second and third by the inventory and **no landed kit has a
 talent that would use either** — there is no Flurry, no Aspect of the Hawk, no Blade Rush
 anywhere in `Content.fs`. That is the real state: the engine has more axes than the
 content has talents, so the next move is a build, not a subsystem.
+
+## Nightfall is built (A1's DoT axis, and the AI bug it exposed)
+
+A1's fourth talent, and the first one a *tick* hangs off: `ProcEvent.OnDoTTick`, with
+`Aura.Corrupted` carrying `caster: EntityId option` so the tick knows whose build to
+consult, and `Empower.Only` scoping an empower to one named ability. Warlock Nightfall
+2/2 (`ChanceBp = 400`) grants `Empower.Instant` restricted to Shadow Bolt for ten seconds.
+Read `domain.md` §"The tick that belongs to the applier" before touching either half: the
+`caster` is `option` on purpose (a casterless dot still ticks, it just fires nothing), and
+the scoping gate in `resolveAbility` is the one line that keeps Inner Focus heal-only while
+letting a named damage spell through.
+
+**The finding worth carrying: the rotation could not reach the spell the talent names.**
+A `dotnet fsi` probe against the built DLL counted 26 procs across six level-60 runs and
+**every buff expired unspent** — because `PartyAi.rangedOrders` ranks spells by
+`damageOf * 1000 / castTicks` and `damageOf` ignores a dot, so Immolate (4900) beats Shadow
+Bolt (4780) by 2.5% and a `sim` Warlock casts Immolate 115 times and Shadow Bolt **never**.
+Corruption and Curse of Agony score 0 and are never cast at all. That is pre-existing and
+class-wide, not Nightfall's doing. The fix landed as one AI rule — a held `Empower` naming
+a spell is a reason to cast that spell — which cannot touch any rotation that exists today
+because no other buff is scoped. After it: 26 procs → 26 Shadow Bolt hits, all while
+holding, mean 25 ticks held against 200 before. ``the warlock reaches for the spell its
+buff names`` pins it, and pins the control too: with no buff held the Warlock still casts
+Immolate, because the ranking was not re-tuned.
+
+Measured on the pinned Core DLL
+`d5e8db4873a3590d571dac80c2dee3040b521a9d88d41c2133519e006c05daa1`: `comps 2 --level 60`
+**36 of 36 cells clean, 0 wipes, 0 parks** — the allowed answer for a change that can only
+add an instant. The blast radius is visible in the same table and is the reason to trust
+it: the three `Warrior/Priest/Mage/Rogue/Hunter` cells (no Warlock) came back **byte
+identical**, and all thirty Warlock cells moved on ticks alone — mostly faster (graveyard
+Priest lock 6255 → 5984, Druid lock 7072 → 6528), every one still 2 of 2 cleared.
+`bench-30` did **not** move and should not: the bench roster is
+Warrior/Priest/Rogue/Mage/Druid, no Warlock, so the bench cannot fire Nightfall. The caveat
+is the usual one: the Warlock ends every cell at 97-100% mana, so an instant he casts
+instead of casting is tempo, and this axis resolves it only through ticks.
 
 ## CLOSED — both open bugs below were one dead totem
 

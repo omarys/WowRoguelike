@@ -162,14 +162,28 @@ type Empower =
     /// Charge no mana for it.
     FreeMana: bool
     /// It always crits.
-    SureCrit: bool }
+    SureCrit: bool
+    /// The one ability this waives for. `None` rides whatever spell comes next,
+    /// which is what the healer cooldowns (Nature's Swiftness, Inner Focus) are;
+    /// `Some "Shadow Bolt"` is Nightfall, whose buff names a spell and must not
+    /// be spent on Corruption. `Empower.appliesTo` is the one test for it.
+    Only: string option }
 
 module Empower =
 
   let none =
     { Instant = false
       FreeMana = false
-      SureCrit = false }
+      SureCrit = false
+      Only = None }
+
+  /// Whether this empower is allowed to touch `ability`. Unscoped buffs ride
+  /// whatever comes next; a scoped one waits for its spell, and a caster that
+  /// reached for something else keeps holding it.
+  let appliesTo (ability: string) (e: Empower) =
+    match e.Only with
+    | None -> true
+    | Some named -> named = ability
 
 /// What a build can fire off an event it did not choose: a block it made, a
 /// critical it landed, a damage spell that hit. These are the events the combat
@@ -186,6 +200,10 @@ type ProcEvent =
   | OnBlock
   /// A damage spell of this character's landed. A resisted spell is not a hit.
   | OnSpellHit
+  /// One tick of a damage-over-time this character applied. Fired on the
+  /// *caster*, from the tick, which is why `Corrupted` records who applied it:
+  /// the damage lands on the target and the talent belongs to the applier.
+  | OnDoTTick
 
 /// What one proc hands over when it fires. Two shapes, because the talents that
 /// need more than these two are talents the vocabulary cannot express yet and
@@ -274,8 +292,12 @@ type Aura =
   /// Sunder Armour. Reduces the target's armour by a flat amount. Refreshed by
   /// another application rather than stacking.
   | Sundered of remaining: int<tick> * armorReduction: int
-  /// A damage-over-time. Deals `damagePerTick` every Tick, unmitigated.
-  | Corrupted of remaining: int<tick> * damagePerTick: int
+  /// A damage-over-time. Deals `damagePerTick` every Tick, unmitigated. It
+  /// remembers who applied it, because a talent can hang off its own ticks:
+  /// Nightfall watches the Warlock's Corruption and Ancient Brutality watches a
+  /// Druid's bleed, and neither can be read off the target — the tick lands on
+  /// the wrong entity, at a moment the caster may already be dead.
+  | Corrupted of remaining: int<tick> * damagePerTick: int * caster: EntityId option
   /// Deadly Poison: a damage-over-time that stacks instead of refreshing, because
   /// the fifth dose is worth five times the first. The duration is shared; the
   /// stacks are what the Tick multiplies by.
@@ -344,7 +366,7 @@ module Aura =
     | Silenced r when r > ticks 1 -> Some(Silenced(r - ticks 1))
     | Rejuvenation(r, n, s) when r > ticks 1 -> Some(Rejuvenation(r - ticks 1, n, s))
     | Sundered(r, reduction) when r > ticks 1 -> Some(Sundered(r - ticks 1, reduction))
-    | Corrupted(r, n) when r > ticks 1 -> Some(Corrupted(r - ticks 1, n))
+    | Corrupted(r, n, c) when r > ticks 1 -> Some(Corrupted(r - ticks 1, n, c))
     | DeadlyPoisoned(r, n, s) when r > ticks 1 -> Some(DeadlyPoisoned(r - ticks 1, n, s))
     | Wounded(r, bp, s) when r > ticks 1 -> Some(Wounded(r - ticks 1, bp, s))
     | Numbed(r, bp) when r > ticks 1 -> Some(Numbed(r - ticks 1, bp))
@@ -376,7 +398,7 @@ module Aura =
     | Drained(r, n) -> sprintf "drained(%d,%d)" r n
     | Rejuvenation(r, n, s) -> sprintf "rejuv(%d,+%d,%s)" r n s
     | Sundered(r, reduction) -> sprintf "sunder(%d,-%d)" r reduction
-    | Corrupted(r, n) -> sprintf "dot(%d,%d)" r n
+    | Corrupted(r, n, _) -> sprintf "dot(%d,%d)" r n
     | DeadlyPoisoned(r, n, s) -> sprintf "deadly(%d,%d,x%d)" r n s
     | Wounded(r, bp, s) -> sprintf "wound(%d,-%d,x%d)" r bp s
     | Numbed(r, bp) -> sprintf "numb(%d,+%d)" r bp
@@ -388,7 +410,15 @@ module Aura =
     | HealingWay(r, n) -> sprintf "healingway(%d,x%d)" r n
     | Inspired(r, bp) -> sprintf "inspired(%d,+%d)" r bp
     | Empowered(r, e) ->
-      sprintf "empowered(%d,%s%s%s)" r (if e.Instant then "i" else "") (if e.FreeMana then "f" else "") (if e.SureCrit then "c" else "")
+      sprintf
+        "empowered(%d,%s%s%s%s)"
+        r
+        (if e.Instant then "i" else "")
+        (if e.FreeMana then "f" else "")
+        (if e.SureCrit then "c" else "")
+        (match e.Only with
+         | Some named -> ">" + named
+         | None -> "")
     | RecentlyCast r -> sprintf "recent(%d)" r
     | Innervated(r, bp) -> sprintf "innervated(%d,x%d)" r bp
 
@@ -443,7 +473,7 @@ module Aura =
     | Rejuvenation(r, _ , _)
     | Silenced r
     | Sundered(r, _)
-    | Corrupted(r, _)
+    | Corrupted(r, _, _)
     | Drained(r, _)
     | Blocking r -> r
     | TotemBoon(r, _, _, _)
@@ -579,7 +609,7 @@ module Aura =
     let remaining =
       match a with
       | Rejuvenation(r, _, _) -> r
-      | Corrupted(r, _) -> r
+      | Corrupted(r, _, _) -> r
       | DeadlyPoisoned(r, _, _) -> r
       | Drained(r, _) -> r
       | Polymorphed r -> r
@@ -702,6 +732,13 @@ module Aura =
     | Sundered(_, reduction) -> reduction
     | _ -> 0
 
+  /// Who applied this damage-over-time, when the aura knows who did. Only a
+  /// talent on the applier reads it, so nothing else in the engine asks.
+  let dotCaster =
+    function
+    | Corrupted(_, _, Some caster) -> Some caster
+    | _ -> None
+
   /// Extra block chance from Shield Block, in basis points.
   let blockBonusBp =
     function
@@ -717,7 +754,7 @@ module Aura =
   /// A flat amount dealt as damage each Tick (damage-over-time).
   let flatDamagePerTick =
     function
-    | Corrupted(_, n) -> n
+    | Corrupted(_, n, _) -> n
     | _ -> 0
 
   /// Resource drained per firing Tick, summed over auras. Viper Sting is the only
