@@ -4,7 +4,7 @@ Written at commit `aba0722`, with that session's work on top as one WIP commit
 `40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**250 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
+**251 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
 Release`, 260 total), Release build clean — re-verified 2026-11-05 on the tree at
 `42975a1` (Hunter port `67d7c1c`, swing hook `42975a1`) and again on the proc axis
 (§"The proc axis is built", below) and on Nightfall (§"Nightfall is built", below). The
@@ -39,6 +39,37 @@ A  .pi/research/levelscale/raid-gear-60.md
 Splitting the commit into reviewable pieces is a real piece of owed work — the diff
 spans movement, party AI, content, harness and tests, and nothing has been
 reviewed by anyone but the agent that wrote it.
+
+## The Hunter's lane (a class that cast nothing, under seven landed talents)
+
+The Hunter port's own measurement said "seven of sixteen landed, 100% mana in every
+cell". The mana figure was the bug, not a finding. `PartyAi.decide` filed a Dps member
+as `melee` when its kit held a `Foe` ability at range 1, and the Hunter holds Raptor
+Strike — so it never saw `rangedOrders` and never fired a shot. On the harness at
+library L36 seed 1 it dealt **15103 damage, 6228 of it Raptor Strike**, and Arcane Shot,
+Aimed Shot, Multi-Shot, Serpent Sting and Viper Sting each logged **zero casts** for the
+whole run. Eight of nine rows were dead.
+
+The lane now keys on damage, not reach: `ranged` = a `Foe` row past range 1 with
+`damageOf > 0` that is not an interrupt. The Rogue is the control that keeps it honest
+(Sap reaches 3, deals nothing, stays melee). A ranged member still gets its adjacent
+melee row as a **fallback ability** when every shot is on cooldown or unaffordable, but
+never the `MoveTo(behindSpot …)` that `meleeOrders` ends its chain with — otherwise the
+Hunter charges in on every gap and shoots its way back out.
+
+**After: 15103 → 21381 direct damage on the same seed (27367 at L60), and minimum mana
+97% → 0.1% at L36.** At L60 it still ends above 90% on a 3300-point Gear60 pool, so
+"not resource-limited" is a level-60 claim only. `comps 2 --level 60` is **36 of 36 cells
+clean**. The bench snapshot is **byte-identical to HEAD** — `defaultRoster` seats no
+Hunter, so the bench cannot see this class (the same rule as the Warlock); do not read a
+quiet bench as a quiet change. New test:
+`a hunter shoots from its lane and a rogue stays in its own` (it asserts the Rogue keeps
+its melee row, so a future lane change cannot quietly take Sap away).
+
+The lesson, recorded in `docs/agents/domain.md`: **a talent port is only as live as the
+lane its class fights in.** Nightfall and this are the same failure shape — mechanic
+correct, AI never reached it. When a class's next talent is "more damage on a shot",
+probe first that the shot is being fired.
 
 ## What this session changed
 
@@ -563,7 +594,7 @@ not measured. No ladder or `comps` cell seats them either, so nothing else needs
 | Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
 | Paladin | 40/0/11 | **7 of 17** | five lines and one deletion; Illumination is a **nerf** (10000 → 6000) and Divine Favor's cooldown row is gone; `comps 6 --level 60` 36/36 clean, bench 30/30 with the snapshot unmoved |
 | Warlock | 31/0/20 | **8 of 17** | needed a model change: DoT ticks now take `Talents.damageBp` at aura-application time; `comps 6 --level 60` 36/36 clean, but the warlock ends every arm at 99-100% mana |
-| Hunter | 0/41/10 | **7 of 16** | first class to get cheaper from an earlier port: Improved Stings rides the Warlock's DoT-at-application change with no new code; Lethal Shots had to become `Traits.CritBonusBp` (hero-wide crit); `comps 6 --level 60` 35/36 cells clean, but **100% mana in every cell** — like the Warlock, not resource-limited at 60 |
+| Hunter | 0/41/10 | **7 of 16** | first class to get cheaper from an earlier port: Improved Stings rides the Warlock's DoT-at-application change with no new code; Lethal Shots had to become `Traits.CritBonusBp` (hero-wide crit). **The class then turned out to have never fired a shot** — the AI's lane test filed it as melee because of Raptor Strike. Fixed (`ranged` = a damaging `Foe` row past range 1), 15103 → 21381 damage at L36, `comps 2 --level 60` 36/36 clean, bench byte-identical (no Hunter in `defaultRoster`). The seven talents now sit on a class that uses them; re-rank the Hunter's (b)-bucket after that. |
 | Druid | — | 0 | notes written (feral + moonkin), three specs `Skip`ped by the operator's direction |
 
 The Warrior port is the template: each (a)-bucket talent lands as a field, each (b)-bucket

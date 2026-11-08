@@ -3134,7 +3134,61 @@ let ``the hunter shoots from range`` () =
   Assert.Equal((66, 84), (hunter.AutoAttack.Value.Min, hunter.AutoAttack.Value.Max))
   Assert.Equal(secTicks 1.8, hunter.AutoAttack.Value.Ticks)
 
-/// A hunter brings no party passive, so it must not silently change the buffs.
+/// Which lane a member fights in follows from what it can *damage* at range, not
+/// from which rows it holds. A Hunter carries Raptor Strike at range 1 beside a full
+/// Marksmanship kit, so the older test — "holds a Foe ability at range 1" — filed it
+/// under melee: on the harness it swung a sword for the whole run, cast 0 of its 8
+/// ranged rows, finished at 97% mana and dealt the party's lowest damage. The Rogue
+/// is the control that keeps the fix honest: Sap also reaches 3 tiles, deals nothing,
+/// and a Rogue still fights in the melee lane.
+[<Fact>]
+let ``a hunter shoots from its lane and a rogue stays in its own`` () =
+  let world (roster: string list) (mobAt: int) =
+    let members = Content.partyOf roster 60
+    let tank = members |> List.head
+
+    let mob =
+      { Content.mob 100 "Fighter" CreatureType.Humanoid 60 1000 0 None [] None { X = mobAt; Y = 5 } with
+          Engaged = true
+          Target = Some tank.Id }
+
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 14 12
+      Entities = (members |> List.mapi (fun i e -> { e with Pos = { X = 3 + i; Y = 5 } })) @ [ mob ]
+      Pending = []
+      Rng = Rng.streamsOf 1UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let castsOf (w: World) (name: string) =
+    let who = w.Entities |> List.find (fun e -> e.Name = name) |> fun e -> e.Id
+
+    PartyAi.decide w
+    |> List.choose (fun c ->
+      match c.Kind with
+      | UseAbility(actor, ability, _) when actor = who -> Some ability
+      | _ -> None)
+
+  let hunterWorld = world [ "Warrior"; "Hunter" ] 9
+  let hunterCasts = castsOf hunterWorld "Hunter"
+  Assert.Contains("Arcane Shot", hunterCasts)
+  // The melee lane is what it used to be in, and what it must not fall back to
+  // while a shot is available: Raptor Strike is 1 tile away from a mob 4 tiles off.
+  Assert.DoesNotContain("Raptor Strike", hunterCasts)
+
+  // Sap reaches 3 tiles and deals nothing; a Rogue adjacent to the mob still swings
+  // rather than being filed under the ranged lane the way the Hunter was.
+  let rogueWorld = world [ "Warrior"; "Rogue" ] 5
+  let rogue = rogueWorld.Entities |> List.find (fun e -> e.Name = "Rogue")
+
+  let meleeRows =
+    rogue.Abilities |> List.filter (fun a -> a.TargetKind = Foe && a.Range <= 1) |> List.map (fun a -> a.Name)
+
+  match castsOf rogueWorld "Rogue" with
+  | [ name ] -> Assert.Contains(name, meleeRows)
+  | other -> failwithf "the Rogue should issue exactly one melee order, got %A" other/// A hunter brings no party passive, so it must not silently change the buffs.
 [<Fact>]
 let ``a hunter adds no party passive`` () =
   Assert.Equal<PartyBuffKind list>([ BattleShout ], Content.partyBuffsFor [ "Warrior"; "Hunter" ])

@@ -1038,10 +1038,53 @@ changed".
 `comps 6 --level 60` is **35 of 36 cells clean**; the one dirty cell is
 `Warrior/Priest/Paladin/Mage/Warlock graveyard L33` (`cleared=5`, `unresolved=1`), which
 seats no Hunter — it is the known park flake, not this port. Re-measured at
-`comps 3 --level 60` after the swing hook: **36 of 36 cells clean**. The finding to carry
-forward is the mana column: **the Hunter ends every cell at 99-100% mana**, exactly as
-the Warlock ends at 97-100%. Neither class is resource-limited at level 60, so no hunter
-damage talent will ever show up in a mana floor either.
+`comps 3 --level 60` after the swing hook: **36 of 36 cells clean**. The mana column read
+**99-100% for the Hunter in every cell**, and that was taken for "not resource-limited".
+It was not: the Hunter was firing nothing at all. See the lane section below — the number
+was the symptom, and it stayed 96-100% at level 60 after the fix (a 3300-point pool at
+Gear60) while the same Hunter at level 36 runs to 0.1%.
+
+### The lane question — a Hunter that never fired a shot
+
+The seven landed Hunter talents were measured on outcomes and looked fine. They were
+sitting on a class that **cast none of them**. `PartyAi.decide` sorted a Dps member into
+one of two lanes — `melee` if the kit held a `Foe` ability at range 1, `ranged` if it held
+one past range 1 **and** was not melee — and the Hunter holds Raptor Strike. So it was
+filed as melee and only ever received `meleeOrders`: on the harness at library L36 seed 1
+it dealt 15103 damage, of which 6228 was Raptor Strike and the rest white swings, and
+the mercenary detail that gave it away was **Arcane Shot, Aimed Shot, Multi-Shot, Serpent
+Sting and Viper Sting: zero casts, every run**. Eight of its nine rows were dead code.
+
+The lane now follows what a member can **damage** at range, not how far it can reach:
+`ranged` = a `Foe` row past range 1 with `damageOf > 0` that is not an interrupt. The
+Rogue is the control that keeps that honest — Sap reaches 3 tiles, deals nothing, and a
+Rogue stays in the melee lane — and it is the case the old comment was written to protect.
+
+A ranged member is not denied its sword: when `rangedOrders` comes back empty (every shot
+on cooldown, or nothing affordable) the melee orders are consulted for an **ability only**.
+`meleeOrders` ends its own chain with `MoveTo(behindSpot …)`, which is right for a Rogue
+and would send a Hunter charging in on every cooldown gap to shoot its way back out.
+
+Measured on the same fixture, before and after: **15103 → 21381 direct damage at L36**
+(Arcane 5362, Multi-Shot 4438, Aimed 3950, Raptor Strike 381 — the sword only when
+a mob is on top of it), and **27367 at L60**. Minimum mana over the run went from 97% to
+**0.1% at L36**: the Hunter is now the mana-limited class the talents assumed. At L60 it
+still finishes above 90%, because Gear60 hands it a 3300-point pool — so "no talent will
+show up in a mana floor" is true at 60 and false at 36, and the level is part of the
+claim.
+
+The lesson generalises past the Hunter: **a talent port is only as live as the lane its
+class fights in.** Seven talents landed, all seven correct at the data level, and the
+class could not reach one of them. Both this and Nightfall are the same failure shape —
+the mechanic was right and the AI never got there — which is why the lane predicate is
+now keyed on an effect (`damageOf`) instead of on a range comparison that a single melee
+row can invert.
+
+Bench snapshot is **byte-identical to HEAD** — its roster (`Warrior/Priest/Rogue/Mage/Druid`)
+seats no Hunter, so the bench cannot see this class; the 20 lines that moved while the
+fallback still included `meleeOrders`' walk were the Rogue's, not the Hunter's, and they
+returned when the fallback was narrowed to abilities. `comps 2 --level 60` stayed **36 of
+36 clean**, so the fix bought throughput without moving the outcome axis.
 
 ### The proc axis — four talents, four classes, and the vocabulary a port no longer has to invent
 

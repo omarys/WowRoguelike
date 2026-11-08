@@ -1132,12 +1132,24 @@ module PartyAi =
       |> List.filter (fun e -> e.Casting.IsNone && not (SimState.isSleeping e) && e.Totem.IsNone)
       |> List.filter (fun e -> not (dying |> Option.exists (fun d -> d.Id = e.Id)))
     let role r = actors |> List.filter (fun e -> e.Role = Some r)
-    let melee (e: Entity) = e.Abilities |> List.exists (fun a -> a.TargetKind = Foe && a.Range <= 1)
-    // Exclusive, not overlapping: a Rogue with Sap holds a Foe ability at range 3
-    // and is still a melee member, and issuing it both order sets puts two commands
-    // for one actor in the same Tick.
+    // What a member *is* follows from where it can hurt something, not from which
+    // abilities it happens to hold. A Hunter carries Raptor Strike beside a full
+    // Marksmanship kit, and the old test — "holds a Foe ability at range 1" —
+    // claimed it for the melee lane, so every fight it swung a sword and never
+    // fired a shot: 0 of its 8 ranged rows were ever cast, 97% mana at the end of a
+    // run and the lowest damage in the party. Damage is the qualifier, not reach
+    // alone, because a Rogue's Sap also reaches 3 tiles and a Rogue is still melee;
+    // Sap deals nothing and an Arcane Shot deals damage, and `damageOf` is the
+    // function that already says which is which.
     let ranged (e: Entity) =
-      (not (melee e)) && e.Abilities |> List.exists (fun a -> a.TargetKind = Foe && a.Range > 1)
+      e.Abilities
+      |> List.exists (fun a -> a.TargetKind = Foe && a.Range > 1 && damageOf a > 0 && not (interrupts a))
+
+    // Exclusive, not overlapping: issuing both order sets puts two commands for one
+    // actor in the same Tick. A ranged member keeps its melee row as a fallback and
+    // gets it only from the empty case below, which is one command either way.
+    let melee (e: Entity) =
+      not (ranged e) && e.Abilities |> List.exists (fun a -> a.TargetKind = Foe && a.Range <= 1)
 
     let tank = actors |> List.tryFind (fun e -> e.Role = Some Tank)
 
@@ -1729,7 +1741,21 @@ module PartyAi =
            yield! role Dps
                   |> List.filter ranged
                   |> List.filter (fun e -> not (drained e) && not (resting.Contains e.Id))
-                  |> List.collect (fun e -> rangedOrders w e target at) ]
+                  |> List.collect (fun e ->
+                    match rangedOrders w e target at with
+                    // Shots on cooldown and nothing to fire: a member with a mob on
+                    // top of it still has a sword arm, and Raptor Strike at range 1
+                    // is worth more than the idle tick. Only the ability is taken,
+                    // never the walk — `meleeOrders` closes to melee when nothing
+                    // connects, which is right for a Rogue and would make a Hunter
+                    // charge in on every cooldown gap and shoot its way back out.
+                    | [] ->
+                      meleeOrders w e target at
+                      |> List.filter (fun c ->
+                        match c.Kind with
+                        | UseAbility _ -> true
+                        | _ -> false)
+                    | orders -> orders) ]
          |> List.filter (fun c ->
            match c.Kind with
            | UseAbility(source, _, _) -> not (resting.Contains source)
