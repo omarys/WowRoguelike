@@ -71,6 +71,34 @@ lane its class fights in.** Nightfall and this are the same failure shape — me
 correct, AI never reached it. When a class's next talent is "more damage on a shot",
 probe first that the shot is being fired.
 
+## The Hunter's (b)-bucket, re-ranked on a live class
+
+The nine unlanded talents were ranked when the Hunter cast nothing, so the ranking was
+fiction. Re-measured on the fixed lane (`library` seed 1) the class crits at **27.4% at
+L36 and 39.3% at L60**, deals 21381 / 27367, ends L36 **mana-empty (1137/1695)** and L60
+**full (3300/3300)**, and every hostile in every wing is **Humanoid**.
+
+1. **Mortal Shots 5/5** — swings crit at 200% and spells at 150%, so +30% crit damage is
+   **+6.8% measured at L36 and +8.8% at L60** (1.4-1.8% per point). The two multipliers are
+   already spelled out at their two sites, so the axis is one field and two
+   multiplications. **This is the pick.**
+2. **Improved Slaying 3/3** — a flat **+3%** (every hostile is Humanoid; `CreatureType`
+   exists and nothing reads it), 1.0% per point, and the cheapest predicate in the bucket.
+3. **Piercing Shots 2/2** — the biggest ceiling, `0.6p/(1+p)` = +12.9% / +16.9% before
+   bleed truncation, but `ProcResult` only has two caster-directed shapes and this needs a
+   proc that puts a DoT on the *target* plus a threat-free damage marker.
+4. **Lock and Load 1/1 — worth nothing yet, and the reason is a missing (a)-row.**
+5. Swift Reflexes, Experimental Ammunition, Improved Concussive Shot — last, for two new
+   axes, missing evidence, and a row the kit does not have, respectively.
+
+**The finding that outranks the ranking: `aimedShotRanks` still has a 6 s cooldown**
+(`Content.fs:772`) where §5(a) of the Hunter note records OctoWoW's **26 s**. Spells crit at
+150% and the build's 3 points of Swiftshot shave a cooldown the sim does not have, so both
+of those measure as nothing. Aimed Shot is *not* cooldown-starved today (46 casts issued
+against a 67 ceiling at L36, 32 against 46 at L60) — which is exactly why a reset talent is
+worth nothing until the row lands. Full table and arithmetic in
+`.pi/research/octowow/hunter.md` §10.
+
 ## What this session changed
 
 Details and measured outcomes are in `docs/agents/domain.md`; these are pointers
@@ -594,7 +622,7 @@ not measured. No ladder or `comps` cell seats them either, so nothing else needs
 | Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
 | Paladin | 40/0/11 | **7 of 17** | five lines and one deletion; Illumination is a **nerf** (10000 → 6000) and Divine Favor's cooldown row is gone; `comps 6 --level 60` 36/36 clean, bench 30/30 with the snapshot unmoved |
 | Warlock | 31/0/20 | **8 of 17** | needed a model change: DoT ticks now take `Talents.damageBp` at aura-application time; `comps 6 --level 60` 36/36 clean, but the warlock ends every arm at 99-100% mana |
-| Hunter | 0/41/10 | **7 of 16** | first class to get cheaper from an earlier port: Improved Stings rides the Warlock's DoT-at-application change with no new code; Lethal Shots had to become `Traits.CritBonusBp` (hero-wide crit). **The class then turned out to have never fired a shot** — the AI's lane test filed it as melee because of Raptor Strike. Fixed (`ranged` = a damaging `Foe` row past range 1), 15103 → 21381 damage at L36, `comps 2 --level 60` 36/36 clean, bench byte-identical (no Hunter in `defaultRoster`). The seven talents now sit on a class that uses them; re-rank the Hunter's (b)-bucket after that. |
+| Hunter | 0/41/10 | **7 of 16** | first class to get cheaper from an earlier port: Improved Stings rides the Warlock's DoT-at-application change with no new code; Lethal Shots had to become `Traits.CritBonusBp` (hero-wide crit). **The class then turned out to have never fired a shot** — the AI's lane test filed it as melee because of Raptor Strike. Fixed (`ranged` = a damaging `Foe` row past range 1), 15103 → 21381 damage at L36, `comps 2 --level 60` 36/36 clean, bench byte-identical (no Hunter in `defaultRoster`). **(b)-bucket re-ranked on the live class (§10 of the note): Mortal Shots 5/5 is the pick at +6.8-8.8% measured, then Improved Slaying +3%, then Piercing Shots.** An (a)-bucket row was found missing — Aimed Shot's 26 s cooldown is not in `Content.fs` — which is why Lock and Load is worth nothing yet. |
 | Druid | — | 0 | notes written (feral + moonkin), three specs `Skip`ped by the operator's direction |
 
 The Warrior port is the template: each (a)-bucket talent lands as a field, each (b)-bucket

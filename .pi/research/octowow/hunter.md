@@ -279,3 +279,84 @@ on `AutoAttack`, which nothing has needed yet.
 Red test first: `the tree's damage bonus reaches a white swing` (30 vs 33 on a 30..30
 fixture, `DamageDoneBp` 0 against 1000). Bench snapshot regenerated: 23 of 30 cells move,
 mean 958 → 956 ticks, no outcome flips. `comps 3 --level 60`: 36 of 36 clean.
+
+## 10. The (b)-bucket, re-ranked on a class that actually fights
+
+§5's ordering was written against a Hunter that **cast nothing** — the AI had filed it as
+melee because Raptor Strike reaches 1 tile, so the class ran at 97-100% mana and dealt
+15103 damage in the L36 probe (`docs/agents/domain.md` §8, "The lane question"). With the
+lane fixed it deals **21381 at L36 and 27367 at L60**, and the ranking of what to port next
+changes with it. Same fixture throughout (`library`, seed 1,
+`Warrior/Priest/Mage/Rogue/Hunter`): per-ability damage and the commands the AI issued.
+
+**The measured profile.** Crit chance is `500 + Agility×10 + Lethal Shots 500`
+(`Content.fs:3296`): **27.4% at L36** (Agility 174) and **39.3% at L60** (Agility 293). The
+L36 Hunter ends the wing at 1137/1695 mana — it is mana-bound for the first time. The L60
+one ends at **3300/3300**: utterly idle.
+
+| row | L36 | L60 |
+|---|---|---|
+| Auto Attack (swing, crits at 200%) | 7250 | 9743 |
+| Arcane Shot (53 / 39 casts issued) | 5362 | 4088 |
+| Multi-Shot (24 / 19) | 4438 | 7575 |
+| Aimed Shot (46 / 32) | 3950 | 4244 |
+| Raptor Strike (3 / 8) | 381 | 1717 |
+
+Every hostile in every wing is **Humanoid** (`library` 44, `graveyard` 48, `armory` 50,
+`cathedral` 62) — no Beasts, no Dragonkin, no Undead, and `CreatureType` has no `Giant` at
+all, so a slaying talent covers one type out of the note's four.
+
+**Mortal Shots 5/5 (+30% crit damage).** Swings crit for 200%
+(`src/WowRoguelike.Core/SimCombat.fs:284`) and spells for 150%
+(`SimCombat.fs:23-25`), so the two sites gain differently: a swing row goes `1+p` → `1+1.3p`
+and a spell row `1+0.5p` → `1+0.8p`. At p = 0.274 that is **+6.4% on the bow and +7.2% on
+the shots**, **+1462 damage, +6.8% of the Hunter's whole output**; at p = 0.393, **+8.5%
+and +9.9%**, **+2396, +8.8%**. Five points, **1.4-1.8% per point** — and the axis is one
+field and two multiplications, because the two multipliers are already spelled out at the
+two sites (200% and 150% are Vanilla-faithful, not a bug).
+
+**Improved Slaying 3/3 (+3% damage and crit damage vs Beasts/Giants/Dragonkin/Humanoids).**
+All hostiles are Humanoid, so it is a flat **+3%** (≈641 / ≈821 damage), **1.0% per point**.
+`CreatureType` is already on every entity (`Domain.fs:122`) and nothing reads it — the
+cheapest axis in the bucket, and a per-type damage modifier is a shape three other classes
+want (the Rogue's and Warrior's slaying talents are the same predicate).
+
+**Piercing Shots 2/2 (a crit bleeds for 30% of the hit over 8 s).** The largest *ceiling* in
+the bucket: 30% of every crit's damage, and a crit is 27-39% of hits at double damage, is
+`0.6p/(1+p)` = **+12.9% at L36 and +16.9% at L60** if the bleed runs to term. It will not:
+mobs die in seconds and a target swap drops it, so the honest expectation is well under
+half. Two points either way. The cost is vocabulary: `ProcResult` has exactly two shapes,
+`GrantResource` and `EmpowerNext`, both of which act on the **caster**, and `procOn` carries
+only the caster's id (`SimCombat.fs:205`) — a proc that puts a DoT on the *target*, with a
+payload derived from the triggering hit, is a third shape and a target to resolve. On top
+of that, "generates no threat" needs a threat-free damage marker the engine does not have.
+
+**Lock and Load 1/1 — worth nothing *yet*, and the reason is an (a)- bucket row that never
+landed.** Its reset leg only pays when Aimed Shot is cooldown-starved, and in this kit it
+is not: `aimedShotRanks` still carries `CooldownTicks = secTicks 6.0`
+(`Content.fs:772`) against a 3 s cast, so the ceiling in 8064 ticks is 67 casts and the AI
+issued 46; at L60 the ceiling is 46 and it issued 32. §5(a) lists "Aimed Shot 6 s → 26 s
+cooldown" as expressible and it is **not in `Content.fs`** — the sim's Hunter has a far
+better Aimed Shot than OctoWoW's, which is also why the build's 3 points of Swiftshot
+(shaving a cooldown the sim does not have) measure as nothing. Correct the row first; a
+crit-driven reset of a 6 s cooldown with a 3 s cast is worth almost nothing, and of a 26 s
+cooldown is worth having. The line-AoE leg is out of reach regardless — `MultiShot` is 3
+targets near the target and `AreaDamage` is a radius; neither is a line.
+
+**The rest, and why they are last.** *Swift Reflexes 2/2* needs parry (the engine has dodge
+and block) and attack speed (`AutoAttack.Ticks` is fixed data) — two axes, two points,
+defensive. *Experimental Ammunition 1/1* is blocked on evidence before it is blocked on
+code: §7 records that the "active ammunition" selector is never explained, and the rider's
+trigger is a property of it. *Improved Concussive Shot 5/5* buys a chance to stun on a row
+the kit does not have (`kitAt` holds no Concussive Shot), so five of the build's 51 points
+wait on an ability plus a proc.
+
+**Order, by measured value per axis:** Mortal Shots (5) → Improved Slaying (3) →
+Piercing Shots (2) → Lock and Load (1, *after* the Aimed Shot row) → Swift Reflexes (2) →
+Experimental Ammunition (1) → Improved Concussive Shot (5).
+
+Mortal Shots is the pick: the largest measured increment in the bucket, the smallest axis,
+and it is the axis every class's crit-damage talent needs. Its one honest over-application
+is the same one §9's swing hook carries — the sim cannot tell a bow from a dagger, so a
+`CritDamageBp` raised for ranged crits also raises Raptor Strike's, which is 381-1717
+damage of 21381-27367. That is 1.8-6.3%, inside the noise of the talent itself.

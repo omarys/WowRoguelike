@@ -1080,6 +1080,15 @@ the mechanic was right and the AI never got there — which is why the lane pred
 now keyed on an effect (`damageOf`) instead of on a range comparison that a single melee
 row can invert.
 
+With the lane live the class crits at **27.4% (L36) / 39.3% (L60)** and the (b)-bucket
+re-ranks around that: **Mortal Shots (+30% crit damage) is +6.8% to +8.8% of the Hunter's
+whole output** for five points, because a swing already crits at 200% and a shot at 150%
+and both multipliers sit unwidened at their two sites. It is the cheapest axis in the
+bucket and the one every class's crit-damage talent needs. The note's §10 has the table,
+and the second finding of that measurement is an **(a)**-bucket gap: Aimed Shot's 26-second
+cooldown was never landed (the kit still has 6 s), which is why the Lock and Load reset is
+worth nothing today and the build's Swiftshot points measure as nothing.
+
 Bench snapshot is **byte-identical to HEAD** — its roster (`Warrior/Priest/Rogue/Mage/Druid`)
 seats no Hunter, so the bench cannot see this class; the 20 lines that moved while the
 fallback still included `meleeOrders`' walk were the Rogue's, not the Hunter's, and they
