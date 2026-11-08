@@ -360,3 +360,47 @@ and it is the axis every class's crit-damage talent needs. Its one honest over-a
 is the same one §9's swing hook carries — the sim cannot tell a bow from a dagger, so a
 `CritDamageBp` raised for ranged crits also raises Raptor Strike's, which is 381-1717
 damage of 21381-27367. That is 1.8-6.3%, inside the noise of the talent itself.
+
+## 11. Mortal Shots — landed, and the divergence it forced
+
+`Talents.CritDamageBp` is the axis: **percentage points added to a crit's multiplier**, not
+a factor (Mortal Shots 5/5 is `3000`). Both crit sites keep their own base —
+`SimCombat.rollCrit` is 150% for spells, `meleeStrike` is 200% for swings — and each adds
+the same points, so "+30%" is +30 wherever it lands. The Hunter's five points are
+`hunterTalents.CritDamageBp = 3000`. Its over-application is the one Lethal Shots already
+carries: `CritChanceBp`/`CritDamageBp` are one number per hero, so Raptor Strike's crits
+get it too — 381 of 21381 damage at L36, 1717 of 27367 at L60.
+
+**Measured** (`library`, Median, 8-seed A/B by zeroing the field at runtime, then 12 seeds
+for the wipe count):
+
+| | dmg/tick | mean damage | clears |
+|---|---|---|---|
+| L36 off | 2.772 | 23304 | 12/12 |
+| L36 on | **3.072 (+10.8%)** | **25857 (+11.0%)** | **11/12** |
+| L60 off | 4.818 | 24939 | 12/12 |
+| L60 on | **5.511 (+14.4%)** | **27654 (+10.9%)** | 12/12 |
+
+The prediction in §10 was +6.8% / +8.8% from the crit share alone; the measurement is
++11% on damage and +11-14% on throughput, because more damage also ends the wing sooner
+(L60: mean 5183 → 5023 ticks).
+
+**The one wipe, diagnosed.** On L36 seed 3 the talent flips a clear into a party wipe —
+the Hunter dies first at tick 7449 and then everyone does. It is *not* the Hunter pulling
+threat: at tick 7000 the eleven live mobs are on the **Priest** (5 of them), the Mage, the
+Rogue and the Hunter one each, with the tank holding none of them — the pull has already
+cascaded through the healer. The talent shifted the RNG stream onto a seed where the
+party's margin is thin; the L36/L39 grid is wipe-prone with or without it (`comps 2
+--level 36` is **34/36 clean off, 32/36 on**, and every losing cell drops one seed of two).
+At L60 — the level every increment in this port has been judged at — `comps 2 --level 60`
+is **36 of 36 clean**, the bench snapshot is **byte-identical** (`defaultRoster` seats no
+Hunter), and `dotnet test` is **252 passed / 10 skipped**.
+
+**The divergence, recorded rather than fixed.** §5(a) lists Aimed Shot's cooldown as
+6 s → 26 s; `aimedShotRanks` still carries 6 s (`Content.fs:772`) and **stays there by
+decision**, because the 26 s row makes the class's best button fire once per 26 seconds and
+would require re-measuring Swiftshot and Lock and Load from scratch. Two consequences are
+now recorded rather than blamed on the port: Swiftshot's 3 points shave a cooldown the sim
+does not have (they measure as nothing), and Lock and Load's reset buys nothing until
+something makes Aimed Shot cooldown-starved. Both are §10's rank-4 note; `Content.fs`'s
+`hunterTalents` comment names the divergence where the talent is built.

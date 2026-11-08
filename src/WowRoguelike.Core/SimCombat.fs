@@ -19,10 +19,14 @@ module SimCombat =
     let v, rng = Rng.drawCombat lo hi w.Rng
     v, { w with Rng = rng }
 
-  /// Roll for a critical hit against `critChanceBp`. A spell crit deals 150%.
-  let rollCrit (critChanceBp: int) (amount: int) (w: World) : int * World =
+  /// Roll for a critical hit against `critChanceBp`. A spell crit deals 150%,
+  /// plus whatever `critDamageBp` the tree adds: Mortal Shots is 3000, so a
+  /// critted Arcane Shot is 180% and not 150%. Points and not a factor, so the
+  /// two sites that crit — this one at 150% for spells, `meleeStrike` at 200% for
+  /// swings — can each keep their own base and still take one number.
+  let rollCrit (critChanceBp: int) (critDamageBp: int) (amount: int) (w: World) : int * World =
     let roll, w = rollRange 0 9999 w
-    if roll < critChanceBp then amount * 150 / 100, w else amount, w
+    if roll < critChanceBp then amount * (15000 + critDamageBp) / 10000, w else amount, w
 
   /// Base chance (basis points) that damage interrupts a cast in progress (Q5a).
   let pushbackBaseBp = 1000
@@ -280,8 +284,10 @@ module SimCombat =
         // whether or not the hit got through the shield.
         mitigate (max 0 (amount - t.BlockValue)), (w |> procOn OnBlock t.Id)
       | Critical ->
-        // And a crit is the attacker's event, whatever it landed on.
-        mitigate (amount * 200 / 100), (w |> procOn OnCrit attacker.Id)
+        // And a crit is the attacker's event, whatever it landed on. A swing's
+        // base is 200% where a spell's is 150%, and the tree's crit-damage
+        // talent adds the same points to either.
+        mitigate (amount * (20000 + attacker.Talents.CritDamageBp) / 10000), (w |> procOn OnCrit attacker.Id)
       | Hit -> mitigate amount, w
 
   /// Damage wakes a sleeper, as does any other hostile action — see `wake`. A
@@ -526,7 +532,7 @@ module SimCombat =
           let rolled, w = rollRange lo hi w
           let rolled = rolled * Talents.damageBp ability.Name actor.Talents / 10000
           let amount, w = spellHit ability.Name actor targetId rolled w
-          let amount, w = rollCrit actor.CritChanceBp amount w
+          let amount, w = rollCrit actor.CritChanceBp actor.Talents.CritDamageBp amount w
           // A damage spell that landed is the event Clearcasting hangs off; a
           // resisted one is not. Rolled once per landed spell, not once per
           // ability — a wave of Arcane Missiles is five chances, as it was.
@@ -789,7 +795,7 @@ module SimCombat =
           // within `radius` of the actor. No friendly fire, and not mitigated by
           // armour (spell).
           let amount, w = rollRange lo hi w
-          let amount, w = rollCrit actor.CritChanceBp amount w
+          let amount, w = rollCrit actor.CritChanceBp actor.Talents.CritDamageBp amount w
 
           w.Entities
           |> List.filter (fun e ->

@@ -4856,15 +4856,30 @@ module Content =
   ///   spends Malice. `CritChanceBp` is one number for melee and ranged, so a hunter's
   ///   dagger crits as often as its bow — the same over-application the rogue carries.
   ///
-  /// The nine that are not here are that note's §5(b): Mortal Shots needs a crit
-  /// *multiplier* (a crit is `* 150 / 100` in `SimCombat.rollCrit`), Experimental
-  /// Ammunition a queued next-cast rider, Piercing Shots something that fires on a
-  /// crit, Lock and Load both of those, Improved Slaying a reader for `CreatureType`,
-  /// Swift Reflexes a parry, and Improved Concussive Shot a Concussive Shot row to
-  /// stun with. The build spends 0 of its 51 points in Beast Mastery, so nothing in
-  /// this port waits on an inheritance link for the pet.
+  /// - Mortal Shots 5/5: `CritDamageBp = 3000`, which is the crit multiplier
+  ///   itself — a spell crit goes 150% → 180% and the bow's swing crit 200% → 230%.
+  ///   `CritChanceBp` is one number for melee and ranged, so this over-applies the
+  ///   same way Lethal Shots does: Raptor Strike's crits get it too, which is 381 of
+  ///   this class's 21381 damage at L36 and 1717 of 27367 at L60.
+  ///
+  /// The eight that are not here are that note's §5(b), re-ranked in §10 on a class
+  /// that finally casts: Experimental Ammunition needs a queued next-cast rider,
+  /// Piercing Shots a proc that puts a DoT on the *target* (every `ProcResult` acts
+  /// on the caster), Lock and Load a cooldown reset that is worth nothing while Aimed
+  /// Shot's cooldown is 6 s rather than the notes' 26, Improved Slaying a reader for
+  /// `CreatureType`, Swift Reflexes a parry, and Improved Concussive Shot a Concussive
+  /// Shot row to stun with. The build spends 0 of its 51 points in Beast Mastery, so
+  /// nothing in this port waits on an inheritance link for the pet.
+  ///
+  /// **Aimed Shot's 26-second row is a known divergence, not an omission.**
+  /// `aimedShotRanks` keeps the sim's 6 s cooldown by decision (note §11): the 26 s row
+  /// would make the class's best button near-unusable and would require re-measuring
+  /// Swiftshot and Lock and Load from scratch. The two talents that spend points on it
+  /// are consequently worth nothing here — Swiftshot's 3 points shave a cooldown the sim
+  /// does not have, and Lock and Load has nothing to reset.
   let private hunterTalents =
     { Talents.none with
+        CritDamageBp = 3000
         CooldownOff = [ "Arcane Shot", secTicks -1.5 ]
         Spells =
           [ for spell, costBp, damageBp in

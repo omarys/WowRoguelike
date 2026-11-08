@@ -1446,6 +1446,36 @@ let ``a guaranteed crit deals 200 percent`` () =
   Assert.Contains(90, amounts)
   Assert.All(amounts, fun d -> Assert.True(d = 90 || d = 0, sprintf "dealt %d" d))
 
+/// A crit-damage talent adds points to the multiplier, not a factor to it: the
+/// Hunter's Mortal Shots 5/5 is "+30%", which is 180% on a spell (from 150%) and
+/// 230% on a swing (from 200%). Both sites keep their own base, so one number
+/// serves a class whose damage is half shots and half swings.
+[<Fact>]
+let ``a crit-damage talent widens the multiplier on both sites`` () =
+  // The spell site, as a pure function: 100 damage at a guaranteed crit.
+  let spell = fst (SimCombat.rollCrit 10000 3000 100 (Content.dungeon 1UL))
+  Assert.Equal(180, spell)
+
+  let dealt (w: World) =
+    let before = (mobOf w).Health
+    let w = SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.heroicStrike w
+    before - (mobOf w).Health
+
+  let amounts =
+    [ 1UL .. 8UL ]
+    |> List.map (fun seed ->
+      arena 0 0 { X = 7; Y = 5 }
+      |> SimState.mapEntity (EntityId 1) (fun e ->
+        { e with
+            CritChanceBp = 10000
+            Talents = { e.Talents with CritDamageBp = 3000 } })
+      |> fun w -> { w with Rng = Rng.streamsOf seed }
+      |> dealt)
+
+  // 45 damage at 230% is 103, and 90 without the talent.
+  Assert.Contains(103, amounts)
+  Assert.All(amounts, fun d -> Assert.True(d = 103 || d = 0, sprintf "dealt %d" d))
+
 /// The party passives land on the pools: Arcane Intellect rank 2 (+7 Intellect),
 /// Mark of the Wild rank 3 (+4 to every stat) and Power Word: Fortitude rank 3
 /// (+20 Stamina).

@@ -99,6 +99,35 @@ against a 67 ceiling at L36, 32 against 46 at L60) — which is exactly why a re
 worth nothing until the row lands. Full table and arithmetic in
 `.pi/research/octowow/hunter.md` §10.
 
+## Mortal Shots — the crit multiplier became data
+
+The re-rank said Mortal Shots and the port agreed: `Talents.CritDamageBp` is **percentage
+points added to a crit's multiplier**, and both crit sites keep their own base
+(`SimCombat.rollCrit` 150% for spells, `meleeStrike` 200% for swings) so one number means
+"+30%" on either. The Hunter's 5 points are `hunterTalents.CritDamageBp = 3000`.
+
+12-seed A/B on `library`/Median, zeroing the field at runtime:
+
+| | damage/tick | mean damage | clears |
+|---|---|---|---|
+| L36 off → on | 2.772 → **3.072 (+10.8%)** | 23304 → 25857 (+11.0%) | 12/12 → 11/12 |
+| L60 off → on | 4.818 → **5.511 (+14.4%)** | 24939 → 27654 (+10.9%) | 12/12 → 12/12 |
+
+`comps 2 --level 60` **36/36 clean**, bench **byte-identical** (no Hunter in
+`defaultRoster`), `dotnet test` **252 passed / 10 skipped**. The one L36 wipe is
+diagnosed, not waved away: the Hunter dies first, but at tick 7000 the eleven live mobs are
+on the **Priest** (5), the Mage, the Rogue and the Hunter one each with the tank holding
+none — a cascade through the healer, not Hunter threat. The L36/L39 grid is wipe-prone
+either way (`comps 2 --level 36`: 34/36 off, 32/36 on), and every losing cell drops one
+seed of two.
+
+Two things this made explicit rather than fixed: the crit maths now lives in one field
+(before, a crit was a literal `* 150 / 100` in three places), and **Aimed Shot's 26 s row
+stays unported by decision** — the class's best button firing once per 26 s would need
+Swiftshot and Lock and Load re-measured from scratch. That divergence is now recorded in
+the note (§11) and beside `hunterTalents`, because two of the build's four remaining
+dead points are dead *because of it*.
+
 ## What this session changed
 
 Details and measured outcomes are in `docs/agents/domain.md`; these are pointers
@@ -622,7 +651,7 @@ not measured. No ladder or `comps` cell seats them either, so nothing else needs
 | Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
 | Paladin | 40/0/11 | **7 of 17** | five lines and one deletion; Illumination is a **nerf** (10000 → 6000) and Divine Favor's cooldown row is gone; `comps 6 --level 60` 36/36 clean, bench 30/30 with the snapshot unmoved |
 | Warlock | 31/0/20 | **8 of 17** | needed a model change: DoT ticks now take `Talents.damageBp` at aura-application time; `comps 6 --level 60` 36/36 clean, but the warlock ends every arm at 99-100% mana |
-| Hunter | 0/41/10 | **7 of 16** | first class to get cheaper from an earlier port: Improved Stings rides the Warlock's DoT-at-application change with no new code; Lethal Shots had to become `Traits.CritBonusBp` (hero-wide crit). **The class then turned out to have never fired a shot** — the AI's lane test filed it as melee because of Raptor Strike. Fixed (`ranged` = a damaging `Foe` row past range 1), 15103 → 21381 damage at L36, `comps 2 --level 60` 36/36 clean, bench byte-identical (no Hunter in `defaultRoster`). **(b)-bucket re-ranked on the live class (§10 of the note): Mortal Shots 5/5 is the pick at +6.8-8.8% measured, then Improved Slaying +3%, then Piercing Shots.** An (a)-bucket row was found missing — Aimed Shot's 26 s cooldown is not in `Content.fs` — which is why Lock and Load is worth nothing yet. |
+| Hunter | 0/41/10 | **8 of 16** | first class to get cheaper from an earlier port: Improved Stings rides the Warlock's DoT-at-application change with no new code; Lethal Shots had to become `Traits.CritBonusBp` (hero-wide crit). **The class then turned out to have never fired a shot** — the AI's lane test filed it as melee because of Raptor Strike. Fixed (`ranged` = a damaging `Foe` row past range 1), 15103 → 21381 damage at L36, `comps 2 --level 60` 36/36 clean, bench byte-identical (no Hunter in `defaultRoster`). **(b)-bucket re-ranked on the live class (§10 of the note) and its head built: Mortal Shots 5/5 as `Talents.CritDamageBp = 3000`, measured +10.8% damage/tick at L36 and +14.4% at L60 on a 12-seed A/B, `comps 2 --level 60` 36/36 clean.** One L36 seed of twelve flips to a wipe; the mobs end on the Priest, so it is not Hunter threat — L39 is wipe-prone with or without the talent (34/36 off, 32/36 on). Next in the bucket: Improved Slaying (+3%, all hostiles Humanoid), then Piercing Shots. Aimed Shot's 26 s row is a **recorded divergence** (sim keeps 6 s), which is why Swiftshot's 3 points and Lock and Load measure as nothing. |
 | Druid | — | 0 | notes written (feral + moonkin), three specs `Skip`ped by the operator's direction |
 
 The Warrior port is the template: each (a)-bucket talent lands as a field, each (b)-bucket

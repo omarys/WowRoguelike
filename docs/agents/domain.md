@@ -1089,6 +1089,15 @@ and the second finding of that measurement is an **(a)**-bucket gap: Aimed Shot'
 cooldown was never landed (the kit still has 6 s), which is why the Lock and Load reset is
 worth nothing today and the build's Swiftshot points measure as nothing.
 
+Mortal Shots then landed as `Talents.CritDamageBp` — **points added to the multiplier,
+not a factor**, so each site keeps its base (spell 150%, swing 200%) and one number serves
+both. Measured on a 12-seed A/B: **+10.8% damage/tick at L36, +14.4% at L60**, mean damage
++11% at both. `comps 2 --level 60` 36/36 clean, bench byte-identical. One L36 seed of
+twelve flips to a wipe and the diagnosis matters: the Hunter dies first but the mobs end
+up on the **Priest**, so the talent is not pulling aggro — the L36/L39 grid sits on a thin
+margin (`comps 2 --level 36` is 34/36 clean even with the talent off) and the stream shift
+lands there on that seed.
+
 Bench snapshot is **byte-identical to HEAD** — its roster (`Warrior/Priest/Rogue/Mage/Druid`)
 seats no Hunter, so the bench cannot see this class; the 20 lines that moved while the
 fallback still included `meleeOrders`' walk were the Rogue's, not the Hunter's, and they

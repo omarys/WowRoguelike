@@ -1239,6 +1239,13 @@ type Talents =
     /// Percent off the mana cost of every damaging spell (Frost Channeling,
     /// improved Fireball's cheaper sibling), bp.
     SpellCostBp: int
+    /// Percentage points added to a critical strike's multiplier, bp. Mortal
+    /// Shots' "+30% critical strike damage" is 3000, which turns a spell crit
+    /// from 150% into 180% and a swing crit from 200% into 230%. Points and not a
+    /// factor, because "+30%" means the same thirty points whichever site it
+    /// lands on — which is why each site keeps its own base multiplier rather
+    /// than this field replacing it.
+    CritDamageBp: int
     /// Percent added to Intellect before the pools are derived (Ancestral
     /// Knowledge, Divine Intellect), bp.
     IntellectBp: int
@@ -1276,6 +1283,7 @@ module Talents =
       DamageDoneBp = 0
       HealCostBp = 0
       SpellCostBp = 0
+      CritDamageBp = 0
       IntellectBp = 0
       RegenBp = 0
       ManaRefundOnCritBp = 0
