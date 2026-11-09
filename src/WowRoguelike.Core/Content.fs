@@ -4868,7 +4868,12 @@ module Content =
       // party. Kept because the operator listed them and because the tick loop's
       // `Cleanses` pulse is one line once the vocabulary exists.
       totem "Cure Poison Totem" 60 (ticks 0) 22  20 (secTicks 2.0) (Cleanses Poison)
-      totem "Cleansing Totem" 60 (ticks 0) 34  20 (secTicks 2.0) (Cleanses Disease) ]
+      totem "Cleansing Totem" 60 (ticks 0) 34  20 (secTicks 2.0) (Cleanses Disease)
+      // Grounding is the air slot's answer to a hostile caster and the only pulse
+      // the tick loop never fires: it is read when a spell resolves. Five health,
+      // like every totem here, so it eats exactly one spell — which is what the
+      // fifteen-second cooldown is for, and why the slot is worth re-filling.
+      totem "Grounding Totem" 40 (secTicks 15.0) 30  20 (secTicks 2.0) Redirects ]
     |> List.filter (fun (requirement, _) -> level >= requirement)
     |> List.map snd
 

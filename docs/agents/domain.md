@@ -1064,6 +1064,30 @@ buffs is not a thing the game has. Both sit *after* Mana Spring in the kit, so t
 slot still goes to the standing trickle in ordinary play and the cleaners are the reason
 the slot exists only when a body is actually poisoned.
 
+### Grounding Totem: the one pulse that is not a pulse
+
+`TotemPulse.Redirects` has no clock. It is read at exactly one place —
+`SimCombat.redirectTarget`, called from `resolveAbility` — and its rule is that a hostile
+spell aimed at a party member resolves against the nearest redirecting totem in reach of
+that member instead. `SpellDamage` and `DamageOverTime` are the two shapes a hostile spell
+arrives in; a Warrior's axe is neither, and a party caster is never redirected (the guard
+is `actor.Faction = Party`, so a Mage's own Fireball is untouched).
+
+The mechanics need no special case at all: a redirecting totem has five health like every
+totem here, so it dies of the bolt it ate, which is the era's own behaviour. Its
+fifteen-second cooldown exists because that is what makes the slot worth re-filling.
+
+Measured, Shaman roster (Warrior/Shaman/Mage/Rogue/Warlock), 8 seeds per wing: **every
+drop ate exactly one spell** (8 drops, 8 deaths in each wing), clear time **flat to
+−0.4 %** (armory 8 117 → 8 086; library 8 534 → 8 539, +0.06 %), and party damage taken
+**down in both wings** (library 2 293 → 2 104, armory 4 358 → 3 336, −8 % and −23 %). So
+this is a defensive totem, not a throughput one — which is what it should be.
+
+It drops once a fight, not whenever its cooldown is up: `PartyAi.totemOrders` is a
+fallback in the order list, so a Shaman that is busy healing never gets back to it. That
+is the AI's priority working as designed, and the reason the effect is one spell per fight
+rather than one every fifteen seconds.
+
 Measured: **52 dispels over four library seeds** (49 in armory), library mean clear
 **8 470 → 8 311 ticks (−1.9%)**, armory 7 697 → 7 685 (−0.2%), graveyard unchanged (nothing
 to strip, 0 dispels). The L60 bench snapshot did not move. A dispel is therefore worth a

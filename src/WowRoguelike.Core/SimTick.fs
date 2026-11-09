@@ -72,6 +72,7 @@ module SimTick =
                     |> List.filter (fun a -> Aura.isHelpful a || Aura.dispelType a <> school) })
             w
         | Heals _ -> w
+        | Redirects -> w (* read at spell resolution, not on a clock *)
 
       (w, totems)
       ||> List.fold (fun w t ->

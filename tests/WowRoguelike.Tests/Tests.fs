@@ -3284,6 +3284,60 @@ let ``a totem claims no tile and never expires`` () =
   Assert.Equal({ X = 6; Y = 5 }, (at totem.Id).Pos)
   Assert.True(SimState.alive (at totem.Id), "walking onto the totem killed it")
 
+/// Grounding Totem is the one totem whose work happens in `resolveAbility` rather
+/// than on a clock: a hostile spell aimed at a party member lands on the totem
+/// instead, so what a caster's bolt hits is decided at resolution.
+[<Fact>]
+let ``a grounding totem eats the spell aimed at the party`` () =
+  let tank = { (Content.partyOf [ "Warrior" ] 24).[0] with Health = 4000 }
+
+  let totem =
+    { tank with
+        Id = EntityId 300
+        Name = "Grounding Totem"
+        Pos = { X = 6; Y = 5 }
+        MaxHealth = 40
+        Health = 40
+        Abilities = []
+        AutoAttack = None
+        Auras = []
+        Owner = Some tank.Id
+        Totem = Some { Pulse = Redirects; Radius = 20; Period = secTicks 120.0 } }
+
+  let caster =
+    { Content.mob 100 "Scryer" CreatureType.Humanoid 21 4000 3000 None [] None { X = 9; Y = 5 } with
+        Engaged = true
+        Target = Some tank.Id }
+
+  // The bolt's shape is what the hook reads, so the mage's own Fireball stands in
+  // for a Scryer's — the actor below is what makes it a hostile cast.
+  let bolt =
+    (Content.partyOf [ "Mage" ] 60)
+    |> List.head
+    |> fun m -> m.Abilities |> List.find (fun a -> a.Name = "Fireball")
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 12 10
+      Entities = [ tank; totem; caster ]
+      Pending = []
+      Rng = Rng.streamsOf 7UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let after = SimCombat.resolveAbility caster.Id tank.Id bolt w
+
+  let hurtTank =
+    after.Entities |> List.find (fun e -> e.Id = tank.Id) |> fun e -> e.Health
+
+  let hurtTotem =
+    after.Entities |> List.find (fun e -> e.Id = totem.Id) |> fun e -> e.Health
+
+  Assert.Equal(4000, hurtTank)
+  Assert.True(hurtTotem < 40, sprintf "the totem should have taken the bolt: %d" hurtTotem)
+
 /// A cleansing totem on its own clock, the same shape as the healing stream: the
 /// pulse takes auras of one school off the party in reach, and only harmful ones —
 /// a totem that stripped its own party's buffs would not be a totem.

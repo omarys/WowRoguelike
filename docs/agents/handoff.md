@@ -4,8 +4,8 @@ Written at commit `aba0722`, with that session's work on top as one WIP commit
 `40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**264 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
-Release`, 274 total), Release build clean — re-verified on the tree that carries the
+**265 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
+Release`, 275 total), Release build clean — re-verified on the tree that carries the
 era pushback model (`SimCombat.fs:462`), the Hunter's last four increments (`a3f6d10`,
 the snare's null result), the Paladin's Blessing of Kings, the mob ability rotation
 fix (`2a65a63`), the stun-is-an-interrupt rule (`81e17b1`) and the dispel axis. The 10
@@ -40,10 +40,16 @@ light them up for free.
 The Shaman's cleaner totems are in and inert the same way: `TotemPulse.Cleanses school`
 reaches the water slot, so Cure Poison Totem and Cleansing Totem pulse a school off the
 party every two seconds — and both sit after Mana Spring in the kit, so ordinary play
-still drops the trickle. Still open on this axis, and the only piece of the operator's
-list not landed: **Grounding Totem**, which redirects a harmful spell rather than
-removing an effect. That needs a hook in cast resolution (a totem that intercepts the
-target of a spell aimed at a party member), not another aura school.
+still drops the trickle.
+
+**Grounding Totem** is in as `TotemPulse.Redirects` — the one pulse with no clock, read in
+`SimCombat.redirectTarget` at the single point an ability resolves: a hostile spell aimed
+at a party member lands on the nearest redirecting totem in reach instead, and a
+five-health totem dies of it. Measured over 8 seeds per wing: every drop ate exactly one
+spell (8/8), clear time flat to −0.4 %, party damage taken −8 % in library and −23 % in
+armory. It fires once a fight rather than on every fifteen-second cooldown because
+`totemOrders` is a fallback in the AI's order list — the AI's priority working as
+designed, and the reason it is a defensive totem rather than a throughput one.
 
 ## Where the work stands after the pushback increment
 

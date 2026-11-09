@@ -517,12 +517,46 @@ module SimCombat =
     | ConsumeHealOverTime -> true
     | _ -> false
 
+  /// Grounding Totem: a harmful spell aimed at a party member lands on the
+  /// nearest redirecting totem in reach of that member instead, and the totem is
+  /// what has to survive it. Read here, at the one place an ability resolves,
+  /// rather than as an aura — the totem is the target for the length of one
+  /// spell, which is not a state anything else in the engine needs to see.
+  ///
+  /// Only magic is redirected: `SpellDamage` and `Dot` are the two shapes a
+  /// hostile spell arrives in, and a Warrior's axe is neither.
+  let redirectTarget (actor: Entity) (targetId: EntityId) (ability: Ability) (w: World) : EntityId =
+    let magical =
+      ability.Effects
+      |> List.exists (function
+        | SpellDamage _
+        | DamageOverTime _ -> true
+        | _ -> false)
+
+    if not magical || actor.Faction = Party then
+      targetId
+    else
+      match tryEntity targetId w with
+      | Some target when target.Faction = Party ->
+        w.Entities
+        |> List.filter (fun e ->
+          alive e
+          && e.Faction = Party
+          && e.Totem |> Option.exists (fun t -> t.Pulse = Redirects)
+          && Pos.chebyshev e.Pos target.Pos <= e.Totem.Value.Radius)
+        |> List.sortBy (fun e -> Pos.chebyshev e.Pos target.Pos)
+        |> List.tryHead
+        |> Option.map (fun e -> e.Id)
+        |> Option.defaultValue targetId
+      | _ -> targetId
+
   /// Resolve one ability's effects against one target. The resource is spent
   /// here, on resolution, so an interrupted cast costs nothing.
-  let resolveAbility (actorId: EntityId) (targetId: EntityId) (ability: Ability) (w0: World) : World =
+  let resolveAbility (actorId: EntityId) (targetId0: EntityId) (ability: Ability) (w0: World) : World =
     match tryEntity actorId w0 with
     | None -> w0
     | Some actor ->
+      let w0, targetId = w0, redirectTarget actor targetId0 ability w0
       let targetName = nameOf targetId w0
 
       // Nature's Swiftness and Inner Focus are spent by the first *heal* their

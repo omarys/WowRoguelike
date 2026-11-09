@@ -915,11 +915,16 @@ type TotemPulse =
   /// Agility for as long as the totem stands (Grace of Air). Agility is crit and
   /// dodge in this stat model and nothing else, so it arrives as basis points of
   /// each.
+  | AgilityBoon of amount: int
   /// A cleaner on a clock (Cure Poison, Cleansing): every pulse takes auras of
   /// this school off the party members in reach. Harmful ones only, because a
   /// totem that strips its own party's buffs is not a thing the game has.
   | Cleanses of school: DispelType
-  | AgilityBoon of amount: int
+  /// Grounding: a harmful spell aimed at a party member in reach lands on the
+  /// totem instead, and the totem is what has to survive it. The only pulse that
+  /// never fires on a clock — it is read at spell resolution, so its `Period` is
+  /// the lifetime and nothing else.
+  | Redirects
 
 /// Which totem slot a pulse occupies. A Shaman drops one totem per slot and a
 /// new one overrides what stood there — Mana Tide replaces Mana Spring rather
@@ -929,7 +934,8 @@ module TotemSlot =
   let ofPulse (p: TotemPulse) =
     match p with
     | ArmorBoon _ -> 0 (* earth *)
-    | AgilityBoon _ -> 1 (* air *)
+    | AgilityBoon _
+    | Redirects -> 1 (* air *)
     | Heals _
     | RestoresMana _
     | ManaFraction _
