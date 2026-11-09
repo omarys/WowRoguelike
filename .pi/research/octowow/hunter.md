@@ -599,9 +599,11 @@ and the summon), `PetArmorBp = 3600` (Thick Hide 3/3), `PetDamageBp = 1600` (Unl
 Shaman's totem is never scaled by a hunter talent.
 
 **44 of 51 points landed** at the end of that increment. Blocked then: Experimental Ammunition 1/1
-(queued next-cast rider), Swift Aspects 5/5 (no ranged attack-speed stat), and Coordinated Assault is
+(queued next-cast rider), Swift Aspects 5/5 (no ranged attack-speed stat), and Coordinated Assault was
 *implemented but nearly inert* — it shares "20% of your attack power" and the engine's only attack
-power is the melee per-swing `MeleeDamageBonus`, which a hunter's own Strength and Agility do not feed.
+power was the melee per-swing `MeleeDamageBonus`, which a hunter's own Strength and Agility do not feed.
+That last one was closed by giving the class a ranged attack power of its own (§13.3), and the two
+others by §13.1 and §13.2 — the class ends at **51 of 51**.
 
 Measured, 8 seeds/wing, Warrior/Priest/Hunter/Mage/Rogue: pet damage **+19.4%** (library L36)
 and **+18.4%** (armory L39); hunter health **+12%**; clear time **+1.1%** and **−0.4%** — i.e.
@@ -648,3 +650,26 @@ reset, and the reset happens *before* the swing resolves — so the shot that pr
 already armed the next swing at the un-hasted interval, and the talent lost one swing in five (the
 measured shot rate was +3.0% instead of +5.9%). `ProcResult.Gain`'s branch now takes
 `min (SwingTicksLeft) (cadence ...)`: a buff that moves a clock moves the clock it is standing on.
+
+### 13.3 Ranged attack power — the stat the class was missing, and what it is not for
+
+The share Coordinated Assault needed is vanilla's `Attack Power = level x 2 + agility x 2 - 20`. That
+is a *rate plus a level term plus an offset*, so no per-point field can hold it: `Sheet` gained
+`RangedApPerAgility` (2 for a hunter, 0 elsewhere) but `derive` also takes the level and writes the
+whole expression into the new `Entity.RangedAttackPower`. It is the formula the content already
+agrees with — the researched level-24 shot range carries "**+38.8 from 302 ranged attack power**",
+and `24 x 2 + 137 x 2 - 20 = 302`.
+
+The stat is deliberately *not* an input to shot damage. A shot's damage comes from the weapon's roll,
+and that roll is what the range was researched with; adding the attack power into the swing as well
+would count it twice. So the class now carries the stat, one talent reads it, and any future
+shot-scaling row (Aspect of the Hawk, Kill Command's "80% of its attack power") has somewhere to land
+without re-deriving the formula.
+
+Measured, 8 seeds a wing, roster Warrior/Priest/Mage/Rogue/Hunter: the pet's share of party damage
+goes **2.2% -> 4.4%** at library L36 and **1.7% -> 3.7%** at armory L39 — the pet's own damage literally
+doubles — for **+0.6% / -0.7%** clear time. The pet's extra strike has no timer to live on, so it is
+smoothed into every swing at the cadence ratio `swing / 3 s`; at a 2 s swing that is two thirds of a
+fifth of 292, i.e. 38 flat damage on a 44-71 swing. A talent worth a third of the pet's swing rates
+nothing on a wing because the pet is 2% of the party — the same arithmetic that made the fifteen Beast
+Mastery points flat in §13.
