@@ -4898,19 +4898,23 @@ module Content =
   ///   and the target" is a line, not the radius `AreaDamage` draws. The reset leg
   ///   is the half the 26 s row exists for, so it goes first and alone.
   ///
-  /// The five that are not here are that note's §5(b), re-ranked in §10 on a class
+  /// The four that are not here are that note's §5(b), re-ranked in §10 on a class
   /// that finally casts: Experimental Ammunition needs a queued next-cast rider,
   /// Improved Concussive Shot a Concussive Shot row to stun with, and Swift Reflexes
   /// a parry. The build spends 0 of its 51 points in Beast Mastery, so nothing in
-  /// this port waits on an inheritance link for the pet.
+  /// this port waits on an inheritance link for the pet. Each of the four needs an
+  /// engine axis rather than a rule, which is the point at which this class stops
+  /// being cheap to finish.
   ///
   /// **Aimed Shot carries the page's 26 s cooldown now**, which is what unblocked
   /// Swiftshot's Aimed leg: a Talent that claims 6 s off a 6 s row was spending 3
   /// points on a floor. The row had been kept at 6 s as a recorded divergence (note
   /// §11) on the argument that 26 s makes the class's best button near-unusable;
   /// measured, that is not what happened — the L36 hunter was mana-bound and the
-  /// cheaper row (75 → 50) pays for the lost casts. Lock and Load's reset leg is the
-  /// next thing this row makes possible.
+  /// cheaper row (75 → 50) pays for the lost casts. Lock and Load's reset leg is
+  /// what that row was for: +6.35% at L36 and +3.73% at L60, the largest single
+  /// talent this port has measured, and it leaves the row gated by the 3 s cast and
+  /// by mana instead of by its cooldown.
   let private hunterTalents =
     { Talents.none with
         CritDamageBp = 3000
