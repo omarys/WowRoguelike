@@ -315,6 +315,92 @@ let ``a taunt forces every hostile in range`` () =
   Assert.Equal(None, forced (EntityId 102))
 
 // ===========================================================================
+// What a mob does with its turn
+// ===========================================================================
+
+// The rotation is chosen by effect shape, so an ability whose shape is not named
+// there is content the sim never fires. These pin the three that were missing and
+// would have caught the bug that made every Scarlet Monastery caster swing a
+// mace instead of casting its bolt.
+
+let private mobTurn (abilities: Ability list) (allies: Entity list) =
+  let slow = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
+
+  let rogue =
+    Content.hero 3 "Rogue" Dps 1000 1000 slow 10000 [ (AbilityDef.at 24 Content.kick).Value ] { X = 5; Y = 5 }
+
+  let mob =
+    Content.mob 100 "Caster" CreatureType.Humanoid 21 10000 1000 (Some slow) abilities None { X = 6; Y = 5 }
+
+  let mob =
+    { mob with
+        Engaged = true
+        Target = Some(EntityId 3)
+        Threat = Map.ofList [ EntityId 3, 1000 ] }
+
+  { Tick = ticks 0
+    RestTicks = ticks 0
+    Grid = Grid.create 20 10
+    Entities = rogue :: mob :: allies
+    Pending = []
+    Rng = Rng.streamsOf 1UL
+    PartyBuffs = []
+    Quests = []
+    Log = [] }
+  |> SimTick.mobDecisions
+
+[<Fact>]
+let ``a hostile caster spends its turn on its bolt`` () =
+  let mob = mobOf (mobTurn [ Content.lightningBolt ] [])
+
+  match mob.Casting with
+  | Some c -> Assert.Equal("Lightning Bolt", c.Ability.Name)
+  | None -> failwith "the caster swung its weapon instead of casting"
+
+[<Fact>]
+let ``a hostile caster polymorphs instead of swinging`` () =
+  let mob = mobOf (mobTurn [ Content.polymorph ] [])
+
+  match mob.Casting with
+  | Some c -> Assert.Equal("Polymorph", c.Ability.Name)
+  | None -> failwith "polymorph is in the kit and was never used"
+
+[<Fact>]
+let ``a hostile healer renews a wounded ally`` () =
+  let slow = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
+
+  // Renew (6075) as the Scarlet Chaplains carry it: instant, 12 a Tick for 15 s,
+  // on an ally. Built here rather than reached for in `Content` because the
+  // content's copy is private to the roster that uses it.
+  let renew =
+    { Content.lightningBolt with
+        Name = "Renew"
+        CastTicks = ticks 0
+        ResourceCost = 50
+        TargetKind = Ally
+        Effects = [ HealOverTime(secTicks 15.0, 12) ] }
+
+  let hurt =
+    Content.mob 101 "Chaplain" CreatureType.Humanoid 39 1000 5000 (Some slow) [] None { X = 7; Y = 5 }
+
+  let hurt =
+    { hurt with
+        Engaged = true
+        Health = 300
+        Target = Some(EntityId 3)
+        Threat = Map.ofList [ EntityId 3, 1000 ] }
+
+  let w = mobTurn [ renew ] [ hurt ]
+  let healed = w.Entities |> List.find (fun e -> e.Id = EntityId 101)
+
+  match healed.Auras |> List.tryPick (function Rejuvenation(_, perTick, source) -> Some(source, perTick) | _ -> None) with
+  | Some(source, perTick) ->
+    // Instant, so it is not a cast in flight: the HoT is already on the body.
+    Assert.Equal("Renew", source)
+    Assert.Equal(12, perTick)
+  | None -> failwith "a heal-over-time was in the kit and never cast"
+
+// ===========================================================================
 // Determinism and golden replay (ADR-0001 / Q25a)
 // ===========================================================================
 

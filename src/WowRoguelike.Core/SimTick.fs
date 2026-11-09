@@ -636,7 +636,13 @@ module SimTick =
       w
 
   /// Mobs decide. Ability priority is expressed by effect shape, so the caster
-  /// rotation reads heal → slumber → bolt → serpent form.
+  /// rotation reads heal → renew → slumber → bolt → serpent form.
+  ///
+  /// Every shape a hostile kit actually ships has to be named here or the ability
+  /// is content the sim never fires: until `SpellDamage`, `HealOverTime` and
+  /// `Polymorph` were added, a Fireball, a mob's Renew and Arcanist Doan's
+  /// Polymorph were all data with no reader, and the only damage a caster mob ever
+  /// dealt was its auto-attack.
   let mobDecisions (w: World) =
     let acting = w.Entities |> List.filter (fun e -> e.Faction = Hostile && not e.Dormant && canAct e)
 
@@ -686,6 +692,26 @@ module SimTick =
           let sleepAbility = byEffect (function Sleep _ -> true | _ -> false)
           let damageAbility = byEffect (function Damage _ -> true | _ -> false)
 
+          /// A hostile caster's bolt: Fireball, Frostbolt, Smite, Flame Spike,
+          /// Immolate. Separate from `Damage` because a spell is not mitigated by
+          /// armour and does not roll against dodge, and because a mob that has
+          /// both should spend its cast rather than its swing.
+          let spellAbility =
+            byEffect (function SpellDamage _ -> true | _ -> false)
+
+          /// Renew: a heal-over-time on a friendly mob. The AI has no way to
+          /// value a HoT over a heal, so this only fires when the direct heal is
+          /// on cooldown or the mob has none — which is exactly when a Chaplain
+          /// or an Adept would use it.
+          let renewAbility =
+            byEffect (function HealOverTime _ -> true | _ -> false)
+
+          /// Polymorph. A control spell like Sleep, and it shares Sleep's
+          /// one-at-a-time rule: two polymorphs on one pack is a pack that never
+          /// fights back at all.
+          let polymorphAbility =
+            byEffect (function Polymorph _ -> true | _ -> false)
+
           let shiftAbility =
             byEffect (function Shapeshift(Serpent, _, _) -> true | _ -> false)
 
@@ -698,8 +724,18 @@ module SimTick =
           // Only one Party member may be slept at a time.
           let anyoneAsleep = aliveParty w |> List.exists isSleeping
 
+          let anyonePolymorphed =
+            aliveParty w |> List.exists (fun p -> p.Auras |> List.exists (function Polymorphed _ -> true | _ -> false))
+
           let choice =
             [ healAbility
+              |> Option.filter (fun a -> ready a && canCast m)
+              |> Option.bind (fun a -> usableTarget m a w |> Option.map (fun t -> a, t))
+
+              // A HoT goes on an ally that is already hurt, after the direct heal
+              // has had its chance: a mob that heals and renews on the same tick
+              // should heal, because the heal saves the body this tick.
+              renewAbility
               |> Option.filter (fun a -> ready a && canCast m)
               |> Option.bind (fun a -> usableTarget m a w |> Option.map (fun t -> a, t))
 
@@ -716,6 +752,16 @@ module SimTick =
               sleepAbility
               |> Option.filter (fun a -> ready a && canCast m && not anyoneAsleep)
               |> Option.bind (fun a -> usableTarget m a w |> Option.map (fun t -> a, t))
+
+              polymorphAbility
+              |> Option.filter (fun a ->
+                ready a && canCast m && not anyonePolymorphed && canReach a.Range m target w)
+              |> Option.map (fun a -> a, target.Id)
+
+              // The bolt before the swing: a caster mob's damage is its spell.
+              spellAbility
+              |> Option.filter (fun a -> ready a && canCast m && canReach a.Range m target w)
+              |> Option.map (fun a -> a, target.Id)
 
               damageAbility
               |> Option.filter (fun a ->
