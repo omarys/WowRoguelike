@@ -1224,6 +1224,41 @@ Release` rebuilds Core without refreshing that copy — so a probe can silently 
 binary. Lock and Load's first A/B reported **0 resets in 96 fights** because of it. `dotnet
 build -c Release` on the Harness is what makes a probe measure the code in the editor.
 
+### The snare that measured nothing — where a class stops being cheap
+
+The Hunter's last reachable talent, **Improved Concussive Shot 5/5** (`[4/8/12/16/20]%`
+chance to stun on Concussive Shot), looked like the cheapest thing left: `Aura.Crippled` and
+the movement-slow read already exist (`SimTick.fs:437` reads `e.MoveTicksPerTile *
+(10000 + slow) / 10000`, written today only by Crippling Poison at `SimCombat.fs:1548`), so
+one `Effect` case would have carried it. What the bucket analysis never asked was whether the
+row it rides on is worth anything: Concussive Shot r1 deals **no damage** and applies a 50%
+movement slow for 4 s on a 12 s cooldown. Five of the build's 41 Marksmanship points buy a
+stun chance on a snare.
+
+So the snare was priced before it was built, by changing hostile movement speed and nothing
+else (`snapshots 30`, default roster, all 30 seeds cleared):
+
+| hostiles' `MoveTicksPerTile` | median ticks | mean ticks | mean party-hp left |
+|---|---|---|---|
+| `secTicks 0.45` (baseline) | 1000 | 945 | 97.7% |
+| `secTicks 1000.0` (immobile) | 918 | 920 | 98.4% |
+| `secTicks 0.20` (2.25× faster) | 930 | 913 | 97.5% |
+
+Hostile movement is worth **at most 25 ticks of a 945-tick encounter, with no stable sign** —
+per-seed deltas run −153 to +129 in both directions. The party is ranged-heavy and walks to
+the mobs, so the approach is not a phase the fight spends anything on. A permanent
+party-wide snare would have a ceiling near 1.3%; a 4 s single-target one has a few tenths of
+a percent, under both the harness's ±1.5% floor and the 4% floor this port uses for class
+work.
+
+Two consequences outlive the talent. **The bucket that says "needs a new axis" is not the
+bucket that says "worth building"** — this one was reachable with one `Effect` case and worth
+nothing, which is the opposite error from the talents blocked on a real model gap. And the
+Rogue's **Crippling Poison is already modelling this** and is already inert; it stays because
+deleting it would change the poison ladder's shape, but nothing should be claimed for it. The
+Hunter closes at **11 of 16** with three talents left, all blocked on models (a queued
+next-cast rider, parry, a Beast Mastery build) rather than on rules.
+
 ### The proc axis — four talents, four classes, and the vocabulary a port no longer has to invent
 
 The axis inventory (`.pi/research/octowow/axis-inventory.md` §1 A1) put the trigger/proc

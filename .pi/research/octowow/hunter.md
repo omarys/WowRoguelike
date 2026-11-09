@@ -493,3 +493,44 @@ without refreshing that copy. The first Lock and Load A/B therefore ran against 
 without the event and reported **0 resets in 96 fights** as a real (and false) result. `dotnet
 build -c Release` on the Harness is the fix, and it is the fourth measurement trap on this
 port after roster blindness, DoT-tick log blindness, and build-time talent folding.
+
+## 12. The snare is not an axis — measured, not assumed
+
+§5's bucket put **Improved Concussive Shot 5/5** (a `[4/8/12/16/20]%` chance to stun on
+Concussive Shot) last on the grounds that it needs an ability the kit does not have. The
+deeper question is whether the ability it rides on is worth anything: Concussive Shot r1
+deals **no damage** and applies a **50% movement slow for 4 s** on a 12 s cooldown
+(`.pi/research/level24/hunter.md:141`), so five of the build's 41 Marksmanship points buy a
+stun chance on a row whose own payload is a snare. `Aura.Crippled` and the movement-slow read
+already exist (`Domain.fs` — `Aura.movementSlowBp`, read at `SimTick.fs:437` as
+`step = e.MoveTicksPerTile * (10000 + slow) / 10000`; the only writer today is Crippling
+Poison at `SimCombat.fs:1548`), so the vocabulary to build it is one `Effect` case. The
+question is therefore a value question, and it is cheap to answer without writing the code:
+change how fast hostiles move at all and see whether the fight notices.
+
+Same fixture as §10 (`library`, `snapshots 30`, default roster). In every run the party cleared
+all 30 seeds at `mobs-hp=0/8674`; `party-hp` is what is left of 4958.
+
+| hostiles' `MoveTicksPerTile` | median ticks | mean ticks | mean party-hp left |
+|---|---|---|---|
+| `secTicks 0.45` (baseline) | 1000 | 945 | 97.7% |
+| `secTicks 1000.0` (**immobile**) | 918 | 920 | 98.4% |
+| `secTicks 0.20` (**2.25× faster**) | 930 | 913 | 97.5% |
+
+**Hostile movement is worth at most 25 ticks of a 945-tick encounter, and its sign is not
+stable** — immobile mobs are 2.6% *faster* on average and 0.7pp healthier, 2.25× faster mobs
+are 3.4% faster and 0.2pp less healthy. Per-seed deltas run from −153 to +129 ticks in both
+directions, which is the same order as the effect. The party is ranged-heavy and walks to the
+mobs regardless, so the approach is not a phase the fight spends anything on.
+
+A snare therefore has a **ceiling of ~1.3%** even if it were permanent and party-wide, which a
+4 s/12 s single-target daze is not; its realistic value is a few tenths of a percent, i.e.
+under the harness's ±1.5% floor and under the 4% measurement floor this port uses for class
+work. **Improved Concussive Shot is not ported, and the reason is a measurement rather than a
+missing model**: the 5 points are unportable until movement itself matters, which needs a
+fight the party loses to approach time, a kiting requirement, or a ranged mob the party must
+chase — none of which this dungeon has. The same finding applies to the Rogue's **Crippling
+Poison**, which is already modelled and already worth nothing.
+
+Reversal: `cp /tmp/Content.fs.bak src/WowRoguelike.Core/Content.fs`, rebuild, `snapshots 30`
+byte-identical to baseline; `dotnet test -c Release` unchanged. No code landed.

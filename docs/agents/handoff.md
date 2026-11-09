@@ -174,10 +174,17 @@ Gates: `dotnet test` **255 passed, 10 skipped**, `comps 2 --level 60` **36/36**,
 `--level 36` **34/36** (the grid's standing two armory margins), `bench-30` unchanged (its
 roster seats no Hunter).
 
-**The four that remain** are unchanged and still blocked: Experimental Ammunition (needs a
-queued next-cast rider), Improved Concussive Shot (no Concussive Shot row to stun with),
-Swift Reflexes (no parry), and nothing in Beast Mastery (the build spends 0 of 51 points
-there).
+**The three that remain** are unchanged and still blocked: Experimental Ammunition (needs a
+queued next-cast rider), Swift Reflexes (no parry), and nothing in Beast Mastery (the build
+spends 0 of 51 points there). **Improved Concussive Shot is not blocked — it is measured
+worthless.** Concussive Shot r1 deals no damage and applies a 50% movement slow for 4 s, so
+the talent is a stun chance on a snare; and a snare is worth nothing in this sim, which is a
+measurement rather than a guess (`.pi/research/octowow/hunter.md` §12): making hostiles
+**immobile** moves clear time 2.6% and party health 0.7pp, making them **2.25× faster**
+moves it 3.4% and 0.2pp, and per-seed deltas straddle zero in both directions. The approach
+is not a phase the fight spends anything on, so the talent's five of 41 Marksmanship points
+stay unported until movement itself matters — and the Rogue's already-modelled Crippling
+Poison is inert for the same reason.
 
 ## The Aimed Shot row, corrected (and Swiftshot completed)
 
@@ -201,12 +208,13 @@ by reallocating mana into Arcane Shot (46 → 59 casts) — the L36 Hunter had b
 **34/36** (counts held, margins rotated: Paladin/armory healed, Paladin/library broke),
 `bench-30` unchanged, `dotnet test` **254 passed, 10 skipped**.
 
-**Next: nothing in this tree is cheap any more.** The four left in `.pi/research/octowow/hunter.md`
-§5(b) each need a new engine axis (a queued next-cast rider, a parry, a Concussive Shot row,
-a Beast Mastery build) rather than a rule. The Hunter is at **11 of 16** talents and is now
-the second-most complete class in the port; what is left is a party-composition question —
-whether +6% from its capstone is the right size next to the Paladin's and Warlock's — not a
-talent one.
+**Next: nothing in this tree is cheap any more, and one branch is now closed.** Swift
+Reflexes needs parry *and* attack speed as a stat; Experimental Ammunition needs a queued
+next-cast rider and is blocked on evidence before it is blocked on code (the note's §7 never
+finds the ammunition selector explained); Beast Mastery is 0 of 51 points. The Hunter is at
+**11 of 16** and is the second-most complete class in the port; what is left is the aim of
+the class as a whole — whether +6% from its capstone is the right size next to the Paladin's
+and Warlock's capstones — and that is a party-composition question, not a talent one.
 
 ## Lock and Load 1/1 — the largest single talent in the port
 
@@ -772,7 +780,10 @@ not measured. No ladder or `comps` cell seats them either, so nothing else needs
 | Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
 | Paladin | 40/0/11 | **7 of 17** | five lines and one deletion; Illumination is a **nerf** (10000 → 6000) and Divine Favor's cooldown row is gone; `comps 6 --level 60` 36/36 clean, bench 30/30 with the snapshot unmoved |
 | Warlock | 31/0/20 | **8 of 17** | needed a model change: DoT ticks now take `Talents.damageBp` at aura-application time; `comps 6 --level 60` 36/36 clean, but the warlock ends every arm at 99-100% mana |
-| Hunter | 0/41/10 | **11 of 16** | first class to get cheaper from an earlier port: Improved Stings rides the Warlock's DoT-at-application change with no new code; Lethal Shots had to become `Traits.CritBonusBp` (hero-wide crit). **The class then turned out to have never fired a shot** — the AI's lane test filed it as melee because of Raptor Strike. Fixed (`ranged` = a damaging `Foe` row past range 1), 15103 → 21381 damage at L36, `comps 2 --level 60` 36/36 clean, bench byte-identical (no Hunter in `defaultRoster`). **(b)-bucket re-ranked on the live class (§10 of the note) and its first three picks built:** Mortal Shots 5/5 as `Talents.CritDamageBp = 3000` (**+10.8% damage/tick L36, +14.4% L60** on a 12-seed A/B), Improved Slaying 3/3 as `Talents.SlayingBp = 300` — the first talent in the port whose value depends on the target's `CreatureType` (**+2.9% damage/tick L60**, §12 of the note), and Piercing Shots 2/2 as `Talents.CritBleedShareBp = 3000` — the first that pays the *target* (**~17-19% of the class's direct damage**, clock unresolvable at n=96). `comps 2 --level 60` 36/36, `--level 36` 34/36, bench unchanged. Aimed Shot's cost/cooldown row was then corrected to the source (Cost 50, 26 s, §5(a)) before Swiftshot was finished: Swiftshot 3/3 now holds Aimed at **21 s** and the Arrow costs 50. **Lock and Load 1/1** (`ProcEvent.OnCritOf` + `ProcResult.ResetCooldown`) resets Aimed on any crit of Arcane/Aimed — **+6.35% L36, +3.73% L60**, more resets a fight than casts, the largest single talent in the port. The four that remain are blocked on engine axes (queued next-cast rider, parry, Concussive Shot row, Beast Mastery build), not on rules. |
+| Hunter | 0/41/10 | **11 of 16** | first class to get cheaper from an earlier port: Improved Stings rides the Warlock's DoT-at-application change with no new code; Lethal Shots had to become `Traits.CritBonusBp` (hero-wide crit). **The class then turned out to have never fired a shot** — the AI's lane test filed it as melee because of Raptor Strike. Fixed (`ranged` = a damaging `Foe` row past range 1), 15103 → 21381 damage at L36, `comps 2 --level 60` 36/36 clean, bench byte-identical (no Hunter in `defaultRoster`). **(b)-bucket re-ranked on the live class (§10 of the note) and its first three picks built:** Mortal Shots 5/5 as `Talents.CritDamageBp = 3000` (**+10.8% damage/tick L36, +14.4% L60** on a 12-seed A/B), Improved Slaying 3/3 as `Talents.SlayingBp = 300` — the first talent in the port whose value depends on the target's `CreatureType` (**+2.9% damage/tick L60**, §12 of the note), and Piercing Shots 2/2 as `Talents.CritBleedShareBp = 3000` — the first that pays the *target* (**~17-19% of the class's direct damage**, clock unresolvable at n=96). `comps 2 --level 60` 36/36, `--level 36` 34/36, bench unchanged. Aimed Shot's cost/cooldown row was then corrected to the source (Cost 50, 26 s, §5(a)) before Swiftshot was finished: Swiftshot 3/3 now holds Aimed at **21 s** and the Arrow costs 50. **Lock and Load 1/1** (`ProcEvent.OnCritOf` + `ProcResult.ResetCooldown`) resets Aimed on any crit of Arcane/Aimed — **+6.35% L36, +3.73% L60**, more resets a fight than casts, the largest single talent in the port. The three that remain are blocked on engine axes (queued next-cast rider, parry, Beast Mastery
+build), not on rules, and a fourth — Improved Concussive Shot — was closed by measurement
+rather than by a model: §12 of the note shows hostile movement speed is worth under the
+harness's floor, so a snare has nothing to ride on. |
 | Druid | — | 0 | notes written (feral + moonkin), three specs `Skip`ped by the operator's direction |
 
 The Warrior port is the template: each (a)-bucket talent lands as a field, each (b)-bucket
