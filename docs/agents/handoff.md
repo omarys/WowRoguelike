@@ -128,6 +128,24 @@ Swiftshot and Lock and Load re-measured from scratch. That divergence is now rec
 the note (§11) and beside `hunterTalents`, because two of the build's four remaining
 dead points are dead *because of it*.
 
+## Improved Slaying — the first talent that needs the target
+
+`[1/2/3]%` damage and crit damage against Beasts, Giants, Dragonkin and Humanoids is the
+first talent here whose value depends on *what is being hit*, so it became
+`Talents.SlayingBp` read through `SimCombat.slayingBp attacker target` rather than a static
+multiplier. The damage share multiplies what lands (in `spellHit`, in `meleeStrike` before
+the attack table, and baked into a `DamageOverTime`'s per-tick amount); the crit-damage
+share is points on the multiplier, the convention Mortal Shots set. `Giant` is not a
+`CreatureType` here and no content is one, so the talent's fourth type is unreachable
+rather than modelled.
+
+Paired 48-seed A/B at library/Median L60, toggling only `SlayingBp`: **mean damage/tick
+ratio 1.0289** against an analytic +3%, clear time **0.9984** (the wing's pace is not
+Hunter-bound). The median ratio is only 1.007 and 26 of 48 seeds improve — a 3% change to
+one member shifts the RNG stream, and the per-seed spread is wider than the effect. Every
+Scarlet Monastery creature is a `Humanoid`, so the class's own fixture gets the full 3%;
+Wailing Caverns is mixed, and its elementals get nothing, which is the talent as printed.
+
 ## What this session changed
 
 Details and measured outcomes are in `docs/agents/domain.md`; these are pointers
@@ -651,7 +669,7 @@ not measured. No ladder or `comps` cell seats them either, so nothing else needs
 | Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
 | Paladin | 40/0/11 | **7 of 17** | five lines and one deletion; Illumination is a **nerf** (10000 → 6000) and Divine Favor's cooldown row is gone; `comps 6 --level 60` 36/36 clean, bench 30/30 with the snapshot unmoved |
 | Warlock | 31/0/20 | **8 of 17** | needed a model change: DoT ticks now take `Talents.damageBp` at aura-application time; `comps 6 --level 60` 36/36 clean, but the warlock ends every arm at 99-100% mana |
-| Hunter | 0/41/10 | **8 of 16** | first class to get cheaper from an earlier port: Improved Stings rides the Warlock's DoT-at-application change with no new code; Lethal Shots had to become `Traits.CritBonusBp` (hero-wide crit). **The class then turned out to have never fired a shot** — the AI's lane test filed it as melee because of Raptor Strike. Fixed (`ranged` = a damaging `Foe` row past range 1), 15103 → 21381 damage at L36, `comps 2 --level 60` 36/36 clean, bench byte-identical (no Hunter in `defaultRoster`). **(b)-bucket re-ranked on the live class (§10 of the note) and its head built: Mortal Shots 5/5 as `Talents.CritDamageBp = 3000`, measured +10.8% damage/tick at L36 and +14.4% at L60 on a 12-seed A/B, `comps 2 --level 60` 36/36 clean.** One L36 seed of twelve flips to a wipe; the mobs end on the Priest, so it is not Hunter threat — L39 is wipe-prone with or without the talent (34/36 off, 32/36 on). Next in the bucket: Improved Slaying (+3%, all hostiles Humanoid), then Piercing Shots. Aimed Shot's 26 s row is a **recorded divergence** (sim keeps 6 s), which is why Swiftshot's 3 points and Lock and Load measure as nothing. |
+| Hunter | 0/41/10 | **9 of 16** | first class to get cheaper from an earlier port: Improved Stings rides the Warlock's DoT-at-application change with no new code; Lethal Shots had to become `Traits.CritBonusBp` (hero-wide crit). **The class then turned out to have never fired a shot** — the AI's lane test filed it as melee because of Raptor Strike. Fixed (`ranged` = a damaging `Foe` row past range 1), 15103 → 21381 damage at L36, `comps 2 --level 60` 36/36 clean, bench byte-identical (no Hunter in `defaultRoster`). **(b)-bucket re-ranked on the live class (§10 of the note) and its first two picks built:** Mortal Shots 5/5 as `Talents.CritDamageBp = 3000` (**+10.8% damage/tick L36, +14.4% L60** on a 12-seed A/B), then Improved Slaying 3/3 as `Talents.SlayingBp = 300` — the first talent in the port whose value depends on the target's `CreatureType` (**+2.9% damage/tick L60** on a paired 48-seed A/B, clear time unchanged; §12 of the note). `comps 2 --level 60` 36/36, `--level 36` 34/36 (the grid's standing margin), bench unchanged. Next in the bucket: Piercing Shots (needs a target-side proc), then the four that are blocked on a decision. Aimed Shot's 26 s row is a **recorded divergence** (sim keeps 6 s), which is why Swiftshot's 3 points and Lock and Load measure as nothing. |
 | Druid | — | 0 | notes written (feral + moonkin), three specs `Skip`ped by the operator's direction |
 
 The Warrior port is the template: each (a)-bucket talent lands as a field, each (b)-bucket

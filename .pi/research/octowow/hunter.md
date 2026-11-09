@@ -404,3 +404,41 @@ now recorded rather than blamed on the port: Swiftshot's 3 points shave a cooldo
 does not have (they measure as nothing), and Lock and Load's reset buys nothing until
 something makes Aimed Shot cooldown-starved. Both are §10's rank-4 note; `Content.fs`'s
 `hunterTalents` comment names the divergence where the talent is built.
+
+## 12. Improved Slaying — landed, and the one talent that needs the target
+
+`[1/2/3]%` damage **and** crit damage against Beasts, Giants, Dragonkin and Humanoids is
+the first talent in this port whose value depends on *what is being hit*, so it could not
+be a static field the way Mortal Shots' crit multiplier was. Three decisions:
+
+- **One field, two halves.** `Talents.SlayingBp` (300 at 3/3) is both the damage share and
+  the crit-damage share, using the convention §11 set: the damage share multiplies what
+  lands, the crit share is points on the multiplier. A non-crit swing that deals 100 deals
+  103; a critting one takes 203% of 45 rather than 200% of 45.
+- **The gate is the target's `CreatureType`**, read by `SimCombat.slayingBp attacker target`.
+  It pays on `Humanoid`, `Beast` and `Dragonkin`; `Giant` is not a `CreatureType` in this
+  engine and no content is one, so the fourth type is unreachable rather than modelled.
+- **It rides the paths that already exist**: `spellHit` (every spell, single-target and per
+  body inside an area), the top of `meleeStrike` before the attack table (before armour, so
+  it reads as 3% more damage rather than 3% more of what got through), the crit branch of
+  `meleeStrike`, and a `DamageOverTime`'s per-tick amount baked at application.
+
+**Where it pays and where it does not.** Every Scarlet Monastery creature is a `Humanoid`
+(`ScarletMob` carries no type field, so the content builder writes `Humanoid`), which is why
+the class's own fixture gets the full 3%. Wailing Caverns is mixed — the Deviate beasts are
+`Beast` and the lashers and Verdan are `Elemental` — so the talent is worth less there, and
+worth nothing against the elementals. That is the talent as printed, not a port failure.
+
+**Measured.** Paired A/B over 48 seeds at library/Median L60, toggling only `SlayingBp`:
+**mean damage/tick ratio 1.0289** — the analytic +3%, arrived at without any of the number
+being fitted — with clear time at **0.9984** (unchanged; the wing's pace is not
+Hunter-bound). The median ratio is 1.007 and only 26 of 48 seeds improve, because a 3%
+change to one member moves the RNG stream and the per-seed spread is wider than the effect.
+Anything that reports a talent this size from a single seed is measuring noise.
+
+**The crit-damage half does not reach `AreaDamage`.** That path rolls one crit for the whole
+area before it knows which bodies are inside it (`rollCrit` at
+`src/WowRoguelike.Core/SimCombat.fs`, the `AreaDamage` case), so a per-target crit share has
+nowhere to go. It is inert for the Hunter — the class has no area spell (`Multi-Shot` is
+three `weaponStrike`s) — and is recorded here because the next class that takes a slaying
+talent with an AoE will hit it.

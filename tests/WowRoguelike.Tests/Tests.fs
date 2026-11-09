@@ -1475,6 +1475,47 @@ let ``a crit-damage talent widens the multiplier on both sites`` () =
   // 45 damage at 230% is 103, and 90 without the talent.
   Assert.Contains(103, amounts)
   Assert.All(amounts, fun d -> Assert.True(d = 103 || d = 0, sprintf "dealt %d" d))
+/// Improved Slaying pays against three creature types and nothing else, so the
+/// field cannot be read off the attacker alone. Both halves of the talent use the
+/// one number — the damage share multiplies, the crit-damage share is points on
+/// the multiplier — and `slayingBp` is the gate that decides whether either pays.
+[<Fact>]
+let ``slaying pays against three creature types and nothing else`` () =
+  let w = arena 0 0 { X = 7; Y = 5 }
+  let mob = mobOf w
+
+  let slayer =
+    { (w.Entities |> List.find (fun e -> e.Id = EntityId 1)) with
+        Talents = { Talents.none with SlayingBp = 300 } }
+
+  let against kind =
+    SimCombat.slayingBp slayer { mob with CreatureType = kind }
+
+  Assert.Equal(300, against CreatureType.Humanoid)
+  Assert.Equal(300, against CreatureType.Beast)
+  Assert.Equal(300, against CreatureType.Dragonkin)
+  Assert.Equal(0, against CreatureType.Elemental)
+  Assert.Equal(0, against CreatureType.Undead)
+  Assert.Equal(0, against CreatureType.Demon)
+
+  // The damage share, on the one damage path with no armour in it: 100 becomes
+  // 103 against a type the talent names and stays 100 against one it does not.
+  let share kind =
+    [ 1UL .. 8UL ]
+    |> List.map (fun seed ->
+      arena 0 0 { X = 7; Y = 5 }
+      |> SimState.mapEntity (EntityId 100) (fun e -> { e with CreatureType = kind })
+      |> fun w -> { w with Rng = Rng.streamsOf seed }
+      |> fun w -> fst (SimCombat.spellHit "Test" slayer (EntityId 100) 100 w))
+
+  Assert.Contains(103, share CreatureType.Beast)
+  Assert.All(share CreatureType.Humanoid, fun d -> Assert.True(d = 103 || d = 0, sprintf "dealt %d" d))
+  Assert.All(share CreatureType.Elemental, fun d -> Assert.True(d = 100 || d = 0, sprintf "dealt %d" d))
+
+  // And the port's Hunter carries it, at the rank the build buys.
+  let hunter = Content.partyOf [ "Hunter" ] 36 |> List.exactlyOne
+  Assert.Equal(300, hunter.Talents.SlayingBp)
+  Assert.Equal(3000, hunter.Talents.CritDamageBp)
 
 /// The party passives land on the pools: Arcane Intellect rank 2 (+7 Intellect),
 /// Mark of the Wild rank 3 (+4 to every stat) and Power Word: Fortitude rank 3

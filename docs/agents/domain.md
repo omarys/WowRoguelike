@@ -1098,6 +1098,20 @@ up on the **Priest**, so the talent is not pulling aggro — the L36/L39 grid si
 margin (`comps 2 --level 36` is 34/36 clean even with the talent off) and the stream shift
 lands there on that seed.
 
+**Improved Slaying** then landed as the port's first talent that needs the *target*:
+`Talents.SlayingBp` is read through `SimCombat.slayingBp attacker target`, which pays only
+against `Humanoid`, `Beast` and `Dragonkin`. Both halves of the printed "[1/2/3]% damage and
+crit damage" read that one field — the damage share multiplies what lands (`spellHit`,
+the top of `meleeStrike` before the attack table, and a `DamageOverTime`'s per-tick amount
+baked at application), and the crit share is points on the multiplier, the convention
+Mortal Shots set. A paired 48-seed A/B at library/Median L60 toggling only `SlayingBp`
+measures **mean damage/tick ratio 1.0289** against the analytic +3%, with clear time
+unchanged at 0.9984 — the wing's pace is not Hunter-bound. The median ratio of 1.007 and
+26-of-48 improvement is the honest shape of a 3% talent: it shifts the RNG stream, and the
+per-seed spread is wider than the effect. Every Scarlet Monastery creature is a `Humanoid`,
+so the class's own fixture gets the full share; Wailing Caverns is mixed, and its elementals
+get nothing.
+
 Bench snapshot is **byte-identical to HEAD** — its roster (`Warrior/Priest/Rogue/Mage/Druid`)
 seats no Hunter, so the bench cannot see this class; the 20 lines that moved while the
 fallback still included `meleeOrders`' walk were the Rogue's, not the Hunter's, and they

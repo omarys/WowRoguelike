@@ -166,6 +166,32 @@ module SimCombat =
   /// Roll a spell through the hit table. Vanilla resists are all-or-nothing: a
   /// miss deals zero, never a fraction, because partial resists come only from
   /// resistance and nothing here carries resistance.
+  /// Improved Slaying pays against three creature types and nothing else, so it
+  /// cannot be a static multiplier: it needs the target. Both halves of the
+  /// talent read the same number — the damage share multiplies what lands, and
+  /// the crit-damage share is points on the multiplier, the convention
+  /// `Talents.CritDamageBp` already set — so one field covers "[1/2/3]% damage
+  /// and crit damage".
+  ///
+  /// OctoWoW lists four types and the fourth is Giants; `CreatureType` has no
+  /// such case and no content is one, so it is unreachable here rather than
+  /// special-cased into the match.
+  let slayingBp (attacker: Entity) (target: Entity) : int =
+    match target.CreatureType with
+    | CreatureType.Beast
+    | CreatureType.Dragonkin
+    | CreatureType.Humanoid -> attacker.Talents.SlayingBp
+    | _ -> 0
+
+  /// The same for a site holding only an id, which is most of them.
+  let slayingAgainst (attacker: Entity) (targetId: EntityId) (w: World) : int =
+    match tryEntity targetId w with
+    | Some t -> slayingBp attacker t
+    | None -> 0
+
+  /// Spell damage to one target: the resist check, then the slaying share. The
+  /// share multiplies here rather than at the call because this is the one place
+  /// every spell — single-target and each body inside an area — passes through.
   let spellHit
     (spellName: string)
     (caster: Entity)
@@ -181,7 +207,7 @@ module SimCombat =
       if roll < spellMissChanceBp caster t then
         0, logLine (sprintf "%s resists %s" t.Name spellName) w
       else
-        amount, w
+        amount * (10000 + slayingBp caster t) / 10000, w
 
   /// Hand one proc's result to its holder. Reads the entity back out of the
   /// world rather than trusting the caller's copy: a proc fired mid-swing must
@@ -258,6 +284,10 @@ module SimCombat =
     | None -> 0, w
     | Some t when not (alive t) || amount <= 0 -> amount, w
     | Some t ->
+      // Before the attack table, so it reads as "3% more damage" and not "3% more
+      // of what got through the armour".
+      let slaying = slayingBp attacker t
+      let amount = amount * (10000 + slaying) / 10000
       let chances = { chanceOf attacker t with Crit = attacker.CritChanceBp + critBonusBp + levelCritBonusBp attacker t }
       let roll, w = rollRange 0 9999 w
 
@@ -286,8 +316,10 @@ module SimCombat =
       | Critical ->
         // And a crit is the attacker's event, whatever it landed on. A swing's
         // base is 200% where a spell's is 150%, and the tree's crit-damage
-        // talent adds the same points to either.
-        mitigate (amount * (20000 + attacker.Talents.CritDamageBp) / 10000), (w |> procOn OnCrit attacker.Id)
+        // talents add the same points to either — Mortal Shots always, Improved
+        // Slaying only against the types it names.
+        mitigate (amount * (20000 + attacker.Talents.CritDamageBp + slaying) / 10000),
+        (w |> procOn OnCrit attacker.Id)
       | Hit -> mitigate amount, w
 
   /// Damage wakes a sleeper, as does any other hostile action — see `wake`. A
@@ -532,7 +564,13 @@ module SimCombat =
           let rolled, w = rollRange lo hi w
           let rolled = rolled * Talents.damageBp ability.Name actor.Talents / 10000
           let amount, w = spellHit ability.Name actor targetId rolled w
-          let amount, w = rollCrit actor.CritChanceBp actor.Talents.CritDamageBp amount w
+
+          let amount, w =
+            rollCrit
+              actor.CritChanceBp
+              (actor.Talents.CritDamageBp + slayingAgainst actor targetId w)
+              amount
+              w
           // A damage spell that landed is the event Clearcasting hangs off; a
           // resisted one is not. Rolled once per landed spell, not once per
           // ability — a wave of Arcane Missiles is five chances, as it was.
@@ -913,7 +951,16 @@ module SimCombat =
           // multiplying a second later. Improved Curse of Agony and Shadow Mastery
           // are the two that need it. The caster is kept, because a proc can hang
           // off the tick (Nightfall) and the target cannot tell you who applied it.
+          // A dot crits on the tick it is applied, not on every tick, so the
+          // slaying share is baked and its crit half cannot be: a `Corrupted`
+          // carries a number and no attacker. The Hunter's serpent sting is the
+          // only slayable dot in the build, and it does not crit.
           let perTick = perTick * Talents.damageBp ability.Name actor.Talents / 10000
+
+          let perTick =
+            match tryEntity targetId w with
+            | Some t -> perTick * (10000 + slayingBp actor t) / 10000
+            | None -> perTick
 
           match tryEntity targetId w with
           | Some t ->

@@ -1246,6 +1246,12 @@ type Talents =
     /// lands on — which is why each site keeps its own base multiplier rather
     /// than this field replacing it.
     CritDamageBp: int
+    /// Percent added to damage dealt, and to a crit's multiplier, against Beasts,
+    /// Dragonkin and Humanoids (Improved Slaying, 3% at 3/3), bp. Unlike
+    /// `CritDamageBp` this one cannot be read off the attacker alone — the
+    /// target's `CreatureType` decides whether it pays at all — so every site
+    /// that spends it also has to be holding the target.
+    SlayingBp: int
     /// Percent added to Intellect before the pools are derived (Ancestral
     /// Knowledge, Divine Intellect), bp.
     IntellectBp: int
@@ -1284,6 +1290,7 @@ module Talents =
       HealCostBp = 0
       SpellCostBp = 0
       CritDamageBp = 0
+      SlayingBp = 0
       IntellectBp = 0
       RegenBp = 0
       ManaRefundOnCritBp = 0

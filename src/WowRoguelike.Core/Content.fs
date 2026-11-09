@@ -4862,14 +4862,22 @@ module Content =
   ///   same way Lethal Shots does: Raptor Strike's crits get it too, which is 381 of
   ///   this class's 21381 damage at L36 and 1717 of 27367 at L60.
   ///
-  /// The eight that are not here are that note's §5(b), re-ranked in §10 on a class
+  /// - Improved Slaying 3/3: `SlayingBp = 300` — 3% damage and 3 points of crit
+  ///   multiplier against Beasts, Dragonkin and Humanoids. It is cheap here for a
+  ///   dull reason: every hostile in the Scarlet Monastery is a `Humanoid`, so the
+  ///   talent is `+3%` on every pull in the fixture the class is measured on. In
+  ///   Wailing Caverns it is worth less — the Deviate beasts and the lashers are
+  ///   `Beast` and `Elemental`, and the Elementals get nothing at all, which is the
+  ///   talent behaving as printed rather than failing.
+  ///
+  /// The seven that are not here are that note's §5(b), re-ranked in §10 on a class
   /// that finally casts: Experimental Ammunition needs a queued next-cast rider,
   /// Piercing Shots a proc that puts a DoT on the *target* (every `ProcResult` acts
   /// on the caster), Lock and Load a cooldown reset that is worth nothing while Aimed
-  /// Shot's cooldown is 6 s rather than the notes' 26, Improved Slaying a reader for
-  /// `CreatureType`, Swift Reflexes a parry, and Improved Concussive Shot a Concussive
-  /// Shot row to stun with. The build spends 0 of its 51 points in Beast Mastery, so
-  /// nothing in this port waits on an inheritance link for the pet.
+  /// Shot's cooldown is 6 s rather than the notes' 26, Improved Concussive Shot a
+  /// Concussive Shot row to stun with, and Swift Reflexes a parry. The build spends
+  /// 0 of its 51 points in Beast Mastery, so nothing in this port waits on an
+  /// inheritance link for the pet.
   ///
   /// **Aimed Shot's 26-second row is a known divergence, not an omission.**
   /// `aimedShotRanks` keeps the sim's 6 s cooldown by decision (note §11): the 26 s row
@@ -4880,6 +4888,7 @@ module Content =
   let private hunterTalents =
     { Talents.none with
         CritDamageBp = 3000
+        SlayingBp = 300
         CooldownOff = [ "Arcane Shot", secTicks -1.5 ]
         Spells =
           [ for spell, costBp, damageBp in
