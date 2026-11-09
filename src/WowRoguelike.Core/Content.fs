@@ -4870,14 +4870,19 @@ module Content =
   ///   `Beast` and `Elemental`, and the Elementals get nothing at all, which is the
   ///   talent behaving as printed rather than failing.
   ///
-  /// The seven that are not here are that note's §5(b), re-ranked in §10 on a class
+  /// - Piercing Shots 2/2: `CritBleedShareBp = 3000` — a crit makes the target
+  ///   bleed 30% of that crit's damage over eight seconds, on a `Bleeding` aura of
+  ///   its own so it stacks with this class's Serpent Sting instead of refreshing
+  ///   it. It is the one talent here that pays the target, and the reason
+  ///   `rollCrit` now reports whether it rolled a crit at all.
+  ///
+  /// The six that are not here are that note's §5(b), re-ranked in §10 on a class
   /// that finally casts: Experimental Ammunition needs a queued next-cast rider,
-  /// Piercing Shots a proc that puts a DoT on the *target* (every `ProcResult` acts
-  /// on the caster), Lock and Load a cooldown reset that is worth nothing while Aimed
-  /// Shot's cooldown is 6 s rather than the notes' 26, Improved Concussive Shot a
-  /// Concussive Shot row to stun with, and Swift Reflexes a parry. The build spends
-  /// 0 of its 51 points in Beast Mastery, so nothing in this port waits on an
-  /// inheritance link for the pet.
+  /// Lock and Load a cooldown reset that is worth nothing while Aimed Shot's
+  /// cooldown is 6 s rather than the notes' 26, Improved Concussive Shot a Concussive
+  /// Shot row to stun with, and Swift Reflexes a parry. The build spends 0 of its 51
+  /// points in Beast Mastery, so nothing in this port waits on an inheritance link
+  /// for the pet.
   ///
   /// **Aimed Shot's 26-second row is a known divergence, not an omission.**
   /// `aimedShotRanks` keeps the sim's 6 s cooldown by decision (note §11): the 26 s row
@@ -4888,6 +4893,7 @@ module Content =
   let private hunterTalents =
     { Talents.none with
         CritDamageBp = 3000
+        CritBleedShareBp = 3000
         SlayingBp = 300
         CooldownOff = [ "Arcane Shot", secTicks -1.5 ]
         Spells =

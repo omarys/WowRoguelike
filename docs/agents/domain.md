@@ -1118,6 +1118,38 @@ fallback still included `meleeOrders`' walk were the Rogue's, not the Hunter's, 
 returned when the fallback was narrowed to abilities. `comps 2 --level 60` stayed **36 of
 36 clean**, so the fix bought throughput without moving the outcome axis.
 
+**Piercing Shots 2/2** is the first talent in the port that pays the **target** rather than
+its holder, and the reason `SimCombat.rollCrit` now reports the crit it rolled — it returns
+`int * bool * World`, so an "on your critical strikes" talent can fire without re-deriving
+that from the amount (a 150% multiplier can round back to the number it started from). It
+needed a new aura case, `Aura.Bleeding of remaining: int<tick> * damagePerTick: int *
+caster: EntityId option`, even though a `Corrupted` carries the same numbers: `Aura.replaces`
+compares *kinds*, so sharing one would let the bleed refresh the Hunter's own Serpent Sting
+away. `SimCombat.piercingBleed attacker targetId dealt` books
+`dealt * Talents.CritBleedShareBp / 10000 / 8` a tick for eight ticks, called from
+`meleeStrike`'s `Critical` branch (on the amount after mitigation) and from `spellHit`. It is
+threat-free by construction rather than by a flag: the ticks land in
+`SimTick.advanceAuraDamage`, which routes through `dealDamage` and never through `addThreat`.
+
+The first cut used `Aura.refresh` like every other DoT, and that made it **a talent worth
+nothing**: 74 procs a fight and not one of them finishing, because every crit replaced the
+previous bleed and discarded the ticks it still owed. The fix is one line —
+`| Bleeding _, Bleeding _ -> false` in `Aura.replaces` — and it is what makes a 2/2 talent
+printed "+30%" behave like one.
+
+Measuring it has a trap worth recording. **DoT ticks write no log line**, and `Attribution`
+is built from the log (its own header: "every total here is direct damage and direct healing
+only"), so a probe reading the Hunter's damage column cannot see this bleed at all — the
+first A/B reported a *loss*. Counting the auras about to fire, before each step consumes
+them, gives the real figure: **~4.8k damage a fight, 17-19% of the Hunter's direct damage** at
+both L36 and L60. The clock barely moves — −1.10% ±1.10% at L36 (n=88), −0.28% ±1.54% at L60
+(n=96) — so the effect is unresolvable at that sample size; the harness's clear-time noise
+floor is about **±1.5% at n≈96**. The clock *is* damage-bound, just damped: pushing the
+Hunter's crit damage from 3000 to 30000 bp (≈+70% damage) shortens the L60 library run only
+5088 → 4736 ticks (−7%), and to 300000 bp (×6.4) 3104 (−39%). Every remaining (b)-bucket pick
+is worth ≤3%, an order of magnitude under what this probe can resolve — which is the argument
+for judging the rest by mechanism and tests rather than by clock.
+
 ### The proc axis — four talents, four classes, and the vocabulary a port no longer has to invent
 
 The axis inventory (`.pi/research/octowow/axis-inventory.md` §1 A1) put the trigger/proc

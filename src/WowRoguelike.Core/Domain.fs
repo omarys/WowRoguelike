@@ -298,6 +298,11 @@ type Aura =
   /// Druid's bleed, and neither can be read off the target — the tick lands on
   /// the wrong entity, at a moment the caster may already be dead.
   | Corrupted of remaining: int<tick> * damagePerTick: int * caster: EntityId option
+  /// The bleed a critical strike opens (Piercing Shots). Its own case rather than
+  /// another `Corrupted` because `replaces` compares kinds, so sharing one would
+  /// make a Hunter's bleed eat its own Serpent Sting — a sting and a bleed are two
+  /// debuffs on the target in the game, and they have to be two auras here.
+  | Bleeding of remaining: int<tick> * damagePerTick: int * caster: EntityId option
   /// Deadly Poison: a damage-over-time that stacks instead of refreshing, because
   /// the fifth dose is worth five times the first. The duration is shared; the
   /// stacks are what the Tick multiplies by.
@@ -367,6 +372,7 @@ module Aura =
     | Rejuvenation(r, n, s) when r > ticks 1 -> Some(Rejuvenation(r - ticks 1, n, s))
     | Sundered(r, reduction) when r > ticks 1 -> Some(Sundered(r - ticks 1, reduction))
     | Corrupted(r, n, c) when r > ticks 1 -> Some(Corrupted(r - ticks 1, n, c))
+    | Bleeding(r, n, c) when r > ticks 1 -> Some(Bleeding(r - ticks 1, n, c))
     | DeadlyPoisoned(r, n, s) when r > ticks 1 -> Some(DeadlyPoisoned(r - ticks 1, n, s))
     | Wounded(r, bp, s) when r > ticks 1 -> Some(Wounded(r - ticks 1, bp, s))
     | Numbed(r, bp) when r > ticks 1 -> Some(Numbed(r - ticks 1, bp))
@@ -399,6 +405,7 @@ module Aura =
     | Rejuvenation(r, n, s) -> sprintf "rejuv(%d,+%d,%s)" r n s
     | Sundered(r, reduction) -> sprintf "sunder(%d,-%d)" r reduction
     | Corrupted(r, n, _) -> sprintf "dot(%d,%d)" r n
+    | Bleeding(r, n, _) -> sprintf "bleed(%d,%d)" r n
     | DeadlyPoisoned(r, n, s) -> sprintf "deadly(%d,%d,x%d)" r n s
     | Wounded(r, bp, s) -> sprintf "wound(%d,-%d,x%d)" r bp s
     | Numbed(r, bp) -> sprintf "numb(%d,+%d)" r bp
@@ -436,6 +443,7 @@ module Aura =
     | Rejuvenation(_, _, source) -> source
     | Sundered _ -> "SUNDER"
     | Corrupted _ -> "CORRUPTION"
+    | Bleeding _ -> "BLEED"
     | DeadlyPoisoned _ -> "DEADLY POISON"
     | Wounded _ -> "WOUND POISON"
     | Numbed _ -> "NUMBED"
@@ -474,6 +482,7 @@ module Aura =
     | Silenced r
     | Sundered(r, _)
     | Corrupted(r, _, _)
+    | Bleeding(r, _, _)
     | Drained(r, _)
     | Blocking r -> r
     | TotemBoon(r, _, _, _)
@@ -610,6 +619,7 @@ module Aura =
       match a with
       | Rejuvenation(r, _, _) -> r
       | Corrupted(r, _, _) -> r
+      | Bleeding(r, _, _) -> r
       | DeadlyPoisoned(r, _, _) -> r
       | Drained(r, _) -> r
       | Polymorphed r -> r
@@ -698,6 +708,7 @@ module Aura =
     | Rejuvenation _ -> 5
     | Sundered _ -> 6
     | Corrupted _ -> 7
+    | Bleeding _ -> 23
     | Disarmed _ -> 8
     | Blocking _ -> 9
     | TotemBoon _ -> 10
@@ -718,6 +729,12 @@ module Aura =
   let replaces (older: Aura) (newer: Aura) =
     match older, newer with
     | Rejuvenation(_, _, a), Rejuvenation(_, _, b) -> a = b
+    // Piercing Shots stacks, and has to: a crit's bleed is its own eight seconds,
+    // and a Hunter that crits again two seconds later would otherwise swallow the
+    // six ticks the first one still owes. Measured before this line existed, the
+    // talent was worth nothing at all — 74 procs a fight and not one of them
+    // finishing, because every crit ate the previous bleed.
+    | Bleeding _, Bleeding _ -> false
     | _ -> kind older = kind newer
 
   /// Prepend `a`, dropping the aura it replaces, so a re-application refreshes
@@ -737,6 +754,7 @@ module Aura =
   let dotCaster =
     function
     | Corrupted(_, _, Some caster) -> Some caster
+    | Bleeding(_, _, Some caster) -> Some caster
     | _ -> None
 
   /// Extra block chance from Shield Block, in basis points.
@@ -755,6 +773,7 @@ module Aura =
   let flatDamagePerTick =
     function
     | Corrupted(_, n, _) -> n
+    | Bleeding(_, n, _) -> n
     | _ -> 0
 
   /// Resource drained per firing Tick, summed over auras. Viper Sting is the only
@@ -1246,6 +1265,11 @@ type Talents =
     /// lands on — which is why each site keeps its own base multiplier rather
     /// than this field replacing it.
     CritDamageBp: int
+    /// Percent of a critical strike's damage the victim then bleeds back over
+    /// eight seconds (Piercing Shots, 30% at 2/2), bp. The only talent here that
+    /// pays the *target* instead of the holder, which is why it is not a `Proc`:
+    /// a proc's payload acts on its owner by construction.
+    CritBleedShareBp: int
     /// Percent added to damage dealt, and to a crit's multiplier, against Beasts,
     /// Dragonkin and Humanoids (Improved Slaying, 3% at 3/3), bp. Unlike
     /// `CritDamageBp` this one cannot be read off the attacker alone — the
@@ -1290,6 +1314,7 @@ module Talents =
       HealCostBp = 0
       SpellCostBp = 0
       CritDamageBp = 0
+      CritBleedShareBp = 0
       SlayingBp = 0
       IntellectBp = 0
       RegenBp = 0

@@ -1453,8 +1453,9 @@ let ``a guaranteed crit deals 200 percent`` () =
 [<Fact>]
 let ``a crit-damage talent widens the multiplier on both sites`` () =
   // The spell site, as a pure function: 100 damage at a guaranteed crit.
-  let spell = fst (SimCombat.rollCrit 10000 3000 100 (Content.dungeon 1UL))
+  let spell, crit, _ = SimCombat.rollCrit 10000 3000 100 (Content.dungeon 1UL)
   Assert.Equal(180, spell)
+  Assert.True(crit)
 
   let dealt (w: World) =
     let before = (mobOf w).Health
@@ -1516,6 +1517,51 @@ let ``slaying pays against three creature types and nothing else`` () =
   let hunter = Content.partyOf [ "Hunter" ] 36 |> List.exactlyOne
   Assert.Equal(300, hunter.Talents.SlayingBp)
   Assert.Equal(3000, hunter.Talents.CritDamageBp)
+
+/// Piercing Shots is the first talent in the port that pays the target: a crit
+/// opens a `Bleeding` aura worth a share of the damage the crit dealt, over eight
+/// ticks. It has to be its own aura case, because a shared one would let the
+/// Hunter's bleed refresh its own Serpent Sting away.
+[<Fact>]
+let ``a crit-damage talent that pays the target bleeds it and stacks with itself`` () =
+  let w = arena 0 0 { X = 7; Y = 5 }
+
+  // A 90-damage crit, 30% of it over eight ticks, is 3 a tick.
+  let bled =
+    w
+    |> SimState.mapEntity (EntityId 1) (fun e ->
+      { e with
+          Talents = { Talents.none with CritBleedShareBp = 3000 } })
+
+  let hunter = bled.Entities |> List.find (fun e -> e.Id = EntityId 1)
+  let bled = bled |> SimCombat.piercingBleed hunter (EntityId 100) 90
+
+  let bleed =
+    (mobOf bled).Auras
+    |> List.exactlyOne
+    |> fun a -> Assert.Equal(3, Aura.flatDamagePerTick a); a
+
+  Assert.Equal(secTicks 8.0, Aura.remaining bleed)
+  Assert.Equal(Some(EntityId 1), Aura.dotCaster bleed)
+
+  // A second crit stacks a second bleed rather than refreshing the first: the
+  // ticks the older one still owes are not the newer one's to throw away. This is
+  // the assertion that would have caught the bug I shipped into a 74-procs-a-fight
+  // no-op — every crit was eating the previous bleed.
+  let both =
+    bled
+    |> SimCombat.piercingBleed hunter (EntityId 100) 80
+    |> SimState.mapEntity (EntityId 100) (fun e ->
+      { e with
+          Auras = Aura.refresh (Corrupted(secTicks 12.0, 10, Some(EntityId 1))) e.Auras })
+
+  Assert.Equal(3, (mobOf both).Auras.Length)
+  Assert.Equal(16, (mobOf both).Auras |> List.sumBy Aura.flatDamagePerTick)
+  Assert.Equal(2, (mobOf both).Auras |> List.filter (function Bleeding _ -> true | _ -> false) |> List.length)
+
+  // No talent, no bleed.
+  let untouched = SimCombat.piercingBleed (mobOf w) (EntityId 100) 90 w
+  Assert.Empty((mobOf untouched).Auras)
 
 /// The party passives land on the pools: Arcane Intellect rank 2 (+7 Intellect),
 /// Mark of the Wild rank 3 (+4 to every stat) and Power Word: Fortitude rank 3

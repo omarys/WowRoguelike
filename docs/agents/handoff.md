@@ -146,6 +146,40 @@ one member shifts the RNG stream, and the per-seed spread is wider than the effe
 Scarlet Monastery creature is a `Humanoid`, so the class's own fixture gets the full 3%;
 Wailing Caverns is mixed, and its elementals get nothing, which is the talent as printed.
 
+## Piercing Shots — the first talent that pays the target
+
+The tenth of the Hunter's sixteen, and the last (b)-bucket pick that was not blocked on a
+decision. A crit now opens `Aura.Bleeding` — its own case, not a `Corrupted`, because
+`Aura.replaces` compares kinds and one kind would let the bleed eat the Hunter's own Serpent
+Sting — worth `dealt * Talents.CritBleedShareBp / 10000 / 8` a tick for eight ticks, applied
+by `SimCombat.piercingBleed` from `meleeStrike`'s `Critical` branch and from `spellHit`.
+`SimCombat.rollCrit` now returns `int * bool * World`: a talent that fires "on your critical
+strikes" needs the roll, not an inference from the amount. Threat-free by construction —
+the ticks land in `SimTick.advanceAuraDamage`, which never calls `addThreat`.
+
+Two things to carry forward, both in `domain.md` in full:
+
+- **The first cut was worth nothing** — `Aura.refresh` replaced the previous bleed on every
+  crit, so 74 procs a fight finished none of their ticks. One line in `Aura.replaces`
+  (`Bleeding _, Bleeding _ -> false`) is the whole fix; it now stacks.
+- **DoT ticks write no log line**, and `Attribution` is built from the log, so the damage
+  column cannot see this talent (the first A/B it reported a *loss*). Counted off the auras
+  about to fire: **~4.8k a fight, 17-19% of the Hunter's direct damage**. The clock moves
+  −1.10% ±1.10% L36 (n=88), −0.28% ±1.54% L60 (n=96) — **unresolvable**; the clear-time noise
+  floor is ≈±1.5% at n≈96. The clock is damage-bound but damped (Hunter crit damage ×1.7
+  shortens L60 library 5088 → 4736 ticks), and every remaining pick is ≤3%, so judge the rest
+  by mechanism and tests, not by clock.
+
+Gates: `dotnet test` **254 passed, 10 skipped**, `comps 2 --level 60` **36/36**,
+`--level 36` **34/36** (the grid's standing two armory margins), `bench-30` unchanged (its
+roster seats no Hunter).
+
+**The six that remain** are unchanged and still blocked: Experimental Ammunition (needs a
+queued next-cast rider), Lock and Load and Swiftshot (worthless while Aimed Shot's cooldown
+is 6 s in the sim against the notes' 26 — a recorded divergence), Improved Concussive Shot
+(no Concussive Shot row to stun with), Swift Reflexes (no parry), and nothing in Beast
+Mastery (the build spends 0 of 51 points there).
+
 ## What this session changed
 
 Details and measured outcomes are in `docs/agents/domain.md`; these are pointers
@@ -669,7 +703,7 @@ not measured. No ladder or `comps` cell seats them either, so nothing else needs
 | Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
 | Paladin | 40/0/11 | **7 of 17** | five lines and one deletion; Illumination is a **nerf** (10000 → 6000) and Divine Favor's cooldown row is gone; `comps 6 --level 60` 36/36 clean, bench 30/30 with the snapshot unmoved |
 | Warlock | 31/0/20 | **8 of 17** | needed a model change: DoT ticks now take `Talents.damageBp` at aura-application time; `comps 6 --level 60` 36/36 clean, but the warlock ends every arm at 99-100% mana |
-| Hunter | 0/41/10 | **9 of 16** | first class to get cheaper from an earlier port: Improved Stings rides the Warlock's DoT-at-application change with no new code; Lethal Shots had to become `Traits.CritBonusBp` (hero-wide crit). **The class then turned out to have never fired a shot** — the AI's lane test filed it as melee because of Raptor Strike. Fixed (`ranged` = a damaging `Foe` row past range 1), 15103 → 21381 damage at L36, `comps 2 --level 60` 36/36 clean, bench byte-identical (no Hunter in `defaultRoster`). **(b)-bucket re-ranked on the live class (§10 of the note) and its first two picks built:** Mortal Shots 5/5 as `Talents.CritDamageBp = 3000` (**+10.8% damage/tick L36, +14.4% L60** on a 12-seed A/B), then Improved Slaying 3/3 as `Talents.SlayingBp = 300` — the first talent in the port whose value depends on the target's `CreatureType` (**+2.9% damage/tick L60** on a paired 48-seed A/B, clear time unchanged; §12 of the note). `comps 2 --level 60` 36/36, `--level 36` 34/36 (the grid's standing margin), bench unchanged. Next in the bucket: Piercing Shots (needs a target-side proc), then the four that are blocked on a decision. Aimed Shot's 26 s row is a **recorded divergence** (sim keeps 6 s), which is why Swiftshot's 3 points and Lock and Load measure as nothing. |
+| Hunter | 0/41/10 | **10 of 16** | first class to get cheaper from an earlier port: Improved Stings rides the Warlock's DoT-at-application change with no new code; Lethal Shots had to become `Traits.CritBonusBp` (hero-wide crit). **The class then turned out to have never fired a shot** — the AI's lane test filed it as melee because of Raptor Strike. Fixed (`ranged` = a damaging `Foe` row past range 1), 15103 → 21381 damage at L36, `comps 2 --level 60` 36/36 clean, bench byte-identical (no Hunter in `defaultRoster`). **(b)-bucket re-ranked on the live class (§10 of the note) and its first three picks built:** Mortal Shots 5/5 as `Talents.CritDamageBp = 3000` (**+10.8% damage/tick L36, +14.4% L60** on a 12-seed A/B), Improved Slaying 3/3 as `Talents.SlayingBp = 300` — the first talent in the port whose value depends on the target's `CreatureType` (**+2.9% damage/tick L60**, §12 of the note), and Piercing Shots 2/2 as `Talents.CritBleedShareBp = 3000` — the first that pays the *target* (**~17-19% of the class's direct damage**, clock unresolvable at n=96). `comps 2 --level 60` 36/36, `--level 36` 34/36, bench unchanged. The other six are blocked on decisions, not on engine work. Aimed Shot's 26 s row is a **recorded divergence** (sim keeps 6 s), which is why Swiftshot's 3 points and Lock and Load measure as nothing. |
 | Druid | — | 0 | notes written (feral + moonkin), three specs `Skip`ped by the operator's direction |
 
 The Warrior port is the template: each (a)-bucket talent lands as a field, each (b)-bucket
@@ -779,7 +813,7 @@ the talents each build actually takes, not over the tree:
 | Rogue (melee dps) | 6 of 18 | 9 | 3 |
 | Paladin (healer) | 7 of 17 | 9 | 1 |
 | Warlock (caster dps) | 8 of 17 | 9 | 0 |
-| Hunter (dps + pet) | 5 of 16 | 10 | 1 |
+| Hunter (dps + pet) | 6 of 16 | 9 | 1 |
 | Druid (caster dps) | 5 of 19 | 14 | 0 |
 | Druid (tank + melee dps) | 6 of 21 | 15 | 0 |
 | Mage (caster dps) | 4 of 19 | 15 | 0 |

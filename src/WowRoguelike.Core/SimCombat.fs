@@ -24,9 +24,54 @@ module SimCombat =
   /// critted Arcane Shot is 180% and not 150%. Points and not a factor, so the
   /// two sites that crit — this one at 150% for spells, `meleeStrike` at 200% for
   /// swings — can each keep their own base and still take one number.
-  let rollCrit (critChanceBp: int) (critDamageBp: int) (amount: int) (w: World) : int * World =
+  ///
+  /// The flag is the roll, not a comparison of the amount against the roll it
+  /// came from: a talent that fires on "your critical strikes" has to know, and
+  /// a 150% multiplier can round to the number it started from.
+  let rollCrit
+    (critChanceBp: int)
+    (critDamageBp: int)
+    (amount: int)
+    (w: World)
+    : int * bool * World =
     let roll, w = rollRange 0 9999 w
-    if roll < critChanceBp then amount * (15000 + critDamageBp) / 10000, w else amount, w
+
+    if roll < critChanceBp then
+      amount * (15000 + critDamageBp) / 10000, true, w
+    else
+      amount, false, w
+
+  /// Piercing Shots: a critical strike makes the thing it hit bleed for a share of
+  /// the damage it took, over eight seconds. The first talent in the port that
+  /// pays the *target* on a crit, which is why it is a rule here and not a `Proc`:
+  /// every `ProcResult` acts on its holder (rage, a free spell, a cooldown reset),
+  /// and this one needs the victim and the number the crit dealt.
+  ///
+  /// It is threat-free by construction rather than by a flag: the ticks are paid
+  /// by `SimTick.advanceAuraDamage`, which routes through `dealDamage` and never
+  /// through `addThreat` — threat is charged where a spell is cast, and this bleed
+  /// is never cast.
+  let piercingBleed (attacker: Entity) (targetId: EntityId) (dealt: int) (w: World) : World =
+    let share = attacker.Talents.CritBleedShareBp
+
+    if share <= 0 || dealt <= 0 then
+      w
+    else
+      match tryEntity targetId w with
+      | Some t when alive t ->
+        // "Over 8 sec" is eight ticks, because a periodic aura in this sim fires
+        // once a second.
+        let perTick = dealt * share / 10000 / 8
+
+        if perTick <= 0 then
+          w
+        else
+          w
+          |> mapEntity targetId (fun e ->
+            { e with
+                Auras = Aura.refresh (Bleeding(secTicks 8.0, perTick, Some attacker.Id)) e.Auras })
+          |> logLine (sprintf "%s's critical strike leaves %s bleeding" attacker.Name t.Name)
+      | _ -> w
 
   /// Base chance (basis points) that damage interrupts a cast in progress (Q5a).
   let pushbackBaseBp = 1000
@@ -318,8 +363,12 @@ module SimCombat =
         // base is 200% where a spell's is 150%, and the tree's crit-damage
         // talents add the same points to either — Mortal Shots always, Improved
         // Slaying only against the types it names.
-        mitigate (amount * (20000 + attacker.Talents.CritDamageBp + slaying) / 10000),
-        (w |> procOn OnCrit attacker.Id)
+        let dealt = mitigate (amount * (20000 + attacker.Talents.CritDamageBp + slaying) / 10000)
+
+        dealt,
+        (w
+         |> procOn OnCrit attacker.Id
+         |> piercingBleed attacker targetId dealt)
       | Hit -> mitigate amount, w
 
   /// Damage wakes a sleeper, as does any other hostile action — see `wake`. A
@@ -565,17 +614,19 @@ module SimCombat =
           let rolled = rolled * Talents.damageBp ability.Name actor.Talents / 10000
           let amount, w = spellHit ability.Name actor targetId rolled w
 
-          let amount, w =
+          let amount, crit, w =
             rollCrit
               actor.CritChanceBp
               (actor.Talents.CritDamageBp + slayingAgainst actor targetId w)
               amount
               w
+
           // A damage spell that landed is the event Clearcasting hangs off; a
           // resisted one is not. Rolled once per landed spell, not once per
           // ability — a wave of Arcane Missiles is five chances, as it was.
           let w = if amount > 0 then procOn OnSpellHit actor.Id w else w
           let w = dealDamage targetId amount w
+          let w = if crit then piercingBleed actor targetId amount w else w
           let w = gainRage actor amount w
           let w = if actor.Faction = Party then addThreat targetId actor amount w else w
           w |> logLine (sprintf "%s's %s hits %s for %d" actor.Name ability.Name targetName amount)
@@ -833,7 +884,7 @@ module SimCombat =
           // within `radius` of the actor. No friendly fire, and not mitigated by
           // armour (spell).
           let amount, w = rollRange lo hi w
-          let amount, w = rollCrit actor.CritChanceBp actor.Talents.CritDamageBp amount w
+          let amount, _, w = rollCrit actor.CritChanceBp actor.Talents.CritDamageBp amount w
 
           w.Entities
           |> List.filter (fun e ->
