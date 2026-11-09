@@ -2000,6 +2000,67 @@ let ``anything that stuns is an interrupt too`` () =
   | UseAbility(_, name, _) -> Assert.Equal("Gouge", name)
   | other -> failwithf "expected a Gouge at the caster, got %A" other
 
+// ===========================================================================
+// Dispels
+// ===========================================================================
+
+let private dispelWorld (mobAuras: Aura list) =
+  let slow = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
+
+  let priest =
+    { Content.hero 1 "Priest" Healer 1000 1000 slow 50000 [ Content.dispelMagic ] { X = 5; Y = 5 } with
+        Target = Some(EntityId 100) }
+
+  let mob =
+    { Content.mob 100 "Chaplain" CreatureType.Humanoid 39 2000 1000 (Some slow) [] None { X = 6; Y = 5 } with
+        Engaged = true
+        Target = Some(EntityId 1)
+        Auras = mobAuras }
+
+  { Tick = ticks 0
+    RestTicks = ticks 0
+    Grid = Grid.create 20 10
+    Entities = [ priest; mob ]
+    Pending = []
+    Rng = Rng.streamsOf 1UL
+    PartyBuffs = []
+    Quests = []
+    Log = [] }
+
+[<Fact>]
+let ``Dispel Magic takes a heal-over-time off the mob it is aimed at`` () =
+  let w = dispelWorld [ Rejuvenation(secTicks 10.0, 12, "Renew") ]
+
+  let after =
+    SimCombat.applyCommand
+      { ApplyAt = ticks 1
+        Kind = UseAbility(EntityId 1, "Dispel Magic", EntityId 100) }
+      w
+
+  let mob = after.Entities |> List.find (fun e -> e.Id = EntityId 100)
+  Assert.Empty(mob.Auras)
+
+[<Fact>]
+let ``a purge is only worth a global when there is something to strip`` () =
+  // The common case in this content is a mob with nothing removable, and a dispel
+  // spent on it is a global the party never gets back.
+  let withRenew =
+    PartyAi.decide (dispelWorld [ Rejuvenation(secTicks 10.0, 12, "Renew") ])
+    |> List.filter (fun c ->
+      match c.Kind with
+      | UseAbility(_, "Dispel Magic", _) -> true
+      | _ -> false)
+
+  let bare =
+    PartyAi.decide (dispelWorld [])
+    |> List.filter (fun c ->
+      match c.Kind with
+      | UseAbility(_, "Dispel Magic", _) -> true
+      | _ -> false)
+
+  Assert.Single(withRenew) |> ignore
+  Assert.Empty(bare)
+
 [<Fact>]
 let ``one caster in mid-spell gets exactly one interrupter`` () =
   let slow = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
@@ -2205,11 +2266,16 @@ let ``the paladin's kit is the level-24 one`` () =
   // immunity.
   Assert.Equal<Effect list>([ Stun(secTicks 4.0) ], effectsOf "Hammer of Justice")
   Assert.Equal<Effect list>([ ReducesDamage(secTicks 8.0, 10000) ], effectsOf "Divine Protection")
+  // Purify is the era's poison cleaner, and the only thing a Paladin dispels; it is
+  // here because the operator listed the class's cleaners, not because this content
+  // has a poison for it to find.
+  Assert.Equal<Effect list>([ Dispel(Poison, 1) ], effectsOf "Purify")
   // Divine Favor is not in the kit any more: OctoWoW's Divine Favor is a passive
   // Holy Shock crit talent, so the 1.12 cooldown row was deleted rather than tuned
-  // (`.pi/research/octowow/paladin.md` §5(c)). Five abilities, not six.
+  // (`.pi/research/octowow/paladin.md` §5(c)). Six abilities: the five the build
+  // spends points on, plus Purify.
   Assert.DoesNotContain(paladin.Abilities, fun a -> a.Name = "Divine Favor")
-  Assert.Equal(5, List.length paladin.Abilities)
+  Assert.Equal(6, List.length paladin.Abilities)
 
 /// The Paladin's OctoWoW build — Holy 40 / Protection 0 / Retribution 11, decoded in
 /// `.pi/research/octowow/paladin.md` §6. Seven of its seventeen talents are data;
@@ -2671,7 +2737,10 @@ let ``the shaman's kit is the level-24 one`` () =
       "Healing Stream Totem"
       "Nature's Swiftness"
       "Reincarnation"
-      "Ancestral Spirit" ],
+      "Ancestral Spirit"
+      "Purge"
+      "Cure Poison"
+      "Cure Disease" ],
     shaman.Abilities |> List.map (fun a -> a.Name)
   )
 

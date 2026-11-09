@@ -752,6 +752,63 @@ module PartyAi =
     | Some cast -> cmd at cast
     | None ->
 
+    // A cleaner is worth a global only when the body carries something it can take
+    // off: `Dispel` on a target with no matching aura is a wasted button, and in
+    // this content that is the common case. A friendly cleaner looks for a harmful
+    // aura of its school on a member; an offensive one (Purge, Dispel Magic) looks
+    // for a helpfully granted aura of that school on the mob already being fought —
+    // which here means the Scarlet Chaplain's Renew and almost nothing else.
+    // Instant, so it never holds a heal back; it sits below the heal because a heal
+    // saves the body this Tick and a dispel does not.
+    let dispelSchoolOf (a: Ability) =
+      a.Effects
+      |> List.tryPick (function
+        | Dispel(school, _) -> Some school
+        | _ -> None)
+
+    let foeTarget =
+      h.Target
+      |> Option.bind (fun id ->
+        w.Entities
+        |> List.tryFind (fun e -> e.Id = id && e.Faction = Hostile && SimState.alive e))
+    let cleanse =
+      h.Abilities
+      |> List.filter (fun a -> canUse h a.Name && (dispelSchoolOf a).IsSome)
+      |> List.tryPick (fun a ->
+        let school = (dispelSchoolOf a).Value
+
+        let carrying (wantHelpful: bool) (e: Entity) =
+          e.Auras
+          |> List.exists (fun x -> Aura.dispelType x = school && Aura.isHelpful x = wantHelpful)
+
+        match a.TargetKind with
+        | Foe ->
+          // A healer's own target is whoever it is healing, so an offensive purge
+          // picks its own: the nearest hostile with something up that this school
+          // can take off. `foeTarget` is the fallback for a caster whose target is
+          // already the mob it is fighting.
+          let candidates =
+            SimState.aliveHostiles w
+            |> List.filter (fun f -> SimState.canReach a.Range h f w && carrying true f)
+            |> List.sortBy (fun f -> Pos.chebyshev h.Pos f.Pos, f.Id)
+            |> List.tryHead
+
+          (match candidates with
+           | Some f -> Some f
+           | None -> foeTarget |> Option.filter (fun f -> SimState.canReach a.Range h f w && carrying true f))
+          |> Option.map (fun f -> UseAbility(h.Id, a.Name, f.Id))
+        | _ ->
+          party
+          |> List.filter (fun t -> SimState.alive t && SimState.canReach a.Range h t w && carrying false t)
+          |> List.sortBy SimState.healthPct
+          |> List.tryHead
+          |> Option.map (fun t -> UseAbility(h.Id, a.Name, t.Id)))
+      |> Option.map (cmd at)
+
+    match cleanse with
+    | Some c -> c
+    | None ->
+
     match directTarget, hotTarget with
     | Some t, _ when projectedPct t < 65 -> heal t
     | _, Some t -> order (hotFor t) t

@@ -4,11 +4,38 @@ Written at commit `aba0722`, with that session's work on top as one WIP commit
 `40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**257 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
-Release`, 267 total), Release build clean — re-verified on the tree that carries the
+**263 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
+Release`, 273 total), Release build clean — re-verified on the tree that carries the
 era pushback model (`SimCombat.fs:462`), the Hunter's last four increments (`a3f6d10`,
-the snare's null result) and the Paladin's Blessing of Kings. The 10 skips are the
-operator's parked Bear/Cat/Moonkin specs.
+the snare's null result), the Paladin's Blessing of Kings, the mob ability rotation
+fix (`2a65a63`), the stun-is-an-interrupt rule (`81e17b1`) and the dispel axis. The 10
+skips are the operator's parked Bear/Cat/Moonkin specs.
+
+## Where the work stands after the interrupt and dispel increment
+
+Two engine truths were missing, and both were cheap:
+
+- **A rotation that only read some effect shapes.** `SimTick.mobDecisions` named
+  `Heal`, `Sleep`, `Damage`, `Shapeshift`, `AreaDamage` and `Stun` — so `SpellDamage`,
+  `HealOverTime` and `Polymorph` were content with no reader, and a Scryer's Fireball,
+  a mob's Renew and Arcanist Doan's Polymorph never fired. Committed as `2a65a63`;
+  the ladder got harder where casters live and that is the point. Three tests pin it
+  (`a hostile caster spends its turn on its bolt`, `… polymorphs instead of swinging`,
+  `… renews a wounded ally`), and one trap is worth carrying: **an instant ability
+  resolves inside the same tick, so there is no `Casting` to assert on** — assert the
+  aura instead.
+- **Stuns are interrupts, and a dispel is one mechanism with two directions.** Details
+  and all measurements in `domain.md` ("Anything that stuns is an interrupt" and "The
+  dispel axis"). The two numbers to remember: kicking *every* interruptible cast made
+  library **5-8% slower** (so the AI kicks only heals, quarter-health hits and 3 s
+  casts, and the 30-seed ladder is flat at +0.4 ticks), and the dispels that actually
+  fire in this content are Purges of a Chaplain's Renew — **52 in four library seeds,
+  8 470 → 8 311 ticks (−1.9%)**.
+
+What a next session should know about the dispel axis specifically: the party carries
+**no poison, disease or curse in this content**, so five of the eight cleaners are
+inert by measurement, not by omission. Adding a hostile that afflicts would light them
+up for free.
 
 ## Where the work stands after the pushback increment
 

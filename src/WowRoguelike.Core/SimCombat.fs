@@ -960,6 +960,33 @@ module SimCombat =
             |> logLine (sprintf "%s stuns %s" actor.Name t.Name)
           | None -> w
 
+        | Dispel(school, count) ->
+          // Both directions at once: whatever on the target answers to this
+          // school comes off, and the school is what makes the offensive and
+          // defensive cases the same code. A purge aimed at a mob finds magic
+          // buffs; a Cure Poison aimed at a member finds a poison. Nothing to
+          // remove is not a wasted cast in the log — it is the common case in
+          // content where the mobs never afflict anyone, and it is silent for
+          // exactly that reason.
+          match tryEntity targetId w with
+          | Some t ->
+            let matching, others =
+              t.Auras |> List.partition (fun a -> Aura.dispelType a = school)
+
+            let taken = matching |> List.truncate count
+
+            if List.isEmpty taken then
+              w
+            else
+              let left = others @ (matching |> List.skip taken.Length)
+
+              w
+              |> mapEntity targetId (fun e -> { e with Auras = left })
+              |> logLine (
+                sprintf "%s dispels %s from %s" actor.Name (String.concat ", " (taken |> List.map Aura.describe)) t.Name
+              )
+          | None -> w
+
         | Root duration ->
           match tryEntity targetId w with
           | Some t ->

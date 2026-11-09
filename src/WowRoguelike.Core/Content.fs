@@ -1388,6 +1388,56 @@ module Content =
 
   let polymorph = rank24 polymorphRanks
 
+  // ---------------------------------------------------------------------------
+  // Dispels
+  // ---------------------------------------------------------------------------
+  // One mechanism, two directions: `Effect.Dispel` takes off every aura whose
+  // `Aura.dispelType` names the school, so a Purge on a mob and a Cure Poison on a
+  // member are the same code seen from two sides. The content has exactly one
+  // removable thing that matters — a Chaplain's Renew — and almost nothing else:
+  // no Scarlet mob poisons, curses or infects the party, so the poison, curse and
+  // disease cleaners are era-correct data that will not fire until the content
+  // grows a target for them. They are here anyway because a cleaner is cheaper to
+  // carry than to add later once a mob does afflict someone.
+  //
+  // All instant: the era's cleaners are, and none of them is worth a cast time.
+
+  let private dispelRanks name target school count cost =
+    { Name = name
+      Resource = Mana
+      Stance = None
+      TargetKind = target
+      Interruptible = false
+      Ranks =
+        [ { Level = 8
+            Cost = cost
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 8.0
+            Range = 6
+            Effects = [ Dispel(school, count) ] } ] }
+
+  /// Shaman: one magic effect off an enemy — a Renew, an Inspired, a shield.
+  let purge = rank24 (dispelRanks "Purge" Foe Magic 1 90)
+  /// Shaman: one poison off a member.
+  let curePoison = rank24 (dispelRanks "Cure Poison" Ally Poison 1 60)
+  /// Shaman: one disease off a member.
+  let cureDisease = rank24 (dispelRanks "Cure Disease" Ally Disease 1 90)
+  /// Paladin: one poison off a member.
+  let purify = rank24 (dispelRanks "Purify" Ally Poison 1 60)
+  /// Druid: one curse off a member.
+  let removeCurse = rank24 (dispelRanks "Remove Curse" Ally Curse 1 60)
+  /// Priest: one disease off a member.
+  let abolishDisease = rank24 (dispelRanks "Abolish Disease" Ally Disease 1 90)
+
+  /// Priest: two magic effects off whoever the cast is aimed at. Offensive in
+  /// this port because the friendly case has no target — the party carries no
+  /// harmful magic in this content — and a hostile Renew is the thing worth
+  /// stripping.
+  let dispelMagic =
+    rank24
+      { (dispelRanks "Dispel Magic" Foe Magic 2 200) with
+          Ranks = [ { Level = 8; Cost = 200; CastTicks = ticks 0; CooldownTicks = secTicks 8.0; Range = 8; Effects = [ Dispel(Magic, 2) ] } ] }
+
   // -- Druid ----------------------------------------------------------------
 
   /// Rejuvenation ranks 1-7 (levels 4-40): 8 → 97 every 3 s for 12 s, so the
@@ -4168,7 +4218,7 @@ module Content =
         (AbilityDef.kitAt
           level
           [ lesserHealRanks; healRanks; renewRanks; smiteRanks; shadowWordPainRanks ]
-        @ [ innerFocus ]))
+        @ [ innerFocus; dispelMagic; abolishDisease ]))
       { X = 1; Y = 6 }
 
   /// Night Elf Rogue: 221 armour from the set plus 200 from Agility, Assassin's
@@ -4463,7 +4513,7 @@ module Content =
               entanglingRootsRanks
               wrathRanks
               moonfireRanks ]
-          @ [ swiftmend; naturesSwiftness; rebirth; innervate ])
+          @ [ swiftmend; naturesSwiftness; rebirth; innervate; removeCurse ])
         @ [ treeOfLife; humanForm ]
       | CatDruid ->
         // The Rogue's energy economy with feral names on it: Claw is Sinister
@@ -4696,7 +4746,8 @@ module Content =
             holyLightRanks
             judgementRanks
             paladinHammerOfJusticeRanks
-            divineProtectionRanks ]))
+            divineProtectionRanks ]
+        @ [ purify ]))
       { X = 1; Y = 8 }
 
   /// Gnome Warlock: cloth, the same washed-out set as the Mage — five of the
@@ -4866,7 +4917,7 @@ module Content =
           level
           [ shamanLightningBoltRanks; earthShockRanks; flameShockRanks; shamanHealingWaveRanks ]
         @ totemKit shamanTalents level
-        @ [ naturesSwiftness; reincarnation; ancestralSpirit ]))
+        @ [ naturesSwiftness; reincarnation; ancestralSpirit; purge; curePoison; cureDisease ]))
       { X = 3; Y = 7 }
 
   /// Night Elf Hunter: level-24 leather only — hunters too train mail at 40 — on

@@ -274,6 +274,21 @@ module Stances =
     | TreeForm -> "tree"
     | MoonkinForm -> "moonkin"
 
+/// What a dispel has to name before it can take an aura off a body. This is the
+/// era's own vocabulary: a cleaner removes "one poison effect", and which of the
+/// five schools the effect belongs to is a property of the effect, not of the
+/// spell. `Physical` is not a school anyone strips — it is the word for "nothing
+/// takes this off": a form you hold, a stun, a sunder, a bleed, the five-second
+/// rule's marker. It is the fallback, so a new aura is undispellable until
+/// someone says otherwise, which is the safe direction for a mechanic whose
+/// cleaners are per-school.
+type DispelType =
+  | Magic
+  | Poison
+  | Disease
+  | Curse
+  | Physical
+
 /// A timed state on an Entity.
 type Aura =
   /// Druid's Slumber. Any hostile action wakes the target.
@@ -479,6 +494,42 @@ module Aura =
     | Inspired _
     | Empowered _ -> true
     | _ -> false
+
+  /// Which dispel takes this aura off. `Physical` answers "none of them" — see
+  /// `DispelType`. The three poisons are the Rogue's, `Drained` is Viper Sting
+  /// (nature, but the era's dispel magic takes it), and everything a caster puts
+  /// on a body to make it worse is magic: a root, a silence, a sleep, a
+  /// polymorph, a damage-over-time. The beneficial side of `Magic` is why an
+  /// offensive purge reads the same list — a Shaman stripping a mob's shield and
+  /// a Priest lifting a curse off the tank are one mechanism seen from two sides.
+  let dispelType =
+    function
+    | Sleeping _
+    | Rooted _
+    | Polymorphed _
+    | Silenced _
+    | Drained _
+    | Corrupted _
+    | Rejuvenation _
+    | Blocking _
+    | ShieldWalled _
+    | TotemBoon _
+    | HealingWay _
+    | Inspired _
+    | Empowered _
+    | Innervated _ -> Magic
+    | DeadlyPoisoned _
+    | Wounded _
+    | Numbed _
+    | Crippled _ -> Poison
+    | SerpentForm _
+    | Shaped _
+    | Stunned _
+    | Sundered _
+    | Bleeding _
+    | Disarmed _
+    | RecentlyCast _ -> Physical
+
   /// Ticks left before it falls off.
   let remaining =
     function
@@ -1011,6 +1062,14 @@ type Effect =
   /// attacked, and it is drawn on the grid — because a pet that cannot die and
   /// a totem that cannot be killed are not the abilities they are in WoW.
   | Summon of spec: SummonSpec
+  /// Take up to `count` auras of one school off the target. One mechanic, both
+  /// directions: an offensive dispel (Purge, Dispel Magic on an enemy) strips a
+  /// buff, a defensive one (Cure Poison, Purify, Dispel Magic on a member) lifts
+  /// a debuff, and the school is what decides which of the two it found. It is
+  /// the only effect whose result depends entirely on what is already on the
+  /// target, which is why the era's cleansers read as dead abilities in a fight
+  /// where nothing afflicts anybody.
+  | Dispel of kind: DispelType * count: int
 
 type TargetKind =
   | Foe

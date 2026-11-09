@@ -1021,6 +1021,63 @@ column: **the Warlock ends every arm at 99-100% mana**, so the class is not mana
 all and its damage talents are visible only in ticks, never in a mana floor. Any future
 question about a warlock's sustain needs a different instrument than the mana column.
 
+### The dispel axis — one mechanism, five schools, and one thing worth stripping
+
+`DispelType` (`Domain.fs:285`) is `Magic | Poison | Disease | Curse | Physical`, and
+`Aura.dispelType` (`Domain.fs:505`) classifies every aura case — `Physical` is not a
+school anyone strips, it is the word for "nothing takes this off" (a stance, a stun, a
+sunder, a bleed, the five-second marker), and it is the fallback so a new aura is
+undispellable until someone says otherwise. `Effect.Dispel(school, count)`
+(`Domain.fs:1072`, resolved at `SimCombat.fs:962`) strips every aura on the target whose
+class answers to that school, so **a Purge on a mob and a Cure Poison on a member are
+the same code seen from two sides** — which is why there is one effect and not two.
+
+Two rules keep it from being a wasted global. The AI only cleans when the body carries
+something the school can take off (`PartyAi.fs`, the `cleanse` branch): a friendly
+cleaner looks for a *harmful* aura of its school on a member, an offensive one looks for
+a *helpful* aura of that school on a hostile. And an offensive dispel picks its own
+target — the nearest hostile with something up — because a healer's own `Target` is
+whoever it is healing, so keying the purge off `h.Target` silently never fires. That
+bug cost one test: `a purge is only worth a global when there is something to strip`.
+
+**What actually gets stripped in this content is one thing:** a Scarlet Chaplain's
+Renew. Per-wing aura census over whole fights (admin-ticks per case, 4 seeds):
+
+| wing | party side | hostile side |
+|---|---|---|
+| library L36 | only helpful auras (Rejuvenation, Blocking, Inspired, Empowered) | `Rejuvenation=16 934`, `Corrupted=30 751`, `DeadlyPoisoned=14 048` |
+| armory L39 | the same, plus 103 ticks of `Polymorphed` | `Rejuvenation=13 866`, `DeadlyPoisoned=16 324` |
+| graveyard L24 | only helpful auras | nothing removable |
+
+The party carries **no poison, disease or curse at all** — the hostile DoTs land on the
+hostile side because they are the Warlock's. So `Purify`, `Cure Poison`, `Cure Disease`,
+`Remove Curse` and `Abolish Disease` are era-correct data with no target in the current
+content, and they say so in their doc comments. They are carried anyway because a
+cleaner is cheaper to already have than to add the day a mob afflicts somebody.
+
+Measured: **52 dispels over four library seeds** (49 in armory), library mean clear
+**8 470 → 8 311 ticks (−1.9%)**, armory 7 697 → 7 685 (−0.2%), graveyard unchanged (nothing
+to strip, 0 dispels). The L60 bench snapshot did not move. A dispel is therefore worth a
+global only on the caster wings — but it is free there, which one healer's instant is.
+
+### Anything that stuns is an interrupt, and the AI kicks what is worth kicking
+
+`SimCombat` already sets `Casting = None` when a `Stun`, a `Sleep` or a `Polymorph`
+lands, so a Gouge, a Shield Bash or a Hammer of Justice is a kick written as control -
+and the party's interrupt scheduler read only `Interrupt`, which left those buttons
+firing at the nearest body while a Chaplain healed through them. `PartyAi.breaksCast`
+now names all four effects.
+
+The measurement that shaped the rest: **breaking every interruptible cast made the
+library wing 5-8% slower.** A kick is a damage button spent on nothing else, and a
+Gouge replacing a Sinister Strike to stop a bolt a 3 050-health Warrior heals back is a
+loss. So a cast has to be worth the button — it heals, it hits for a quarter of the
+victim's health, or it takes three seconds or more (`worthBreaking`). On the
+deterministic 30-seed L60 ladder that is **mean +0.4 ticks, 8 of 30 seeds moved, no
+outcome changes** — which is what a rule that only fires on healers and long casts
+should look like. Supply the era's rule and let the AI be selective; do not read
+"interrupts are good" as "interrupt everything".
+
 ### Hunter: seven of sixteen, and a talent that cannot reach the bow
 
 Marksmanship 41 with no Beast Mastery and Survival 10 lands **seven of sixteen**, and
