@@ -757,6 +757,14 @@ module Content =
   /// vanilla gates it behind 21 Marksmanship points a level-24 hunter cannot have,
   /// and it does not scale, because `.pi/research/ranks/ranks-hunter.md` has no
   /// ladder for it and this file does not invent one.
+  ///
+  /// The cooldown is OctoWoW's **26 seconds**, not the 6 the old record carried:
+  /// the page calls it "a cooldown, not a rotational shot: the Marksmanship tree is
+  /// built around resetting it" (note §3), and two of this build's talents buy
+  /// exactly that reset — Swiftshot's 6 s and Lock and Load's crit. A 6 s row made
+  /// both of them worth nothing, which is how this divergence survived: it measured
+  /// as a divergence in the talents, not in the row. The rank is still level 20 at
+  /// the 1.15.9 client's 75 mana, cut by the page's "about a third" (§3) to 50.
   /// shortcut: a single rank, so a level-60 hunter's Aimed Shot is a level-20 one;
   /// extend the ladder from the 1.15.9 tables when the 60 tier needs the damage.
   let aimedShotRanks: AbilityDef =
@@ -767,9 +775,9 @@ module Content =
       Interruptible = true
       Ranks =
         [ { Level = 20
-            Cost = 75
+            Cost = 50
             CastTicks = secTicks 3.0
-            CooldownTicks = secTicks 6.0
+            CooldownTicks = secTicks 26.0
             Range = 8
             Effects = [ WeaponDamage(10000, 70) ] } ] }
 
@@ -4839,12 +4847,10 @@ module Content =
   ///   Serpent, Aimed, Multi-Shot, Viper, Scatter).
   /// - Resourcefulness 5/5: `CostBp = 1000` on Raptor Strike, its melee half; the
   ///   traps it also discounts are not in the vocabulary.
-  /// - Swiftshot 3/3: `CooldownOff` takes 1.5 s off Arcane Shot. The Aimed leg (−6 s)
-  ///   is deliberately absent: this file's Aimed Shot rows on a 6 s cooldown the page
-  ///   does not carry (that note's Contradiction 1), and `withTalents` would floor the
-  ///   result at 1.5 s — 4.5 s off a button to honour a talent that claims 6 s of a
-  ///   26 s one. Adopting the page's cooldown is a balance decision for the ladder
-  ///   runs, not for a talent port.
+  /// - Swiftshot 3/3: `CooldownOff` takes 1.5 s off Arcane Shot and 6 s off Aimed
+  ///   Shot. Both legs land now that the row carries the page's 26 s: 26 → 20 s,
+  ///   which is the difference between a talent that spends 3 points on nothing and
+  ///   one that spends them on a fifth of the button's cooldown.
   /// - Improved Marksmanship 2/2: `DamageBp = 1000` on Aimed Shot. The Steady Shot
   ///   half of the talent has no row to land on.
   /// - Improved Stings 5/5: `DamageBp = 3000` on Serpent Sting. Its Viper leg needs a
@@ -4876,26 +4882,27 @@ module Content =
   ///   it. It is the one talent here that pays the target, and the reason
   ///   `rollCrit` now reports whether it rolled a crit at all.
   ///
-  /// The six that are not here are that note's §5(b), re-ranked in §10 on a class
+  /// The five that are not here are that note's §5(b), re-ranked in §10 on a class
   /// that finally casts: Experimental Ammunition needs a queued next-cast rider,
-  /// Lock and Load a cooldown reset that is worth nothing while Aimed Shot's
-  /// cooldown is 6 s rather than the notes' 26, Improved Concussive Shot a Concussive
-  /// Shot row to stun with, and Swift Reflexes a parry. The build spends 0 of its 51
-  /// points in Beast Mastery, so nothing in this port waits on an inheritance link
-  /// for the pet.
+  /// Improved Concussive Shot a Concussive Shot row to stun with, and Swift Reflexes
+  /// a parry. The build spends 0 of its 51 points in Beast Mastery, so nothing in
+  /// this port waits on an inheritance link for the pet.
   ///
-  /// **Aimed Shot's 26-second row is a known divergence, not an omission.**
-  /// `aimedShotRanks` keeps the sim's 6 s cooldown by decision (note §11): the 26 s row
-  /// would make the class's best button near-unusable and would require re-measuring
-  /// Swiftshot and Lock and Load from scratch. The two talents that spend points on it
-  /// are consequently worth nothing here — Swiftshot's 3 points shave a cooldown the sim
-  /// does not have, and Lock and Load has nothing to reset.
+  /// **Aimed Shot carries the page's 26 s cooldown now**, which is what unblocked
+  /// Swiftshot's Aimed leg: a Talent that claims 6 s off a 6 s row was spending 3
+  /// points on a floor. The row had been kept at 6 s as a recorded divergence (note
+  /// §11) on the argument that 26 s makes the class's best button near-unusable;
+  /// measured, that is not what happened — the L36 hunter was mana-bound and the
+  /// cheaper row (75 → 50) pays for the lost casts. Lock and Load's reset leg is the
+  /// next thing this row makes possible.
   let private hunterTalents =
     { Talents.none with
         CritDamageBp = 3000
         CritBleedShareBp = 3000
         SlayingBp = 300
-        CooldownOff = [ "Arcane Shot", secTicks -1.5 ]
+        CooldownOff =
+          [ "Arcane Shot", secTicks -1.5
+            "Aimed Shot", secTicks -6.0 ]
         Spells =
           [ for spell, costBp, damageBp in
               [ "Arcane Shot", 1000, 1000

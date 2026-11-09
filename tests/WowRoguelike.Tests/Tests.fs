@@ -3196,8 +3196,9 @@ let ``the hunter's kit is the level-24 one`` () =
   Assert.Equal(9, List.length hunter.Abilities)
 
 /// The Marksmanship build underneath that kit: Efficiency on six rows, Resourcefulness
-/// on the one melee row, Swiftshot on Arcane Shot, Improved Marksmanship on Aimed Shot,
-/// Improved Stings on Serpent Sting, and Ranged Weapon Spec on every damaging shot.
+/// on the one melee row, Swiftshot on Arcane Shot *and* Aimed Shot, Improved
+/// Marksmanship on Aimed Shot, Improved Stings on Serpent Sting, and Ranged Weapon
+/// Spec on every damaging shot.
 [<Fact>]
 let ``the hunter's kit is the marksmanship build`` () =
   let hunter = Content.partyOf [ "Hunter" ] 24 |> List.head
@@ -3207,17 +3208,19 @@ let ``the hunter's kit is the marksmanship build`` () =
   // Raptor Strike, which is the melee half of a talent whose traps are unmodelled.
   Assert.Equal(45, (ability "Arcane Shot").ResourceCost)
   Assert.Equal(45, (ability "Serpent Sting").ResourceCost)
-  Assert.Equal(67, (ability "Aimed Shot").ResourceCost)
+  // The page's own Aimed Shot: 75 mana at rank 1, "about a third less" per §3 of the
+  // note, so 50 before Efficiency takes its 10%.
+  Assert.Equal(45, (ability "Aimed Shot").ResourceCost)
   Assert.Equal(90, (ability "Multi-Shot").ResourceCost)
   Assert.Equal(81, (ability "Viper Sting").ResourceCost)
   Assert.Equal(54, (ability "Scatter Shot").ResourceCost)
   Assert.Equal(40, (ability "Raptor Strike").ResourceCost)
 
-  // Swiftshot 3/3 takes 1.5 s off Arcane Shot's 6 s. Aimed Shot keeps its cooldown:
-  // the talent's Aimed leg would floor a 6 s row at 1.5 s, so `Content.fs` leaves it
-  // out rather than take 4.5 s off a button the page gives 26 s.
+  // Swiftshot 3/3 takes 1.5 s off Arcane Shot's 6 s, and 6 s off Aimed Shot's 26 s.
+  // That second leg is what the page's row buys: on the sim's old 6 s row the talent
+  // was spending 3 points to hit the 1.5 s floor, which is nothing.
   Assert.Equal(secTicks 4.5, (ability "Arcane Shot").CooldownTicks)
-  Assert.Equal(secTicks 6.0, (ability "Aimed Shot").CooldownTicks)
+  Assert.Equal(secTicks 20.0, (ability "Aimed Shot").CooldownTicks)
 
   // Ranged Weapon Spec 5/5 (+10%) reaches every damaging shot; Improved Marksmanship
   // 2/2 and Improved Stings 5/5 stack on their own rows on top of it.

@@ -1131,9 +1131,9 @@ away. `SimCombat.piercingBleed attacker targetId dealt` books
 threat-free by construction rather than by a flag: the ticks land in
 `SimTick.advanceAuraDamage`, which routes through `dealDamage` and never through `addThreat`.
 
-The first cut used `Aura.refresh` like every other DoT, and that made it **a talent worth
-nothing**: 74 procs a fight and not one of them finishing, because every crit replaced the
-previous bleed and discarded the ticks it still owed. The fix is one line —
+The first cut of the bleed used `Aura.refresh` like every other DoT, and that made the talent
+**worth nothing**: 74 procs a fight and not one of them finishing, because every crit replaced
+the previous bleed and discarded the ticks it still owed. The fix is one line —
 `| Bleeding _, Bleeding _ -> false` in `Aura.replaces` — and it is what makes a 2/2 talent
 printed "+30%" behave like one.
 
@@ -1149,6 +1149,44 @@ Hunter's crit damage from 3000 to 30000 bp (≈+70% damage) shortens the L60 lib
 5088 → 4736 ticks (−7%), and to 300000 bp (×6.4) 3104 (−39%). Every remaining (b)-bucket pick
 is worth ≤3%, an order of magnitude under what this probe can resolve — which is the argument
 for judging the rest by mechanism and tests rather than by clock.
+
+**Aimed Shot carries the page's 26 s row.** The sim had kept the 6 s vanilla cooldown as a
+recorded divergence (note §11), on the argument that 26 s makes the class's best button
+near-unusable. Corrected: `Cost` 75 → 50 (the page's "about a third less", §3) and
+`CooldownTicks` 6 s → 26 s, which is what Swiftshot's Aimed leg needs to exist — a talent
+that claims 6 s off a 6 s row was spending 3 points into `withTalents`' 1.5 s floor. Both
+legs of Swiftshot are now in `CooldownOff` (Arcane −1.5 s, Aimed −6 s → 20 s).
+
+Measured over 48 seeds (library, Median, mean per fight):
+
+| | 26 s (no Swiftshot) | 20 s (Swiftshot 3/3) |
+|---|---|---|
+| L36 Aimed casts | 10.0 | 12.0 |
+| L36 Hunter direct damage | 24100 | **24227 (+0.5%)** |
+| L60 Aimed casts | 6.0 | 7.2 |
+| L60 Hunter direct damage | 26599 | **26804 (+0.8%)** |
+
+The talent now does something — 20% more Aimed casts — and that something is 0.5-0.8% of the
+class's damage, because **the AI never saturates the button**: a 400-second fight allows ~15
+Aimed Shots at 26 s and the AI issues 10; at 20 s it allows 20 and the AI issues 12. The
+binding constraint is the 3 s cast and the priority list, not the cooldown, which is the
+second time this port has measured a cooldown talent as AI-capped (the Warlock's Nightfall
+was the first). The row change alone costs the class ~2200 a fight at L36 (Aimed Shot 3950 →
+1739, seed 1) and pays it back almost entirely by reallocating mana into Arcane Shot (46 → 59
+casts, 5362 → 6533) on the cheaper row — the L36 Hunter had been mana-bound at 1137/1695 and
+this row is a third less mana per cast.
+
+`comps 2 --level 60` **36/36** and `--level 36` **34/36** hold their counts, though the L36
+margin rotated: Paladin/armory healed and Paladin/library broke, which is the same thin-margin
+shuffling the grid has shown since the Hunter lane fix. `bench-30` unchanged (no Hunter in its
+roster), `dotnet test` 254 passed.
+
+**A third measurement trap, worth its own line.** `withTalents` folds `CooldownOff`, `Spells`
+and `CritBp` into the **ability list at content-build time**, so mutating `Entity.Talents` on a
+live entity does not touch ability data. The first A/B of Swiftshot's Aimed leg did exactly
+that and reported 26 s and 20 s as *identical* — 12.0 vs 12.0 casts, ratio 1.0000, 0 of 48
+seeds different. It took a rebuild with the entry removed to measure it. Runtime fields
+(`SlayingBp`, `CritBleedShareBp`, `CritDamageBp`) are A/B-able in memory; baked ones are not.
 
 ### The proc axis — four talents, four classes, and the vocabulary a port no longer has to invent
 

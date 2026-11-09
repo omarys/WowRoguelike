@@ -174,11 +174,38 @@ Gates: `dotnet test` **254 passed, 10 skipped**, `comps 2 --level 60` **36/36**,
 `--level 36` **34/36** (the grid's standing two armory margins), `bench-30` unchanged (its
 roster seats no Hunter).
 
-**The six that remain** are unchanged and still blocked: Experimental Ammunition (needs a
-queued next-cast rider), Lock and Load and Swiftshot (worthless while Aimed Shot's cooldown
-is 6 s in the sim against the notes' 26 — a recorded divergence), Improved Concussive Shot
-(no Concussive Shot row to stun with), Swift Reflexes (no parry), and nothing in Beast
-Mastery (the build spends 0 of 51 points there).
+**The five that remain** are unchanged and still blocked: Experimental Ammunition (needs a
+queued next-cast rider), Improved Concussive Shot (no Concussive Shot row to stun with),
+Swift Reflexes (no parry), and nothing in Beast Mastery (the build spends 0 of 51 points
+there). Lock and Load is no longer blocked — see below.
+
+## The Aimed Shot row, corrected (and Swiftshot completed)
+
+The Hunter's Aimed Shot carried the 6 s vanilla cooldown against the page's **26 s**, kept as
+a recorded divergence (note §11) because 26 s looked like it would make the class's best
+button unusable. Corrected, with the page's "about a third less" mana (75 → 50), and that is
+what Swiftshot's Aimed leg needed to exist at all: 3 points claiming 6 s off a 6 s row were
+hitting `withTalents`' 1.5 s floor. Both legs are now in `CooldownOff` — Arcane −1.5 s, Aimed
+−6 s (26 → 20 s).
+
+Measured, 48 seeds, mean per fight: **Aimed casts 10.0 → 12.0 at L36 and 6.0 → 7.2 at L60**,
+worth **+0.5% / +0.8%** of the class's direct damage. Real, and small, for a reason worth
+carrying to every cooldown talent left: **the AI never saturates the button** — a 400-second
+fight allows ~15 Aimed Shots at 26 s and the AI issues 10; at 20 s it allows 20 and issues 12.
+The 3 s cast and the priority list bind, not the cooldown. Second time this port has
+measured a cooldown talent as AI-capped (Nightfall was the first).
+
+The row change alone costs ~2200 a fight at L36 (Aimed 3950 → 1739, seed 1) and pays it back
+by reallocating mana into Arcane Shot (46 → 59 casts) — the L36 Hunter had been mana-bound at
+1137/1695 and this row is a third cheaper. `comps 2 --level 60` **36/36**, `--level 36`
+**34/36** (counts held, margins rotated: Paladin/armory healed, Paladin/library broke),
+`bench-30` unchanged, `dotnet test` **254 passed, 10 skipped**.
+
+**Next: Lock and Load.** The page calls the MM tree "built around resetting" this row, and
+the reset leg is now measurable where it was not: crits of Arcane/Aimed/Steady Shot reset
+Aimed Shot's cooldown. Its line-AoE leg ("every enemy between you and the target") stays out
+of reach — `AreaDamage` is a radius and `MultiShot` three targets near the target, neither a
+line — and can be recorded as such without blocking the reset.
 
 ## What this session changed
 
