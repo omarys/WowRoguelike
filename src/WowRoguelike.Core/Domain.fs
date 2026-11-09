@@ -1654,6 +1654,12 @@ type Entity =
     CritChanceBp: int
     /// Flat bonus to melee damage. Derived from Strength.
     MeleeDamageBonus: int
+    /// Ranged attack power: the hunter's Agility at the class's conversion. No
+    /// other class in the content shoots, so every other entity carries zero.
+    /// Nothing derived reads it yet — a shot's damage comes from the weapon's
+    /// own roll, not from an AP conversion, which is why this is the attack
+    /// power itself and not a per-swing bonus like `MeleeDamageBonus`.
+    RangedAttackPower: int
     /// Current armour, reduced by Sunder, raised by traits and agility. Mitigates
     /// physical damage only (Q2a), linear and capped at 75% (Q1a).
     Armor: int

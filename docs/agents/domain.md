@@ -1163,13 +1163,39 @@ and **+1.4%** of the hunter's damage. The gap between the shot rate and the dama
 the class's shape: at L60 it is cooldown- and mana-bound, so four shots in five are
 Aimed's and the auto-shot the haste buys is a fifth of the bar.
 
-**Only Coordinated Assault 1/1 is still conditional.** It shares "20% of your attack
-power", and the engine's only attack power is the melee per-swing `MeleeDamageBonus`.
-A hunter's Strength and Agility contribute nothing to it by design (his attack power is
-ranged and not modelled), so the share is zero until something else hands him attack
-power — a Warrior's Battle Shout is what makes the field non-zero in the test. Worth
-keeping for that reason: it is as live as the buff. The 51-point build is therefore
-**50 of 51**, with one point that pays only behind a shaman-free party's Battle Shout.
+- **Coordinated Assault 1/1** — "your pet's next strike within 6 s also hits for 20%
+of your attack power". This is the point that forced the model's **first ranged attack
+power**; see below. Measured, 8 seeds a wing: the pet's damage share of the party went
+**2.2% → 4.4%** (library L36) and **1.7% → 3.7%** (armory L39) — the pet's own damage
+doubles — for **+0.6% / −0.7%** clear time, which is noise. The 51-point build is
+therefore **51 of 51**.
+
+### Ranged attack power is the hunter's, and only his
+
+`Stats.AttackPower` is melee: its one reader is the per-swing bonus
+`MeleeDamageBonus = AttackPower * swingTicks / 280` (`Content.fs:3414`), which a hunter
+would spend on the Raptor Strike he never presses. So the class got its own derived
+stat instead, `Entity.RangedAttackPower`, from a new `Sheet.RangedApPerAgility` — and
+that field holds a *rate* only, because vanilla's formula is
+`level x 2 + agility x 2 - 20`: there is a level term and a −20 offset, and neither can
+be written as AP-per-Agility. `derive` therefore takes the level and re-derives the
+whole formula. The check that it is the right formula is already in the file: the
+researched level-24 shot range carries "**+38.8 from 302 ranged attack power**", and
+24 x 2 + 137 x 2 − 20 = 302.
+
+Nothing derived reads the stat. A shot's damage comes from the weapon's own roll, which
+already carries the AP the character had when the range was researched — feeding
+`RangedAttackPower` into the swing as well would count it twice. Its one consumer is
+Coordinated Assault, and that consumer needed a second decision: the talent is an *extra
+strike*, at most once a 3 s, and a pet has no ability list to hang a timer on. So the
+extra strike is smoothed into every swing at the cadence ratio `swing / 3 s` — the same
+shape the DoT and proc models use, and the reason a 2 s pet swing carries two-thirds of
+the share. Both numbers are pinned in
+`` `the second hunter build's beast mastery scales the pet it calls` ``.
+
+**The lesson for the next class that asks for attack power:** `AttackPower` is already a
+stat on `Stats` and it is *not* the one ranged classes want, because the only thing that
+spends it is a swing timer. Ask which reader needs it before adding the conversion.
 
 ### The fired-shot rider, and the first haste in the model
 

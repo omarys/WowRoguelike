@@ -1245,7 +1245,27 @@ module SimCombat =
             let scaleBp (bp: int) (v: int) = if pet then v * (10000 + bp) / 10000 else v
             let petHealth = scaleBp t.HealthBp spec.Health
             let petArmor = scaleBp t.PetArmorBp spec.Armor
-            let petBonus = if pet then actor.MeleeDamageBonus * t.PetApBp / 10000 else 0
+            // Coordinated Assault is `20% of your attack power` on an extra strike,
+            // at most once every 3 s. The pet has no ability list to hang a timer
+            // on, so the extra strike is smoothed into its every swing at the
+            // cadence ratio `swing / 3 s` — the same shape the DoT and proc models
+            // use. It reads ranged attack power, not `MeleeDamageBonus`: a hunter's
+            // attack power is his Agility, and his melee bonus is zero because he
+            // never swings at range 1.
+            let petBonus =
+              if not pet then
+                0
+              else
+                let swingTicks =
+                  spec.Swing
+                  |> Option.map (fun (_, _, sw) -> int sw)
+                  |> Option.defaultValue (int (secTicks 2.0))
+
+                actor.RangedAttackPower
+                * t.PetApBp
+                / 10000
+                * swingTicks
+                / int (secTicks 3.0)
 
             let summon =
               { Id = id
@@ -1291,6 +1311,7 @@ module SimCombat =
                 Stats = Stats.zero
                 CritChanceBp = 0
                 MeleeDamageBonus = petBonus
+                RangedAttackPower = 0
                 Armor = petArmor
                 ArmorClass = Leather
                 DodgeChanceBp = 0

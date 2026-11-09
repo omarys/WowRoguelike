@@ -1863,6 +1863,7 @@ module Content =
       Stats = Stats.zero
       CritChanceBp = 0
       MeleeDamageBonus = 0
+      RangedAttackPower = 0
       Armor = 0
       ArmorClass = Cloth
       DodgeChanceBp = 0
@@ -1928,6 +1929,7 @@ module Content =
       Stats = Stats.zero
       CritChanceBp = 0
       MeleeDamageBonus = 0
+      RangedAttackPower = 0
       Armor = 0
       ArmorClass = Cloth
       DodgeChanceBp = 0
@@ -3188,6 +3190,9 @@ module Content =
       Gear: GearPiece list
       ApPerStrength: int
       ApPerAgility: int
+      /// Ranged attack power per point of Agility. A hunter converts 2; every
+      /// other class converts none, because none of them shoots.
+      RangedApPerAgility: int
       /// Rage and energy are fixed pools; mana is computed from Intellect.
       FixedPool: int option
       /// The class's Tier 1 / Molten Core outfit at 60 as (armour, stats) — what
@@ -3352,7 +3357,13 @@ module Content =
   /// Agility on top of item armour, and crit and dodge per Agility. The
   /// agility-to-crit rate is the one interpolated number here (~10 Agility per 1%
   /// at level 24); it is level-dependent in Classic and is not yet.
-  let private derive (buffs: PartyBuffKind list) (sheet: Sheet) (d: Dressed) (traits: Traits) =
+  let private derive
+    (buffs: PartyBuffKind list)
+    (sheet: Sheet)
+    (level: int)
+    (d: Dressed)
+    (traits: Traits)
+    =
     let s, armorBp, attackPower = buffed buffs d.Stats
     let talents = sheet.Talents
 
@@ -3373,6 +3384,19 @@ module Content =
     let spiritRegen = max 1 (s.Spirit * 4 / 100)
     let regen = spiritRegen * (10000 + talents.RegenBp) / 10000
 
+    // Vanilla's ranged attack power is `level x 2 + agility x 2 - 20`, which is
+    // why this is not a third conversion on `Sheet`: the level term and the -20
+    // offset cannot be written as a per-point rate. The researched shot range
+    // already carries the answer instead of the term (`Content.fs`, the hunter's
+    // doc comment: 21-39 bow + 6.3 Sharp Arrow + 38.8 from **302** ranged attack
+    // power at level 24), so the formula is re-derived here and agrees with it:
+    // 24 x 2 + 137 x 2 - 20 = 302. A class that does not shoot gets zero.
+    let rangedAttackPower =
+      if sheet.RangedApPerAgility = 0 then
+        0
+      else
+        level * 2 + s.Agility * sheet.RangedApPerAgility - 20
+
     {| MaxHealth = maxHealth
        MaxResource = defaultArg sheet.FixedPool (d.BaseMana + pool intellect 15)
        RegenPerTick = regen
@@ -3382,7 +3406,8 @@ module Content =
        Armor = d.Armor + armorBp + s.Agility * 2 + traits.ArmorBonus
        BlockChanceBp = traits.BlockChanceBp
        BlockValue = traits.BlockValue
-       AttackPower = s.Strength * sheet.ApPerStrength + s.Agility * sheet.ApPerAgility + attackPower |}
+       AttackPower = s.Strength * sheet.ApPerStrength + s.Agility * sheet.ApPerAgility + attackPower
+       RangedAttackPower = rangedAttackPower |}
 
   /// A Party member at one level. The passives are applied to the stats before
   /// the derived values are computed.
@@ -3405,7 +3430,7 @@ module Content =
     (pos: Pos)
     : Entity =
     let dressed = dress sheet level
-    let d = derive buffs sheet dressed traits
+    let d = derive buffs sheet level dressed traits
     let attack = rungAt weapons level
 
 
@@ -3450,6 +3475,7 @@ module Content =
       Stats = dressed.Stats
       CritChanceBp = d.CritChanceBp
       MeleeDamageBonus = meleeBonus
+      RangedAttackPower = d.RangedAttackPower
       Armor = d.Armor
       ArmorClass = armorClass
       DodgeChanceBp = d.DodgeChanceBp
@@ -4144,6 +4170,7 @@ module Content =
         Gear60 = (8068, (161, 21, 257, 0, 0))
         ApPerStrength = 2
         ApPerAgility = 0
+        RangedApPerAgility = 0
         FixedPool = Some 100 }
 
     let shielded = (dress sheet level).Shield
@@ -4209,6 +4236,7 @@ module Content =
         Talents = priestTalents
         ApPerStrength = 1
         ApPerAgility = 0
+        RangedApPerAgility = 0
         FixedPool = None }
       [ (1, { Min = 47; Max = 71; Ticks = secTicks 3.0; Range = 1 })
         (28, { Min = 80; Max = 121; Ticks = secTicks 3.1; Range = 1 })
@@ -4274,6 +4302,7 @@ module Content =
         Gear60 = (1488, (59, 236, 182, 0, 0))
         ApPerStrength = 1
         ApPerAgility = 1
+        RangedApPerAgility = 0
         FixedPool = Some 100 }
       [ (1, { Min = 20; Max = 39; Ticks = secTicks 1.9; Range = 1 })
         (28, { Min = 24; Max = 45; Ticks = secTicks 1.5; Range = 1 })
@@ -4389,6 +4418,7 @@ module Content =
         Gear60 = (742, (0, 0, 198, 258, 128))
         ApPerStrength = 0
         ApPerAgility = 0
+        RangedApPerAgility = 0
         FixedPool = None }
       [ (1, { Min = 30; Max = 57; Ticks = secTicks 1.5; Range = 8 })
         (28, { Min = 80; Max = 121; Ticks = secTicks 3.1; Range = 8 })
@@ -4637,6 +4667,7 @@ module Content =
           // Agility counts once, because Cat Form converts both.
           ApPerStrength = 2
           ApPerAgility = 1
+          RangedApPerAgility = 0
           FixedPool = pool }
       | BearDruid ->
         { Base = nightElfDruidBase
@@ -4647,6 +4678,7 @@ module Content =
           // none of it: armour and Stamina carry the spec, not Agility.
           ApPerStrength = 2
           ApPerAgility = 0
+          RangedApPerAgility = 0
           FixedPool = pool }
       | TreeDruid ->
         { Base = nightElfDruidBase
@@ -4659,6 +4691,7 @@ module Content =
           // bench snapshot, which is a balance decision and not a gear one.
           ApPerStrength = 1
           ApPerAgility = 0
+          RangedApPerAgility = 0
           FixedPool = pool }
       | MoonkinDruid ->
         // Emberstone Staff over the healer's Blessed Seer: the four stat points it
@@ -4672,6 +4705,7 @@ module Content =
           Talents = talents
           ApPerStrength = 1
           ApPerAgility = 0
+          RangedApPerAgility = 0
           FixedPool = pool }
 
     // Both casters swing the staff the healer already carried; the feral pair swings
@@ -4736,6 +4770,7 @@ module Content =
         Talents = paladinTalents
         ApPerStrength = 2
         ApPerAgility = 0
+        RangedApPerAgility = 0
         FixedPool = None }
       [ (1, { Min = 65; Max = 99; Ticks = secTicks 3.2; Range = 1 })
         (28, { Min = 104; Max = 156; Ticks = secTicks 4.0; Range = 1 })
@@ -4798,6 +4833,7 @@ module Content =
         Gear60 = (6079, (0, 0, 178, 228, 133))
         ApPerStrength = 0
         ApPerAgility = 0
+        RangedApPerAgility = 0
         FixedPool = None }
       [ (1, { Min = 30; Max = 57; Ticks = secTicks 1.5; Range = 8 })
         (28, { Min = 80; Max = 121; Ticks = secTicks 3.1; Range = 8 })
@@ -4921,6 +4957,7 @@ module Content =
         Talents = shamanTalents
         ApPerStrength = 1
         ApPerAgility = 0
+        RangedApPerAgility = 0
         FixedPool = None }
       [ (1, { Min = 47; Max = 71; Ticks = secTicks 3.0; Range = 1 })
         (28, { Min = 104; Max = 156; Ticks = secTicks 4.0; Range = 1 })
@@ -4945,14 +4982,20 @@ module Content =
   /// this is the class whose auto-attack carries the party's ranged damage.
   ///
   /// The damage range is the researched per-shot total (21-39 bow, +6.3 Sharp
-  /// Arrow, +38.8 from 302 ranged attack power) rather than a bare weapon, because
-  /// vanilla's ranged AP formula is `level x 2 + agility x 2 - 20` and the level
-  /// term and the offset cannot be expressed through `ApPerAgility`.
+  /// Arrow, +38.8 from **302** ranged attack power) rather than a bare weapon, so
+  /// the range already carries what the AP conversion would add. `RangedApPerAgility`
+  /// below re-derives the same formula — `level x 2 + agility x 2 - 20`, whose level
+  /// term and -20 offset cannot be written as a per-point rate — and agrees with it:
+  /// 24 x 2 + 137 x 2 - 20 = 302. Nothing derived reads the stat yet; its one reader
+  /// is Coordinated Assault, which shares "20% of your attack power" with the pet.
   /// shortcut: a pet without Growl, Bite or Claw. Those have no home in the
   /// vocabulary, so the pet is a plain swing rather than a threat-generating
   /// companion. Aspects, Hunter's Mark, Concussive Shot and Wing Clip are also out:
-  /// nothing in the vocabulary carries a ranged-attack-power buff or a movement slow
-  /// — `Effect` has stun, root, sleep and disarm, but no snare of any strength.
+  /// nothing in the vocabulary carries a ranged-attack-power *buff* or a movement
+  /// slow — `Effect` has stun, root, sleep and disarm, but no snare of any strength.
+  /// The snare was priced rather than guessed: doubling every hostile's
+  /// `MoveTicksPerTile` moved nothing, so a five-point talent behind it was worth
+  /// zero (`octowow/hunter.md` §12).
   ///
   /// The build is OctoWoW's 0 / 41 / 10 (Beast Mastery 0, Marksmanship 41, Survival
   /// 10), decoded in `.pi/research/octowow/hunter.md` §6. **Seven of its sixteen
@@ -5127,6 +5170,7 @@ module Content =
         Gear60 = (2947, (0, 163, 192, 52, 40))
         ApPerStrength = 0
         ApPerAgility = 0
+        RangedApPerAgility = 2
         FixedPool = None }
       [ (1, { Min = 66; Max = 84; Ticks = secTicks 1.8; Range = 8 })
         (28, { Min = 36; Max = 68; Ticks = secTicks 2.9; Range = 8 })

@@ -3921,13 +3921,21 @@ let ``the second hunter build's beast mastery scales the pet it calls`` () =
   let swing = pet.AutoAttack.Value
   Assert.Equal((44, 71), (swing.Min, swing.Max))
 
-  // Coordinated Assault 1/1 is a fifth of the hunter's per-swing attack power. His
-  // own Strength and Agility contribute nothing by design (a hunter's attack power
-  // is ranged, and this port does not model it as a stat), so the number is only
-  // non-zero because the party's Battle Shout hands him some — which is exactly the
-  // dependency worth pinning: the talent is as live as the attack power it shares.
-  Assert.True(hunter.MeleeDamageBonus > 0, "Battle Shout is what gives a hunter attack power")
-  Assert.Equal(hunter.MeleeDamageBonus * 2000 / 10000, pet.MeleeDamageBonus)
+  // Coordinated Assault 1/1 is a fifth of the hunter's *ranged* attack power, on an
+  // extra strike no more often than every 3 s. The attack power is the era formula
+  // re-derived at `Content.fs` (`level x 2 + agility x 2 - 20`), which is the same
+  // 302 the researched level-24 shot range carries as its 38.8 damage — here it is
+  // 292 because a buffed roster hunter stands at 132 Agility rather than 137.
+  Assert.Equal(24 * 2 + hunter.Stats.Agility * 2 - 20, hunter.RangedAttackPower)
+
+  // The extra strike has no timer of its own to live on, so it is smoothed into
+  // every swing at the cadence ratio `swing / 3 s`: a fifth of 302 is 60, and a
+  // 2 s pet swing carries 40/60 of it.
+  Assert.Equal(
+    292 * 2000 / 10000 * int swing.Ticks / int (secTicks 3.0),
+    pet.MeleeDamageBonus
+  )
+  Assert.True(pet.MeleeDamageBonus > 0, "a hunter's own Agility is what the pet's bonus is a share of")
 
 /// Multi-Shot's whole point is the second and third body: one aim, three rolls.[<Fact>]
 let ``multi-shot hits the target and the two nearest bodies, and no more`` () =
