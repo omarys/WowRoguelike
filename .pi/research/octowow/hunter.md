@@ -534,3 +534,77 @@ Poison**, which is already modelled and already worth nothing.
 
 Reversal: `cp /tmp/Content.fs.bak src/WowRoguelike.Core/Content.fs`, rebuild, `snapshots 30`
 byte-identical to baseline; `dotnet test -c Release` unchanged. No code landed.
+
+## 13. The operator's second build — decoded, and the tree the port actually lacks
+
+Link: `?points=FQAYBg-AoFoBDAoJQQoB-` → **Beast Mastery 15 / Marksmanship 36 / Survival 0 = 51.**
+
+The encoding is `not` the page's tooltip numbering, so it had to be decoded rather than read: each
+segment is base64 over one tree, each talent's rank is a 3-bit field, and the slot order is the
+payload's `{\"tree\":T,\"talent\":S}` numbering. `Aura`-style care is warranted here — decoding with the
+wrong slot order yields a *plausible* build with ranks above their maximums, which is how the first two
+attempts failed. Verified instead by requiring every rank ≤ the talent's max and the total to be 51.
+
+| Beast Mastery 15 | Marksmanship 36 |
+|---|---|
+| Swift Aspects 5/5 | Efficiency 5/5 |
+| Endurance Training 2/5 | Improved Stings 5/5 |
+| Thick Hide 3/3 | Lethal Shots 5/5 |
+| Coordinated Assault 1/1 | Aimed Shot 1/1 |
+| Unleashed Fury 4/5 | Swiftshot 3/3 |
+| | Mortal Shots 5/5 |
+| | Scatter Shot 1/1 |
+| | Experimental Ammunition 1/1 |
+| | Piercing Shots 2/2 |
+| | Improved Marksmanship 2/2 |
+| | Ranged Weapon Specialization 5/5 |
+| | Lock and Load 1/1 |
+
+**What this fixes:** Improved Concussive Shot is 0/5, so the snare's measured null result (§12) costs the
+build nothing any more.
+
+**What it costs:** the 15 Beast Mastery points. The last section's port table read "the build spends 0 of
+its 51 points in Beast Mastery, so nothing in this port waits on an inheritance link for the pet" — that
+is now false, and the pet is the one thing this port models least: `Content.hunterPet` exists (a 38-62
+swing at 2.0 s, `Summon Pet` ranks at 1/24/48) but no talent touches it, and `Talents` has no pet fields
+at all.
+
+Portability split, against `hunterTalents` as committed:
+
+- **Marksmanship 35 of 36 points are already ported.** The twelve talents here are exactly the bundle
+  `Content.fs` encodes (Mortal Shots 5/5 as `CritDamageBp = 3000`, Piercing Shots 2/2 as
+  `CritBleedShareBp`, Improved Stings 5/5 as Serpent's `DamageBp = 4000`, Improved Marksmanship 2/2,
+  Ranged Weapon Spec 5/5, Lethal Shots 5/5, Efficiency 5/5, Swiftshot, Lock and Load). The only point
+  that is not is **Experimental Ammunition 1/1** (§10's queued next-cast rider).
+- **Beast Mastery 15 of 15 points are unported, but three of the five talents are cheap** — they scale
+  the pet that already fights: Endurance Training (`[6/12/18/24/30]%` health to owner and pet, 2/5 = 12%),
+  Thick Hide (`[12/24/36]%` pet armour, 3/3 = 36%), Unleashed Fury (`[4/8/12/16/20]%` pet damage, 4/5 =
+  16%), Coordinated Assault (pet's next attack within 6 s also strikes for 20% of the owner's attack
+  power, at most once a 3 s). Swift Aspects (`10%` chance of `[3/6/9/12/15]%` ranged attack speed under
+  Aspect of the Hawk, 5/5) needs an attack-speed stat the engine does not have, and Coordinated Assault
+  needs the owner's AP read at the pet's swing.
+
+So the build is *more* portable than the first one in the only sense that matters here: its dead points
+drop from 15 (5 Concussive + 10 Survival) to 1 (Experimental Ammunition) plus whatever the pet axis
+leaves out.
+
+### Port result (§13 build)
+
+Four talent fields carry the fifteen Beast Mastery points, all read at `SimCombat`'s `Summon`
+branch because a pet has no abilities to hang a `Talents.Spells` row on: `HealthBp = 1200`
+(Endurance Training 2/5, owner *and* pet — the only field read at two sites, `Content.derive`
+and the summon), `PetArmorBp = 3600` (Thick Hide 3/3), `PetDamageBp = 1600` (Unleashed Fury
+4/5), `PetApBp = 2000` (Coordinated Assault 1/1). Guarded on `spec.Totem.IsNone`, so a
+Shaman's totem is never scaled by a hunter talent.
+
+**44 of 51 points land.** Blocked: Experimental Ammunition 1/1 (queued next-cast rider),
+Swift Aspects 5/5 (no ranged attack-speed stat), and Coordinated Assault is *implemented but
+nearly inert* — it shares "20% of your attack power" and the engine's only attack power is the
+melee per-swing `MeleeDamageBonus`, which a hunter's own Strength and Agility do not feed.
+
+Measured, 8 seeds/wing, Warrior/Priest/Hunter/Mage/Rogue: pet damage **+19.4%** (library L36)
+and **+18.4%** (armory L39); hunter health **+12%**; clear time **+1.1%** and **−0.4%** — i.e.
+flat. The reason is in the attribution: Warrior 32-34%, Rogue 21-25%, Mage 18-19%, Hunter 18%,
+**Pet 5.7-5.9%**, Priest 0.4-3.7% of party damage. A fixed ~6% pet means ten BM points buy ~1%
+of the party, which no measurement on this harness can resolve. Port them because they are four
+fields and one branch; never for throughput.

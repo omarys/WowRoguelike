@@ -1189,6 +1189,19 @@ module SimCombat =
               |> (+) 1
               |> EntityId
 
+            // Endurance Training, Thick Hide, Unleashed Fury and Coordinated
+            // Assault all scale the same body, so they are read here and nowhere
+            // else: a pet has no abilities to hang a `Spells` row on, which is why
+            // these four are fields rather than spell talents. A totem is not a
+            // pet — it has no talents behind it — so only a summon with
+            // `Totem = None` reads them.
+            let pet = spec.Totem.IsNone
+            let t = actor.Talents
+            let scaleBp (bp: int) (v: int) = if pet then v * (10000 + bp) / 10000 else v
+            let petHealth = scaleBp t.HealthBp spec.Health
+            let petArmor = scaleBp t.PetArmorBp spec.Armor
+            let petBonus = if pet then actor.MeleeDamageBonus * t.PetApBp / 10000 else 0
+
             let summon =
               { Id = id
                 Name = spec.Name
@@ -1198,8 +1211,8 @@ module SimCombat =
                 Faction = Party
                 Role = Some Dps
                 Dormant = false
-                MaxHealth = spec.Health
-                Health = spec.Health
+                MaxHealth = petHealth
+                Health = petHealth
                 Pos = p
                 Home = None
                 Destination = None
@@ -1221,7 +1234,10 @@ module SimCombat =
                 AutoAttack =
                   spec.Swing
                   |> Option.map (fun (lo, hi, sw) ->
-                    { Min = lo; Max = hi; Ticks = sw; Range = 1 })
+                    { Min = scaleBp t.PetDamageBp lo
+                      Max = scaleBp t.PetDamageBp hi
+                      Ticks = sw
+                      Range = 1 })
                 SwingTicksLeft = ticks 0
                 Threat = Map.empty
                 Target = None
@@ -1229,8 +1245,8 @@ module SimCombat =
                 ThreatMultiplierBp = 10000
                 Stats = Stats.zero
                 CritChanceBp = 0
-                MeleeDamageBonus = 0
-                Armor = spec.Armor
+                MeleeDamageBonus = petBonus
+                Armor = petArmor
                 ArmorClass = Leather
                 DodgeChanceBp = 0
                 BlockChanceBp = 0

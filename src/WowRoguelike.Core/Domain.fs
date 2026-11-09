@@ -1407,6 +1407,23 @@ type Talents =
     SpiritToHealingBp: int
     /// Percent added to what a totem gives the party (Restorative Totems), bp.
     TotemEffectBp: int
+    /// Percent added to max health, for the holder *and* for anything it summons
+    /// (Endurance Training, 12% at 2/5 = 1200), bp. `IntellectBp`'s sibling, and
+    /// the one talent field read at two sites: `derive` for the hunter's own pool
+    /// and `Summon` resolution for the pet, because the era's line is "you and
+    /// your pet" and the pet is a `Party` entity like any other.
+    HealthBp: int
+    /// Percent added to a summoned pet's armour (Thick Hide, 36% at 3/3), bp.
+    PetArmorBp: int
+    /// Percent added to a summoned pet's damage (Unleashed Fury, 16% at 4/5), bp.
+    /// Applied to the pet's own swing range at summon time, because a pet has no
+    /// abilities to read a `Spells` row off.
+    PetDamageBp: int
+    /// Percent of the holder's attack power a pet's swing carries as its own flat
+    /// bonus (Coordinated Assault, 20% at 1/1), bp. The engine stores attack power
+    /// only as the per-swing bonus `MeleeDamageBonus` is, so that is what this is a
+    /// share of — the same conversion the owner's own swings went through.
+    PetApBp: int
     /// The per-spell lines: cast time, cost and heal for one named spell.
     Spells: SpellTalent list
     /// Ticks taken off one named cooldown, and the spells it applies to
@@ -1440,6 +1457,10 @@ module Talents =
       HealingWayBp = 0
       SpiritToHealingBp = 0
       TotemEffectBp = 0
+      HealthBp = 0
+      PetArmorBp = 0
+      PetDamageBp = 0
+      PetApBp = 0
       Spells = []
       CooldownOff = []
       Procs = []

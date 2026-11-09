@@ -3356,6 +3356,10 @@ module Content =
     let s, armorBp, attackPower = buffed buffs d.Stats
     let talents = sheet.Talents
 
+    // Endurance Training is one talent with two bodies: the holder's own pool here
+    // and the pet's at summon time (`SimCombat`, the `Summon` branch).
+    let maxHealth = (d.BaseHealth + pool s.Stamina 10) * (10000 + talents.HealthBp) / 10000
+
     // Ancestral Knowledge and Divine Intellect are a share of Intellect taken
     // before the pool is derived, which is why they beat a flat bonus outright:
     // one point of Intellect is fifteen mana, not one.
@@ -3369,7 +3373,7 @@ module Content =
     let spiritRegen = max 1 (s.Spirit * 4 / 100)
     let regen = spiritRegen * (10000 + talents.RegenBp) / 10000
 
-    {| MaxHealth = d.BaseHealth + pool s.Stamina 10
+    {| MaxHealth = maxHealth
        MaxResource = defaultArg sheet.FixedPool (d.BaseMana + pool intellect 15)
        RegenPerTick = regen
        BonusHealing = bonusHealing
@@ -5031,6 +5035,21 @@ module Content =
   /// by mana instead of by its cooldown.
   let private hunterTalents =
     { Talents.none with
+        // ——— Beast Mastery 15, the operator's second build (note §13). Four of its
+        // five talents scale the pet that already fights; the fifth, Swift Aspects
+        // 5/5, needs a ranged attack-speed stat the engine does not have and is
+        // the only BM point set this port leaves on the table.
+        //
+        // Endurance Training 2/5 = 12% to the hunter and to the pet.
+        HealthBp = 1200
+        // Thick Hide 3/3 = 36% pet armour.
+        PetArmorBp = 3600
+        // Unleashed Fury 4/5 = 16% pet damage.
+        PetDamageBp = 1600
+        // Coordinated Assault 1/1 = 20% of the hunter's attack power on the pet's
+        // swing. The engine's attack power is `MeleeDamageBonus`, so the share is
+        // taken of that (see `Content.derive`).
+        PetApBp = 2000
         CritDamageBp = 3000
         CritBleedShareBp = 3000
         SlayingBp = 300

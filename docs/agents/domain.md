@@ -1111,6 +1111,58 @@ outcome changes** — which is what a rule that only fires on healers and long c
 should look like. Supply the era's rule and let the AI be selective; do not read
 "interrupts are good" as "interrupt everything".
 
+### The operator's second Hunter build: 44 of 51 points, and a pet worth 6%
+
+`?points=FQAYBg-AoFoBDAoJQQoB-` — Beast Mastery 15 / Marksmanship 36 / Survival 0. It
+is the same Marksmanship bundle this port already encodes (36 points, of which only
+Experimental Ammunition is unported), so the whole increment is the fifteen Beast
+Mastery points that the first build spent in Survival and that this port had never
+touched. Four talent fields carry them, all read at one site — `SimCombat`'s `Summon`
+branch — because a pet has no abilities to hang a `Talents.Spells` row on:
+
+| field | talent | value |
+|---|---|---|
+| `HealthBp` | Endurance Training 2/5 | 1200 (owner **and** pet) |
+| `PetArmorBp` | Thick Hide 3/3 | 3600 |
+| `PetDamageBp` | Unleashed Fury 4/5 | 1600 |
+| `PetApBp` | Coordinated Assault 1/1 | 2000 |
+
+`HealthBp` is the only talent field read at two sites: `Content.derive` for the
+hunter's own pool and the `Summon` branch for the pet, because the era's line is "you
+and your pet". It is deliberately **not** a `Pet*`-prefixed name for that reason, and
+the scaling is guarded on `spec.Totem.IsNone` so a Shaman's totem is never scaled by a
+hunter talent.
+
+Measured, 8 seeds per wing, roster Warrior/Priest/Hunter/Mage/Rogue:
+
+| | before (11/16 build) | after (+BM 10) |
+|---|---|---|
+| pet damage, library L36 | 18 090 | 21 609 (**+19.4%**) |
+| pet damage, armory L39 | 19 274 | 22 813 (**+18.4%**) |
+| hunter health, L36 (buffed) | 1 687 | 1 889 (**+12%**) |
+| clear ticks, library | 8 210 | 8 298 (**+1.1%**, noise) |
+| clear ticks, armory | 7 838 | 7 803 (**−0.4%**, noise) |
+
+**The lesson is the flat clock, not the pet damage.** Damage attributed over the same
+runs: Warrior 32-34%, Rogue 21-25%, Mage 18-19%, Hunter 18%, **Pet 5.7-5.9%**, Priest
+0.4-3.7%. The pet is a fixed ~6% of the party, so ten Beast Mastery points buy about
+1% of party damage — inside the seed noise of every measurement this port runs. Port
+them because they are four fields and one branch; do not expect the clock to move, and
+do not chase BM talents for throughput.
+
+Two of the fifteen are blocked, and both are the same missing stat seen from opposite
+ends:
+
+- **Swift Aspects 5/5** needs ranged attack speed — there is no haste stat at all.
+  Same blocker as Swift Reflexes' attack-speed leg and as the reason Aimed Shot's 3 s
+  cast is data rather than a number a talent can bend.
+- **Coordinated Assault 1/1 is implemented but nearly inert**: it shares "20% of your
+  attack power", and the engine's only attack power is the melee per-swing
+  `MeleeDamageBonus`. A hunter's Strength and Agility contribute nothing to it by
+  design (his attack power is ranged and not modelled), so the share is zero until
+  something else hands him attack power — a Warrior's Battle Shout is what makes the
+  field non-zero in the test. Worth keeping for that reason: it is as live as the buff.
+
 ### Hunter: seven of sixteen, and a talent that cannot reach the bow
 
 Marksmanship 41 with no Beast Mastery and Survival 10 lands **seven of sixteen**, and

@@ -3807,8 +3807,9 @@ let ``the hunter calls a pet before the first pull and mends it`` () =
 
   // Mend Pet trains at 20, so this test runs a level-24 party: at 12 the Hunter has
   // no mend at all and the summon assertions below would be the only ones it could
-  // meet. A level-24 pet is 900.
-  Assert.Equal(900, pet.MaxHealth)
+  // meet. A level-24 pet is 900 health, and Endurance Training 2/5 adds its 12% at
+  // summon time — the number a pet is called with is the spec's, scaled.
+  Assert.Equal(1008, pet.MaxHealth)
   Assert.Equal(Party, pet.Faction)
   Assert.True(pet.AutoAttack.IsSome, "a pet with no swing is scenery")
   Assert.Equal(Some hunter.Id, pet.Owner)
@@ -3842,8 +3843,49 @@ let ``the hunter calls a pet before the first pull and mends it`` () =
     dead.Entities |> List.filter (fun e -> e.Owner = Some hunter.Id) |> List.length
   )
 
-/// Multi-Shot's whole point is the second and third body: one aim, three rolls.
+/// The operator's second build spends 15 of its 51 points in Beast Mastery, which
+/// is the tree this port used to ignore entirely. Four of the five talents scale
+/// the pet the hunter already calls — Endurance Training (health, both bodies),
+/// Thick Hide (armour), Unleashed Fury (damage) and Coordinated Assault (a share of
+/// the hunter's attack power) — so this pins all four against one summon.
 [<Fact>]
+let ``the second hunter build's beast mastery scales the pet it calls`` () =
+  let w =
+    Content.dungeonAt 24 1UL
+    |> Content.withRosterAt 24 [ "Warrior"; "Priest"; "Hunter"; "Mage"; "Rogue" ]
+
+  let hunter = w.Entities |> List.find (fun e -> e.Name = "Hunter")
+
+  let summon =
+    hunter.Abilities
+    |> List.find (fun a -> a.Name = "Summon Pet")
+    |> fun a -> SimCombat.resolveAbility hunter.Id hunter.Id a w
+
+  let pet = summon.Entities |> List.find (fun e -> e.Owner = Some hunter.Id)
+
+  // Endurance Training 2/5: 900 -> 1008, and the hunter's own pool gains the same
+  // 12% — the talent's line is "you and your pet", so both numbers move. A
+  // party-buffed level-24 hunter is 1013 health, and 1134 is that pool with its
+  // share added.
+  Assert.Equal(1008, pet.MaxHealth)
+  Assert.Equal(1134, hunter.MaxHealth)
+
+  // Thick Hide 3/3: a level-24 pet's 700 armour becomes 952.
+  Assert.Equal(952, pet.Armor)
+
+  // Unleashed Fury 4/5: the 38-62 swing becomes 44-71.
+  let swing = pet.AutoAttack.Value
+  Assert.Equal((44, 71), (swing.Min, swing.Max))
+
+  // Coordinated Assault 1/1 is a fifth of the hunter's per-swing attack power. His
+  // own Strength and Agility contribute nothing by design (a hunter's attack power
+  // is ranged, and this port does not model it as a stat), so the number is only
+  // non-zero because the party's Battle Shout hands him some — which is exactly the
+  // dependency worth pinning: the talent is as live as the attack power it shares.
+  Assert.True(hunter.MeleeDamageBonus > 0, "Battle Shout is what gives a hunter attack power")
+  Assert.Equal(hunter.MeleeDamageBonus * 2000 / 10000, pet.MeleeDamageBonus)
+
+/// Multi-Shot's whole point is the second and third body: one aim, three rolls.[<Fact>]
 let ``multi-shot hits the target and the two nearest bodies, and no more`` () =
   let hunter =
     match Content.partyOf [ "Hunter" ] 24 with
