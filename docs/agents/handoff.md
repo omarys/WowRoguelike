@@ -4,11 +4,52 @@ Written at commit `aba0722`, with that session's work on top as one WIP commit
 `40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**255 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
-Release`, 265 total), Release build clean — re-verified on the tree that carries the
-Hunter's last four increments (`a3f6d10`, the snare's null result) and again on the
-Paladin's Blessing of Kings (§"The Paladin", below). The 10 skips are the operator's
-parked Bear/Cat/Moonkin specs.
+**257 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
+Release`, 267 total), Release build clean — re-verified on the tree that carries the
+era pushback model (`SimCombat.fs:462`), the Hunter's last four increments (`a3f6d10`,
+the snare's null result) and the Paladin's Blessing of Kings. The 10 skips are the
+operator's parked Bear/Cat/Moonkin specs.
+
+## Where the work stands after the pushback increment
+
+The operator's steer was that *cast time has to exist for an interrupt or a silence to
+have something to cancel*, and that this decides what a cast-time talent is worth. The
+measurement says the window exists and nothing contests it:
+
+| wing | L | fight ticks | party cast-ticks | % of member time casting | pushback events | interrupts landed |
+|---|---|---|---|---|---|---|
+| graveyard | 24 | 15 813 | 26 337 | 33% | 4.8 | 0 |
+| graveyard | 60 | 5 967 | 6 799 | 23% | 0.0 | 0 |
+| library | 36 | 8 390 | 16 978 | 40% | 0.6 | 0 |
+| armory | 39 | 8 538 | 21 586 | 51% | 2.1 | 12.1 |
+| armory | 60 | 5 112 | 11 762 | 46% | 1.2 | 5.9 |
+
+Eight seeds a row, bench budget, all clears. Cast time dominates every rotation, and
+the interrupt economy runs one way only: the party kicks 6–32 hostile casts a fight in
+armory and **zero** in graveyard and library, where the mobs cast nothing at all. Of the
+85 abilities in `Content.fs`, 13 carry a crowd-control effect and all but two are party
+side; the two hostile ones are Wailing Caverns bosses (Mutanus' Thundercrack, Deviate
+Dreadfang's Terrify). **Scarlet Monastery has no hostile crowd control, no hostile
+interrupt, and no hostile silence** — the only three `Silence` writers in the codebase
+are Scatter Shot, Kick and Counterspell.
+
+What landed: `SimCombat.fs:462` now pushes a cast back half a second per damaging hit,
+twice per cast, resisted per hit by `PushbackResistanceBp`, instead of the old 10%-chance
+outright cancel. Effect on the ladder (72 comp rows, L36 and L60, 8 seeds each): clear
+ticks move between −2.3% and +2.6% with a mixed sign, and two hunter comps in armory go
+from 5/8 to 8/8 cleared because hostile casts are now as fragile as party casts. That is
+the honest size of it — a fidelity fix and a live-but-small talent hook, not a balance
+shift.
+
+**Where this leaves the axis.** The party's casters barely take damage, so no pushback
+model can make their cast-time talents pay: graveyard L24 spreads 32 624 damage a fight
+onto the Warrior and 8 071 onto the Priest (52% of it mid-cast) while the Mage takes
+1 540 and the Rogue — which casts nothing — takes 4 240. Armory at L39 puts **zero**
+damage on the Mage or Warlock. The next real lever is therefore content, not the timer:
+an AoE, an add, or a threat behaviour that lets a caster be trained. `Improved
+Concentration Aura` (priest) and `Unbreakable Will` (priest) both wait on the same gap —
+`Aura.Silenced` and `Aura.Stunned` exist (`Domain.fs:217`, `224`) and nothing rolls
+against them, because nothing in the built content applies them.
 
 Everything settled — the brief, the architecture rules, the run table, and every
 decision with its reason — is in `docs/agents/domain.md`. Read that first, then §9

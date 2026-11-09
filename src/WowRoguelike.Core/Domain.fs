@@ -1164,7 +1164,11 @@ type AutoAttack =
 type Cast =
   { Ability: Ability
     Target: EntityId
-    Remaining: int<tick> }
+    Remaining: int<tick>
+    /// How many times damage has already pushed this cast back. The era's rule
+    /// allows two, and the counter is per cast rather than per tick: without it a
+    /// caster standing in a fight is pushed back forever and never finishes.
+    Pushes: int }
 
 /// The five Vanilla stats. Each feeds one derived value at construction: Stamina
 /// -> health, Intellect -> resource pool, Spirit -> regen, Strength -> melee
@@ -1507,7 +1511,9 @@ type Entity =
     /// A flat amount subtracted from a blocked hit (Q4a).
     BlockChanceBp: int
     BlockValue: int
-    /// Reduces the chance damage interrupts a cast in progress (Q5a).
+    /// Chance (basis points) to ignore a pushback: each damaging hit on a cast in
+    /// progress otherwise costs `SimCombat.pushbackDelayTicks` of that cast, and a
+    /// cast absorbs at most `SimCombat.pushbackMaxPerCast` of them.
     PushbackResistanceBp: int
     /// Extra crit chance on Backstab (Rogue trait).
     BackstabCritBonusBp: int

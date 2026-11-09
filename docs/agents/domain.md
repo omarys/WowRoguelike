@@ -992,6 +992,23 @@ that field. **Demonic Swiftness is dead weight** — the build takes it, and the
 and no Succubus for it to speed up; it is the clearest example yet of a payload talent that
 costs nothing to skip.
 
+### Damage pushback is time, not a lost cast
+
+`SimCombat.fs:462` — a damaging hit on an interruptible cast pushes it back by
+`pushbackDelayTicks` (half a second) and a cast absorbs at most `pushbackMaxPerCast`
+(two), with `PushbackResistanceBp` a per-hit chance to lose nothing. This replaced a
+10%-chance *outright cancel*, which made one hit worth a whole cast and priced every
+cast-time talent in the game at nearly nothing. The cap is load-bearing: without it a
+caster standing in a fight is pushed back forever and never finishes a spell.
+
+The model is now the era's, but the field is still cheap, and the reason is measurable
+rather than theoretical — **the party's casters are almost never hit**. At graveyard L24
+the tank absorbs 32 624 damage a fight and the priest 8 071 (52% of it mid-cast), while
+Mage, Rogue and Warlock between them take 8 177 and the Rogue casts nothing. In armory at
+L39 the two casters who are not the healer take **zero**. Cast-time talents on those
+seats stay inert until something in the content hits more than the tank — an AoE, an
+add, or a threat behaviour that lets a caster pull.
+
 One test trap, and it is new: **Corruption is now a cast**, so a test that fires it through
 `ApplyAt` only *starts* a half-second cast and finds no aura on the target. Assert through
 `SimCombat.resolveAbility`, which is the path a finished cast takes anyway.

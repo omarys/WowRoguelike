@@ -116,7 +116,8 @@ this section.
 
 **(a) Expressible today — coefficient, rank, cooldown, cost edits. 7.** Divine Intellect 5/5 →
 `IntellectBp = 1000`, already there. Spiritual Focus 2/2 → `healerTraits 500 7000` already carries the
-70% pushback endpoint. Healing Light 3/3 → `HealBp = 1200` already on Flash of Light; extend that line
+70% pushback endpoint, and since the era pushback model landed (`SimCombat.fs:462`) that endpoint is
+70% of the halves of a second that a hit costs a cast, not 70% of a chance to keep the cast at all. Healing Light 3/3 → `HealBp = 1200` already on Flash of Light; extend that line
 to Holy Light and Holy Shock. Illumination 5/5 → `ManaRefundOnCritBp` **10000 → 6000** — a nerf to live
 behaviour, since payload 5/5 refunds 60%, not the whole cost. Holy Power 3/3 → `SpellTalent { Spell =
 "Holy Light"; CritBp = 600 }` plus the Flash of Light twin; the sim's comment already claims "Holy Power

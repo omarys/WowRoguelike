@@ -167,10 +167,13 @@ would turn the single `polymorphRanks` row (`Content.fs:1318`) into a form-keyed
 Refreshment plus the three portals are new rows with no combat content. The three Arcane removals
 (Arcane Mind, Arcane Resilience, Improved Arcane Explosion) delete nothing here — no such row exists.
 
-**Pushback and interrupts.** Nothing in this build touches `PushbackResistanceBp`; the Mage's
-`Traits.none` leaves it at 0. The only pushback-adjacent talent in the class is **Ice Barrier**
-("preventing interrupts"), and it is not taken. Improved Counterspell is the one interrupt talent and
-it is a clean `Silence` append, not a model change.
+**Pushback and interrupts.** Since the era pushback model landed (`SimCombat.fs:462`: half a second
+per damaging hit, twice per cast, resisted per hit) the Mage's `Traits.none` — 0 resistance — is a
+real cost rather than a formality, and it is the worst in the game by that measure. It still measures
+near zero on the ladder, because nothing hits the Mage: armory L39 puts no damage at all on either
+non-healer caster. The only pushback-adjacent talent in the class is **Ice Barrier** ("preventing
+interrupts"), and it is not taken. Improved Counterspell is the one interrupt talent and it is a
+clean `Silence` append, not a model change.
 
 ## 6. The build decoded — `TAFOLISYZKAoB--FADD`
 

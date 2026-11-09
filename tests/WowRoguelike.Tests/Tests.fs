@@ -178,7 +178,8 @@ let private casterWorld (ability: Ability) : World =
           Some
             { Ability = ability
               Target = EntityId 3
-              Remaining = secTicks 2.0 } }
+              Remaining = secTicks 2.0
+              Pushes = 0 } }
 
   { Tick = ticks 0
     RestTicks = ticks 0
@@ -1322,16 +1323,46 @@ let ``creature type decides whether polymorph lands`` () =
   Assert.False(polymorphed CreatureType.Undead)
   Assert.False(polymorphed CreatureType.Dragonkin)
 
-/// Casters resist being interrupted by damage (Q5a): full resistance means the
-/// pushback chance is zero.
+/// Damage pushes a cast back instead of cancelling it: half a second of the cast
+/// is lost per hit, at most twice per cast, and resistance is a chance to lose
+/// nothing at all. Full resistance means the cast is untouched.
 [<Fact>]
-let ``pushback resistance stops damage interrupting a cast`` () =
+let ``damage pushes a cast back half a second`` () =
+  let w = casterWorld Content.lightningBolt
+  let before = (mobOf w).Casting.Value.Remaining
+  let w = SimCombat.dealDamage (EntityId 100) 50 w
+  Assert.Equal(before + SimCombat.pushbackDelayTicks, (mobOf w).Casting.Value.Remaining)
+
+[<Fact>]
+let ``a cast absorbs at most two pushes`` () =
+  let mutable w = casterWorld Content.lightningBolt
+
+  // The pushback roll is a coin every hit, so keep hitting: the third delay is
+  // what the cap is there to refuse, not the second.
+  for _ in 1 .. 30 do
+    w <- SimCombat.dealDamage (EntityId 100) 1 w
+
+  Assert.Equal(SimCombat.pushbackMaxPerCast, (mobOf w).Casting.Value.Pushes)
+
+  let capped = (mobOf w).Casting.Value.Remaining
+  let w = SimCombat.dealDamage (EntityId 100) 1 w
+  Assert.Equal(capped, (mobOf w).Casting.Value.Remaining)
+
+[<Fact>]
+let ``pushback resistance stops damage delaying a cast`` () =
   let w =
     casterWorld Content.lightningBolt
     |> SimState.mapEntity (EntityId 100) (fun e -> { e with PushbackResistanceBp = 10000 })
 
-  let w = SimCombat.dealDamage (EntityId 100) 50 w
+  let before = (mobOf w).Casting.Value.Remaining
+  let mutable w = w
+
+  for _ in 1 .. 30 do
+    w <- SimCombat.dealDamage (EntityId 100) 50 w
+
   Assert.True((mobOf w).Casting.IsSome)
+  Assert.Equal(before, (mobOf w).Casting.Value.Remaining)
+  Assert.Equal(0, (mobOf w).Casting.Value.Pushes)
 
 /// Crit and dodge come from Agility: roughly 10 Agility per point of crit and 20
 /// per point of dodge at level 24, on top of the 5% every character starts with.
@@ -1852,7 +1883,12 @@ let ``one caster in mid-spell gets exactly one interrupter`` () =
     { Content.mob 100 "Caster" CreatureType.Humanoid 21 2000 0 (Some slow) [] None { X = 3; Y = 1 } with
         Engaged = true
         Target = Some(EntityId 1)
-        Casting = Some { Ability = Content.lightningBolt; Target = EntityId 1; Remaining = ticks 20 } }
+        Casting =
+          Some
+            { Ability = Content.lightningBolt
+              Target = EntityId 1
+              Remaining = ticks 20
+              Pushes = 0 } }
 
   let world =
     { Tick = ticks 100
@@ -4127,7 +4163,8 @@ let ``a rebirth in flight keeps a wiped run alive`` () =
                     Some
                       { Ability = Content.rebirth
                         Target = EntityId 3
-                        Remaining = ticks 10 } }
+                        Remaining = ticks 10
+                        Pushes = 0 } }
             | _ -> e) }
 
   Assert.Equal(PartyWiped, SimState.outcome fallen)
@@ -4192,7 +4229,8 @@ let ``the shaman interrupts with Earth Shock`` () =
           Some
             { Ability = Content.heal
               Target = EntityId 101
-              Remaining = secTicks 2.0 } }
+              Remaining = secTicks 2.0
+              Pushes = 0 } }
 
   let w =
     { Tick = ticks 0
@@ -4274,7 +4312,8 @@ let ``the mage counterspells a caster out of melee reach`` () =
           Some
             { Ability = Content.heal
               Target = EntityId 101
-              Remaining = secTicks 2.0 } }
+              Remaining = secTicks 2.0
+              Pushes = 0 } }
 
   let w =
     { Tick = ticks 0

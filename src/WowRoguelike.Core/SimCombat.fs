@@ -73,8 +73,17 @@ module SimCombat =
           |> logLine (sprintf "%s's critical strike leaves %s bleeding" attacker.Name t.Name)
       | _ -> w
 
-  /// Base chance (basis points) that damage interrupts a cast in progress (Q5a).
-  let pushbackBaseBp = 1000
+  /// Chance (basis points), before resistance, that a damaging hit pushes a cast
+  /// back. The era's answer is every hit, and the cost is time rather than the
+  /// cast: 0.5 s added to what is left, at most twice per cast.
+  let pushbackBaseBp = 10000
+
+  /// What one pushback costs, and how many a single cast absorbs. Two is the
+  /// era's cap, and the cap is what keeps a caster standing in a fight from being
+  /// pushed into an endless cast.
+  let pushbackDelayTicks = secTicks 0.5
+
+  let pushbackMaxPerCast = 2
 
   /// The two leaps. They share the rule the engine enforces rather than the AI: a
   /// Warrior cannot leap to something it cannot see, so a Charge or an Intercept
@@ -460,20 +469,36 @@ module SimCombat =
         SimState.recordKill name w
       | _ -> w
 
-    // Pushback: damage can interrupt an interruptible cast in progress, reduced
-    // by the target's resistance (Q5a).
+    // Pushback: damage pushes an interruptible cast in progress back by half a
+    // second instead of cancelling it, at most twice per cast, and the target's
+    // resistance takes a bite out of the chance. Time is what a caster pays for
+    // standing in the fight — cancelling outright made a single hit worth a whole
+    // cast, which priced every cast-time talent in the game at nearly nothing.
     if amount <= 0 then
       w
     else
       match tryEntity targetId w with
-      | Some t when alive t && (t.Casting |> Option.exists (fun c -> c.Ability.Interruptible)) ->
+      | Some t when
+        alive t
+        && (t.Casting
+            |> Option.exists (fun c -> c.Ability.Interruptible && c.Pushes < pushbackMaxPerCast))
+        ->
         let roll, w = rollRange 0 9999 w
         let chance = pushbackBaseBp * (10000 - t.PushbackResistanceBp) / 10000
 
         if roll < chance then
           w
-          |> mapEntity targetId (fun e -> { e with Casting = None })
-          |> logLine (sprintf "%s's cast is interrupted by damage" t.Name)
+          |> mapEntity targetId (fun e ->
+            match e.Casting with
+            | Some c ->
+              { e with
+                  Casting =
+                    Some
+                      { c with
+                          Remaining = c.Remaining + pushbackDelayTicks
+                          Pushes = c.Pushes + 1 } }
+            | None -> e)
+          |> logLine (sprintf "%s's cast is knocked back by damage" t.Name)
         else
           w
       | _ -> w
@@ -1297,7 +1322,8 @@ module SimCombat =
                     Remaining =
                       ability.CastTicks
                       * (10000 + (e.Auras |> List.sumBy Aura.castTimeIncreaseBp))
-                      / 10000 } })
+                      / 10000
+                    Pushes = 0 } })
         w
 
   let applyCommand (cmd: Command) (w: World) : World =
