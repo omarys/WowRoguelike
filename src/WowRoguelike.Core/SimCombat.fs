@@ -273,6 +273,12 @@ module SimCombat =
         w
         |> mapEntity id (fun x -> { x with Auras = Aura.refresh (Empowered(duration, empower)) x.Auras })
         |> logLine (sprintf "%s: %s procs" e.Name p.Talent)
+      // `Map.remove` reads as "never cast", which is ready: the ability's own
+      // cooldown entry is the only thing standing between it and its next cast.
+      | ResetCooldown ability ->
+        w
+        |> mapEntity id (fun x -> { x with Cooldowns = Map.remove ability x.Cooldowns })
+        |> logLine (sprintf "%s: %s resets %s" e.Name p.Talent ability)
 
   /// Fire whatever this character's build hangs off `ev`. Called where the event
   /// is already decided — a block of `meleeStrike`, a crit of `meleeStrike`, a
@@ -323,6 +329,7 @@ module SimCombat =
     (targetId: EntityId)
     (amount: int)
     (critBonusBp: int)
+    (ability: string option)
     (w: World)
     : int * World =
     match tryEntity targetId w with
@@ -365,10 +372,17 @@ module SimCombat =
         // Slaying only against the types it names.
         let dealt = mitigate (amount * (20000 + attacker.Talents.CritDamageBp + slaying) / 10000)
 
-        dealt,
-        (w
-         |> procOn OnCrit attacker.Id
-         |> piercingBleed attacker targetId dealt)
+        let w = w |> procOn OnCrit attacker.Id
+
+        // The named twin, for the talents that fire off one ability's crits
+        // rather than every crit the character lands. A white swing has no name
+        // and gets only the unnamed event.
+        let w =
+          match ability with
+          | Some name -> procOn (OnCritOf name) attacker.Id w
+          | None -> w
+
+        dealt, (w |> piercingBleed attacker targetId dealt)
       | Hit -> mitigate amount, w
 
   /// Damage wakes a sleeper, as does any other hostile action — see `wake`. A
@@ -538,7 +552,7 @@ module SimCombat =
         // multiplies by 10000.
         let swing = swing * Talents.damageBp ability.Name actor.Talents / 10000
         let critBonus = if ability.Name = "Backstab" then actor.BackstabCritBonusBp else 0
-        let amount, w = meleeStrike actor victim (swing * multiplierBp / 10000 + bonus) critBonus w
+        let amount, w = meleeStrike actor victim (swing * multiplierBp / 10000 + bonus) critBonus (Some ability.Name) w
         let w = dealDamage victim amount w
         // Only the Party builds threat on Mobs.
         let w = if actor.Faction = Party then addThreat victim actor amount w else w
@@ -551,7 +565,7 @@ module SimCombat =
           let rolled, w = rollRange lo hi w
           let rolled = rolled * Talents.damageBp ability.Name actor.Talents / 10000
           let critBonus = if ability.Name = "Backstab" then actor.BackstabCritBonusBp else 0
-          let amount, w = meleeStrike actor targetId rolled critBonus w
+          let amount, w = meleeStrike actor targetId rolled critBonus (Some ability.Name) w
           let w = dealDamage targetId amount w
           // Only the Party builds threat on Mobs.
           let w = if actor.Faction = Party then addThreat targetId actor amount w else w
@@ -626,6 +640,11 @@ module SimCombat =
           // ability — a wave of Arcane Missiles is five chances, as it was.
           let w = if amount > 0 then procOn OnSpellHit actor.Id w else w
           let w = dealDamage targetId amount w
+
+          // A spell crit is a crit like any other for the named event: the ability
+          // name is right here, which is why `OnCritOf` is resolved on both sides
+          // of `rollCrit`.
+          let w = if crit then procOn (OnCritOf ability.Name) actor.Id w else w
           let w = if crit then piercingBleed actor targetId amount w else w
           let w = gainRage actor amount w
           let w = if actor.Faction = Party then addThreat targetId actor amount w else w
@@ -986,7 +1005,7 @@ module SimCombat =
           let points = actor.ComboPoints
           let extra = perPoint * max 0 (points - 1)
           let rolled, w = rollRange (lo + extra) (hi + extra) w
-          let amount, w = meleeStrike actor targetId rolled 0 w
+          let amount, w = meleeStrike actor targetId rolled 0 (Some ability.Name) w
           let w = dealDamage targetId amount w
           let w = if actor.Faction = Party then addThreat targetId actor amount w else w
 

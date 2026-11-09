@@ -568,7 +568,7 @@ module SimTick =
 
               // The auto-attack runs the same attack table every physical special does,
               // so a mob dodges both identically.
-              let total, w = SimCombat.meleeStrike e t.Id total 0 w
+              let total, w = SimCombat.meleeStrike e t.Id total 0 None w
 
               w
               |> dealDamage t.Id total
@@ -599,7 +599,7 @@ module SimTick =
             let offRoll =
               (rolled + e.MeleeDamageBonus) * Talents.damageBp swingName e.Talents / 10000 + bonus
 
-            let offHand, w = SimCombat.meleeStrike e t.Id (offRoll / 2) 0 w
+            let offHand, w = SimCombat.meleeStrike e t.Id (offRoll / 2) 0 None w
 
             w
             |> dealDamage t.Id offHand

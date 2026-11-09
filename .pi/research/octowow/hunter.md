@@ -396,14 +396,14 @@ At L60 — the level every increment in this port has been judged at — `comps 
 is **36 of 36 clean**, the bench snapshot is **byte-identical** (`defaultRoster` seats no
 Hunter), and `dotnet test` is **252 passed / 10 skipped**.
 
-**The divergence, recorded rather than fixed.** §5(a) lists Aimed Shot's cooldown as
-6 s → 26 s; `aimedShotRanks` still carries 6 s (`Content.fs:772`) and **stays there by
-decision**, because the 26 s row makes the class's best button fire once per 26 seconds and
-would require re-measuring Swiftshot and Lock and Load from scratch. Two consequences are
-now recorded rather than blamed on the port: Swiftshot's 3 points shave a cooldown the sim
-does not have (they measure as nothing), and Lock and Load's reset buys nothing until
-something makes Aimed Shot cooldown-starved. Both are §10's rank-4 note; `Content.fs`'s
-`hunterTalents` comment names the divergence where the talent is built.
+**The divergence, recorded rather than fixed — and closed in §13.** §5(a) lists Aimed
+Shot's cooldown as 6 s → 26 s; `aimedShotRanks` carried 6 s (`Content.fs:772`) on the
+argument that the 26 s row makes the class's best button fire once per 26 seconds and would
+require re-measuring Swiftshot and Lock and Load from scratch. Both consequences were
+recorded rather than blamed on the port: Swiftshot's 3 points shaved a cooldown the sim did
+not have (they measured as nothing), and Lock and Load's reset bought nothing while Aimed
+Shot was not cooldown-starved. Measured, that argument was wrong on the second half — the
+row landed and both talents then paid. See §13.
 
 ## 12. Improved Slaying — landed, and the one talent that needs the target
 
@@ -442,3 +442,54 @@ area before it knows which bodies are inside it (`rollCrit` at
 nowhere to go. It is inert for the Hunter — the class has no area spell (`Multi-Shot` is
 three `weaponStrike`s) — and is recorded here because the next class that takes a slaying
 talent with an AoE will hit it.
+
+## 13. Aimed Shot's 26 s row — the divergence closed, and Lock and Load with it
+
+§11 kept the 6 s row by decision. That decision was wrong, and the way it was wrong is worth
+recording: the argument assumed a cooldown-bound button, and Aimed Shot is not one. A
+400-second fight allows ~15 Aimed Shots at 26 s and the AI issues 10; at 20 s it allows 20
+and issues 12. The 3 s cast and the priority list bind before the cooldown does, so the row
+cost **~10% of the class's direct damage at L36 (Aimed 3950 → 1739 a fight, seed 1)** and got
+most of it back from **`Efficiency`'s cheaper row — `Cost` 75 → 50, which turned 46 Arcane
+Shots into 59 on a class that had been mana-bound at 1137/1695**.
+
+**Swiftshot 3/3, both legs, is worth +0.5% / +0.8%.** 26 → 20 s moves Aimed casts 10.0 → 12.0
+at L36 and 6.0 → 7.2 at L60 over 48 seeds. Real, small, and AI-capped for the reason above —
+the second cooldown talent in this port measured that way after the Warlock's Nightfall.
+
+**Lock and Load 1/1 is worth +6.35% / +3.73%, the largest single talent in the port so far.**
+The payload is **100% on a crit** (the page says "a chance"; payload is the number), it fires
+off Arcane and Aimed Shot crits — Steady Shot has no row — and it makes the 26 s row nearly
+free:
+
+| | Aimed casts | resets/fight | Hunter direct damage |
+|---|---|---|---|
+| L36 off | 12.0 | 0.0 | 24161 |
+| L36 on | **20.8** | 24.7 | **25696 (+6.35%)** |
+| L60 off | 7.2 | 0.0 | 26804 |
+| L60 on | **13.3** | 20.5 | **27803 (+3.73%)** |
+
+More resets a fight than casts, which is the page's "the tree is built around resetting it"
+arriving as arithmetic: the row is now gated by cast time and mana, not by its cooldown, and
+it is the reason the 26 s row is worth having at all. Clear time does not follow
+(−0.43% at L36, +0.91% at L60, both inside the ±1.5% floor at n=48) — a fifth of the party's
+damage moving 4-6% is under the harness's resolution, which is why this one is reported on
+damage and the class's own casts.
+
+**Two vocabulary additions, both small.** `ProcEvent.OnCritOf of ability: string` exists
+because Aimed Shot is a `WeaponDamage` row and Arcane Shot a spell, so no unnamed crit event
+covers the page's list; `meleeStrike` now takes the ability name (`None` for a white swing,
+which is not one of the three). `ProcResult.ResetCooldown of ability: string` clears the
+ability's own entry in `Entity.Cooldowns` — a reset, not a reduction, which is why it is a
+proc result and not a `CooldownOff` line. What is **not** ported is the payload's second
+half: the 10 s window in which Aimed Shot casts 1 s faster and hits every enemy *between* the
+hunter and its target. A timed cast-time cut on one named spell has no vocabulary (`castOff`
+is a build-time fold) and "between you and the target" is a line, where `AreaDamage` draws a
+radius. Both are named in `Content.fs`'s `hunterTalents` comment.
+
+**A measurement trap that cost a false zero.** `dotnet fsi` probes `#r` the *copy* of Core in
+`src/WowRoguelike.Harness/bin/Release/net10.0/`, and `dotnet test -c Release` rebuilds Core
+without refreshing that copy. The first Lock and Load A/B therefore ran against a binary
+without the event and reported **0 resets in 96 fights** as a real (and false) result. `dotnet
+build -c Release` on the Harness is the fix, and it is the fourth measurement trap on this
+port after roster blindness, DoT-tick log blindness, and build-time talent folding.

@@ -1005,7 +1005,7 @@ let ``dodge avoids a physical hit entirely`` () =
     arena 0 0 { X = 7; Y = 5 }
     |> SimState.mapEntity (EntityId 1) (fun e -> { e with DodgeChanceBp = 10000 })
 
-  let amount, _ = SimCombat.meleeStrike (mobOf w) (EntityId 1) 100 0 w
+  let amount, _ = SimCombat.meleeStrike (mobOf w) (EntityId 1) 100 0 None w
   Assert.Equal(0, amount)
 
 /// Block subtracts a flat value (Q4a), after the avoidance bands.
@@ -1029,7 +1029,7 @@ let ``block reduces a hit by the block value`` () =
           BlockValue = 25
           Armor = 0 })
 
-  let amount, _ = SimCombat.meleeStrike (mobOf w) (EntityId 100) 100 0 w
+  let amount, _ = SimCombat.meleeStrike (mobOf w) (EntityId 100) 100 0 None w
   // 100 - 25 = 75, less nothing for armour. Avoidance comes first on the table,
   // so a miss is a legitimate zero here.
   Assert.True(amount = 75 || amount = 0, sprintf "amount %d" amount)
@@ -6679,6 +6679,37 @@ let private procWorld (talents: Talents) : World =
     Quests = []
     Log = [] }
 
+/// Lock and Load is the reset the 26 s Aimed Shot row exists for: a crit of
+/// Arcane or Aimed Shot clears Aimed Shot's cooldown, and a crit of anything else
+/// this character owns does not — which is why the event carries the ability's
+/// name rather than firing off every crit a Hunter lands.
+[<Fact>]
+let ``a critical Arcane Shot resets Aimed Shot's cooldown and a critical Raptor Strike does not`` () =
+  // The arena's tank tile, carrying the Hunter's own talents at 60.
+  let baseWorld = arena 0 0 { X = 7; Y = 5 }
+
+  let hunter =
+    Content.partyOf [ "Hunter" ] 60
+    |> List.exactlyOne
+    |> fun h -> { h with Id = EntityId 1; Cooldowns = Map.ofList [ "Aimed Shot", secTicks 20.0 ] }
+
+  let world =
+    { baseWorld with
+        Entities = baseWorld.Entities |> List.map (fun e -> if e.Id = hunter.Id then hunter else e) }
+
+  let cooling (w: World) =
+    (SimState.tryEntity hunter.Id w).Value.Cooldowns |> Map.containsKey "Aimed Shot"
+
+  Assert.True(cooling world)
+
+  // A crit of an ability the talent names clears the row.
+  let reset = SimCombat.procOn (OnCritOf "Arcane Shot") hunter.Id world
+  Assert.False(cooling reset)
+
+  // A crit of one the talent does not name leaves it standing.
+  let untouched = SimCombat.procOn (OnCritOf "Raptor Strike") hunter.Id world
+  Assert.True(cooling untouched)
+
 /// The engine half: an event fires the proc, it pays into the pool, and a
 /// hundred-percent chance draws no random number at all — the seed's stream is
 /// exactly where a build carrying no procs left it.
@@ -6797,7 +6828,7 @@ let ``a rostered warrior's shield pays him rage on a block`` () =
 
   // Big enough to survive the swing, small enough that armour does not matter.
   let (EntityId wid) = warrior.Id
-  let w = SimCombat.meleeStrike mob warrior.Id 5 0 w |> snd
+  let w = SimCombat.meleeStrike mob warrior.Id 5 0 None w |> snd
 
   Assert.Equal(5, poolOf wid w)
   Assert.True(

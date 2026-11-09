@@ -170,14 +170,14 @@ Two things to carry forward, both in `domain.md` in full:
   shortens L60 library 5088 → 4736 ticks), and every remaining pick is ≤3%, so judge the rest
   by mechanism and tests, not by clock.
 
-Gates: `dotnet test` **254 passed, 10 skipped**, `comps 2 --level 60` **36/36**,
+Gates: `dotnet test` **255 passed, 10 skipped**, `comps 2 --level 60` **36/36**,
 `--level 36` **34/36** (the grid's standing two armory margins), `bench-30` unchanged (its
 roster seats no Hunter).
 
-**The five that remain** are unchanged and still blocked: Experimental Ammunition (needs a
+**The four that remain** are unchanged and still blocked: Experimental Ammunition (needs a
 queued next-cast rider), Improved Concussive Shot (no Concussive Shot row to stun with),
 Swift Reflexes (no parry), and nothing in Beast Mastery (the build spends 0 of 51 points
-there). Lock and Load is no longer blocked — see below.
+there).
 
 ## The Aimed Shot row, corrected (and Swiftshot completed)
 
@@ -201,11 +201,53 @@ by reallocating mana into Arcane Shot (46 → 59 casts) — the L36 Hunter had b
 **34/36** (counts held, margins rotated: Paladin/armory healed, Paladin/library broke),
 `bench-30` unchanged, `dotnet test` **254 passed, 10 skipped**.
 
-**Next: Lock and Load.** The page calls the MM tree "built around resetting" this row, and
-the reset leg is now measurable where it was not: crits of Arcane/Aimed/Steady Shot reset
-Aimed Shot's cooldown. Its line-AoE leg ("every enemy between you and the target") stays out
-of reach — `AreaDamage` is a radius and `MultiShot` three targets near the target, neither a
-line — and can be recorded as such without blocking the reset.
+**Next: nothing in this tree is cheap any more.** The four left in `.pi/research/octowow/hunter.md`
+§5(b) each need a new engine axis (a queued next-cast rider, a parry, a Concussive Shot row,
+a Beast Mastery build) rather than a rule. The Hunter is at **11 of 16** talents and is now
+the second-most complete class in the port; what is left is a party-composition question —
+whether +6% from its capstone is the right size next to the Paladin's and Warlock's — not a
+talent one.
+
+## Lock and Load 1/1 — the largest single talent in the port
+
+A crit of Arcane or Aimed Shot resets Aimed Shot's cooldown. It is **100% on a crit** (the
+payload; the page's "a chance" is the vaguer of the two) and the page calls the tree "built
+around resetting" that row, which is exactly what the 26 s row from the previous commit made
+possible. Steady Shot is the page's third trigger and has no row here.
+
+| | Aimed casts | resets/fight | Hunter direct damage |
+|---|---|---|---|
+| L36 off | 12.0 | 0.0 | 24161 |
+| L36 on | **20.8** | 24.7 | **25696 (+6.35%)** |
+| L60 off | 7.2 | 0.0 | 26804 |
+| L60 on | **13.3** | 20.5 | **27803 (+3.73%)** |
+
+More resets than casts means the row is now gated by the 3 s cast and by mana, not by its
+cooldown — the reset does in one talent what a shorter row could not do without handing the
+class free button presses. Clear time is flat (−0.43% / +0.91%, inside the ±1.5% floor): a
+fifth of the party's damage moving 4-6% is under the harness's resolution, so the numbers to
+carry forward are the class's own casts and damage.
+
+It needed two vocabulary additions, both small: `ProcEvent.OnCritOf of ability: string`
+(Aimed Shot is a `WeaponDamage` row and Arcane Shot a spell, so no unnamed crit event covers
+the page's list) and `ProcResult.ResetCooldown of ability: string` (clears the ability's own
+`Entity.Cooldowns` entry — a reset, not a `CooldownOff` reduction). `meleeStrike` now takes
+the ability name, `None` for a white swing.
+
+**Not ported:** the payload's second half — a 10 s window where Aimed Shot casts 1 s faster
+and hits every enemy *between* the hunter and its target. A timed cast-time cut on one named
+spell has no vocabulary (`castOff` is a build-time fold) and "between you and the target" is
+a line, where `AreaDamage` draws a radius. Both are named in `Content.fs`'s `hunterTalents`
+comment.
+
+Gates: `comps 2 --level 60` **36/36**, `--level 36` **34/36** (both unchanged), bench
+unchanged (no Hunter in `defaultRoster`), `dotnet test -c Release` **255 passed / 10 skipped**.
+
+**A probe that lied, for the record.** The first A/B of this talent measured 0 resets in 96
+fights. `dotnet fsi` probes `#r` the *copy* of Core in
+`src/WowRoguelike.Harness/bin/Release/net10.0/`, and `dotnet test -c Release` rebuilds Core
+without refreshing it. `dotnet build -c Release` on the Harness is required before trusting
+any probe — the fourth measurement trap on this port.
 
 ## What this session changed
 

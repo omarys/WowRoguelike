@@ -4882,6 +4882,22 @@ module Content =
   ///   it. It is the one talent here that pays the target, and the reason
   ///   `rollCrit` now reports whether it rolled a crit at all.
   ///
+  /// - Lock and Load 1/1, the row-7 capstone: a crit of Arcane or Aimed Shot
+  ///   resets Aimed Shot's cooldown, through `ProcEvent.OnCritOf` — the event
+  ///   carries the ability's name because Aimed Shot is a `WeaponDamage` row and
+  ///   Arcane Shot a spell, so no single unnamed crit event covers both. The
+  ///   page says "a chance"; the payload says **100%**, and `ChanceBp = 10000`
+  ///   draws no random number at all, so the seed's stream stays where a build
+  ///   without the talent leaves it. Steady Shot is the page's third trigger and
+  ///   has no row here.
+  ///
+  ///   What the payload's *second* half needs is not here yet: Lock and Load also
+  ///   opens a 10 s window in which Aimed Shot casts 1 s faster and hits every
+  ///   enemy between the hunter and its target. A timed cast-time cut on one named
+  ///   spell has no vocabulary (`castOff` is a build-time fold) and "between you
+  ///   and the target" is a line, not the radius `AreaDamage` draws. The reset leg
+  ///   is the half the 26 s row exists for, so it goes first and alone.
+  ///
   /// The five that are not here are that note's §5(b), re-ranked in §10 on a class
   /// that finally casts: Experimental Ammunition needs a queued next-cast rider,
   /// Improved Concussive Shot a Concussive Shot row to stun with, and Swift Reflexes
@@ -4903,6 +4919,13 @@ module Content =
         CooldownOff =
           [ "Arcane Shot", secTicks -1.5
             "Aimed Shot", secTicks -6.0 ]
+        Procs =
+          [ for shot in [ "Arcane Shot"; "Aimed Shot" ] do
+              { Talent = "Lock and Load"
+                Event = OnCritOf shot
+                ChanceBp = 10000
+                InternalCooldown = ticks 0
+                Then = ResetCooldown "Aimed Shot" } ]
         Spells =
           [ for spell, costBp, damageBp in
               [ "Arcane Shot", 1000, 1000

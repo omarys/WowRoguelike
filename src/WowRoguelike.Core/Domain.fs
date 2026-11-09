@@ -196,6 +196,11 @@ module Empower =
 type ProcEvent =
   /// A physical hit of this character's landed critically.
   | OnCrit
+  /// A critical strike landed by one *named* ability. The crit sites know the
+  /// name — a `WeaponDamage` row hands its own to `meleeStrike`, a damage spell
+  /// is resolved under it — which is what a talent like Lock and Load needs: it
+  /// fires off three shots and not off the same character's Raptor Strike.
+  | OnCritOf of ability: string
   /// This character blocked a physical hit aimed at it.
   | OnBlock
   /// A damage spell of this character's landed. A resisted spell is not a hit.
@@ -205,9 +210,9 @@ type ProcEvent =
   /// the damage lands on the target and the talent belongs to the applier.
   | OnDoTTick
 
-/// What one proc hands over when it fires. Two shapes, because the talents that
-/// need more than these two are talents the vocabulary cannot express yet and
-/// are named in a comment beside their build instead.
+/// What one proc hands over when it fires. Three shapes, because the talents
+/// that need more than these three are talents the vocabulary cannot express yet
+/// and are named in a comment beside their build instead.
 type ProcResult =
   /// Resource in the character's own pool (rage on a block, rage on a crit).
   /// It does nothing to a pool that is not rage, which is what makes Primal
@@ -216,6 +221,11 @@ type ProcResult =
   | GrantResource of amount: int
   /// The "next spell" buff a caster is holding — Clearcasting's free mana.
   | EmpowerNext of duration: int<tick> * empower: Empower
+  /// One named ability's cooldown goes to zero. A reset is not a reduction:
+  /// `CooldownOff` is the build-time fold that shortens a row, this is the state
+  /// the tick map holds, and it is cleared because the ability has just been
+  /// used rather than because a tree was spent.
+  | ResetCooldown of ability: string
 
 /// One talent's trigger: the chance, how soon it may fire again, and what it
 /// hands over. `Talent` is the name it is logged and cooled down under — the

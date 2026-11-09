@@ -1181,12 +1181,48 @@ margin rotated: Paladin/armory healed and Paladin/library broke, which is the sa
 shuffling the grid has shown since the Hunter lane fix. `bench-30` unchanged (no Hunter in its
 roster), `dotnet test` 254 passed.
 
+**Lock and Load 1/1 turns that row back into a formality, and is the largest single talent in
+the port: +6.35% at L36, +3.73% at L60.** A crit of Arcane or Aimed Shot resets Aimed Shot's
+cooldown — 100% on a crit, per the payload (the page says "a chance"), which also means it
+draws no random number, leaving the seed's stream where a build without it leaves it.
+
+| | Aimed casts | resets/fight | Hunter direct damage |
+|---|---|---|---|
+| L36 off | 12.0 | 0.0 | 24161 |
+| L36 on | **20.8** | 24.7 | **25696 (+6.35%)** |
+| L60 off | 7.2 | 0.0 | 26804 |
+| L60 on | **13.3** | 20.5 | **27803 (+3.73%)** |
+
+More resets a fight than casts is the page's "the tree is built around resetting it" arriving
+as arithmetic: after this talent the row is gated by the 3 s cast and by mana, not by its
+cooldown. Clear time does not follow (−0.43% / +0.91%, inside the ±1.5% floor at n=48): a
+fifth of the party's damage moving 4-6% is under the harness's resolution, so this one is
+reported on damage and on the class's own casts.
+
+It cost two small vocabulary additions rather than a pipeline. `ProcEvent.OnCritOf of
+ability: string` exists because Aimed Shot is a `WeaponDamage` row and Arcane Shot a spell,
+so no unnamed crit event covers the page's list of three; `meleeStrike` now takes the ability
+name, `None` for a white swing. `ProcResult.ResetCooldown of ability: string` clears the
+ability's own `Entity.Cooldowns` entry — a reset, not a reduction, which is why it is a proc
+result and not a `CooldownOff` line. **What is not ported is the payload's second half:** a
+10 s window where Aimed Shot casts 1 s faster and hits every enemy *between* the hunter and
+its target. A timed cast-time cut on one named spell has no vocabulary (`castOff` is a
+build-time fold), and "between you and the target" is a line where `AreaDamage` draws a
+radius.
+
 **A third measurement trap, worth its own line.** `withTalents` folds `CooldownOff`, `Spells`
 and `CritBp` into the **ability list at content-build time**, so mutating `Entity.Talents` on a
 live entity does not touch ability data. The first A/B of Swiftshot's Aimed leg did exactly
 that and reported 26 s and 20 s as *identical* — 12.0 vs 12.0 casts, ratio 1.0000, 0 of 48
 seeds different. It took a rebuild with the entry removed to measure it. Runtime fields
-(`SlayingBp`, `CritBleedShareBp`, `CritDamageBp`) are A/B-able in memory; baked ones are not.
+(`SlayingBp`, `CritBleedShareBp`, `CritDamageBp`, `Procs`) are A/B-able in memory; baked ones
+are not.
+
+**A fourth: the probe loads a copy.** `dotnet fsi` probes `#r`
+`src/WowRoguelike.Harness/bin/Release/net10.0/WowRoguelike.Core.dll`, and `dotnet test -c
+Release` rebuilds Core without refreshing that copy — so a probe can silently run the previous
+binary. Lock and Load's first A/B reported **0 resets in 96 fights** because of it. `dotnet
+build -c Release` on the Harness is what makes a probe measure the code in the editor.
 
 ### The proc axis — four talents, four classes, and the vocabulary a port no longer has to invent
 
