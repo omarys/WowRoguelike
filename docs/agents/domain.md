@@ -892,10 +892,10 @@ that failed before this port are now clean, so the scaled axis went from four fa
 to three — the healer's numbers helped the rosters carrying a Shaman, which is the kind of
 coupling that makes a single-class diff hard to credit.
 
-### Paladin: seven of seventeen, one deletion, and a nerf kept on purpose
+### Paladin: eight of seventeen, one deletion, and a nerf kept on purpose
 
-Holy 40 / Protection 0 / Retribution 11 — the operator's build — lands **seven of
-seventeen talents**, and two of the seven were already in the record, so the diff is five
+Holy 40 / Protection 0 / Retribution 11 — the operator's build — lands **eight of
+seventeen talents**, and two of the eight were already in the record, so the diff is six
 lines and one deletion. The Paladin is the first class where the port *lowered* a number:
 
 - **Illumination 5/5 is `ManaRefundOnCritBp` 10000 → 6000.** The old record refunded the
@@ -913,10 +913,21 @@ lines and one deletion. The Paladin is the first class where the port *lowered* 
   "Holy Power 5/5 (+5% crit)" while the record set no `CritBp` at all. Before porting a
   class, diff its own comment against its own record: this one was wrong for months.
 
-The nine unlanded talents are the trigger-shaped ones — Holy Shock's either-target cast,
-Daybreak's reactive heal, Blessed Strikes' reset proc, Ironclad's armour-to-healing,
-Blessing of Kings' *multiplicative* party buff (every `buffed` branch today adds a flat
-number). Seals stay unmodelled, so Judgement is still a plain Holy nuke.
+- **Blessing of Kings 1/1 is a `PartyBuffKind`, and the first talent to hand the party a
+  passive.** Every other talent in this port changes the character that spent the point;
+  Kings changes the four characters next to it, so `Talents` grew a `PartyBuffs` list and
+  `partyBuffsFor` grew a second half that reads the class records rather than just the
+  roster. It is also the only *multiplicative* passive: `buffed` now folds flats first and
+  applies one percentage on the total, which is the order the game uses. Armour and attack
+  power are not stats and are not multiplied — Kings carries only the extra Agility's
+  armour.
+
+The eight unlanded talents are the trigger-shaped ones — Holy Judgement's cast-time cut,
+Improved Lay on Hands' armour on the target, Improved Concentration Aura's silence
+resistance, Ironclad's armour-to-healing, Holy Shock's either-target cast, Blessed
+Strikes' reset proc, Daybreak's reactive heal, Improved Blessings' blessing effectiveness.
+Eight axes for eight talent points, which is why this class stops being cheap here. Seals
+stay unmodelled, so Judgement is still a plain Holy nuke.
 
 Two traps in the tests, both from content that is level-gated:
 
@@ -933,6 +944,14 @@ seeds**, identical to the Priest port's record, so the Illumination nerf did not
 single cell at the level the balance question is asked at. Do not read that as "the nerf
 is free": the axis that would show it is one where a Paladin runs out of mana, and no cell
 came close (the Paladin seat ends every arm above 60% mana).
+
+Kings was priced before it was built, and it is the largest single talent this class has:
+**−5.4% clear time in the library and −2.5% in the armory** at 60 on a twelve-seed A/B,
+with eleven and nine of the twelve seeds faster, every seed clearing in both arms, and the
+party ending on the same health and resource it did before. A 10% stat line is a throughput
+gain here, not a survivability one — which is worth knowing before anyone tunes it: the
+buff's defensive half (Stamina, and the armour the Agility brings) is invisible at the
+margin the sim actually fights at.
 
 ### Warlock: eight of seventeen, and the DoT that could not take a talent
 

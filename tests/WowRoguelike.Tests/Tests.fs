@@ -2091,18 +2091,22 @@ let ``the paladin is built on the researched level-24 set`` () =
   // Sta +39, Int +9, Spi +12. Mark of the Wild adds 4 to all five and Arcane
   // Intellect 7 Intellect, so Stamina is 89 and Intellect 55 — and Divine
   // Intellect is another 10% on top of that, which is 60.
-  // Health = 247 + (20 + 10 x 69); mana = 525 + (20 + 15 x 40).
-  Assert.Equal(957, paladin.MaxHealth)
-  Assert.Equal(1145, paladin.MaxResource)
-  // 557 from the four mail pieces, 90 from 45 Agility, 275 Devotion Aura, 105
-  // Mark of the Wild.
-  Assert.Equal(1027, paladin.Armor)
+  // Blessing of Kings multiplies all five by 10% once those flats have landed,
+  // which is the order the game uses: Stamina 89 -> 97, Intellect 55 -> 60 -> 66.
+  // Health = 247 + (20 + 10 x 77); mana = 525 + (20 + 15 x 46).
+  Assert.Equal(1037, paladin.MaxHealth)
+  Assert.Equal(1235, paladin.MaxResource)
+  // 557 from the four mail pieces, 90 from 45 Agility (41 before Kings), 275
+  // Devotion Aura, 105 Mark of the Wild. Armour is not a stat, so Kings does not
+  // multiply it — it only carries the extra 4 Agility, which is 8 armour.
+  Assert.Equal(1035, paladin.Armor)
   // Entity.Stats is the dressed set before the passives: Strength 47 + 27 = 74.
   Assert.Equal(74, paladin.Stats.Strength)
-  // Mark of the Wild takes it to 78, which is 156 attack power, plus Battle Shout
-  // 55 and Blessing of Might 55: 266 AP, so 266/14 x 3.20 s = 60 a swing. The
-  // attack power itself is not stored, so the swing bonus is what proves it.
-  Assert.Equal(60, paladin.MeleeDamageBonus)
+  // Mark of the Wild takes it to 78, and Kings multiplies that to 85, which is 170
+  // attack power, plus Battle Shout 55 and Blessing of Might 55: 280 AP, so
+  // 280/14 x 3.20 s = 64 a swing. The attack power itself is not stored, so the
+  // swing bonus is what proves it.
+  Assert.Equal(64, paladin.MeleeDamageBonus)
   // Verigan's Fist, 65-99 at 3.20 s.
   Assert.Equal((65, 99), (paladin.AutoAttack.Value.Min, paladin.AutoAttack.Value.Max))
 
@@ -2200,10 +2204,16 @@ let ``no class loses a stat on the way from 24 to 60`` () =
 [<Fact>]
 let ``the party's passives come from the roster`` () =
   Assert.Equal<PartyBuffKind list>(
-    [ BattleShout; BlessingOfMight; DevotionAura ],
+    [ BattleShout; BlessingOfMight; DevotionAura; BlessingOfKings ],
     Content.partyBuffsFor [ "Warrior"; "Paladin" ]
   )
 
+  // Kings is the one passive a *talent* hands out, so it arrives with the Paladin's
+  // talent record rather than with the Paladin. Point that falls away and the party
+  // keeps Might and Devotion Aura and loses Kings — which is exactly what the
+  // talent record controls, and why a class can be seated without having spent the
+  // point.
+  Assert.Contains(BlessingOfKings, Content.partyBuffsFor [ "Paladin" ])
   // A paladin brings Devotion Aura, not Mark of the Wild: a party with no Druid
   // loses the armour and the four stats.
   Assert.DoesNotContain(MarkOfTheWild, Content.partyBuffsFor [ "Paladin"; "Mage" ])
@@ -2449,14 +2459,14 @@ let ``the warlock is built on the researched level-24 set`` () =
      warlock.Stats.Spirit)
   )
 
-  // Base health 266 with Stamina 61 (57 + Mark of the Wild); base mana 467 with
-  // Intellect 93 (82 + 4 + Arcane Intellect 7), which is the largest pool of the
-  // nine and the point of the class.
-  Assert.Equal(696, warlock.MaxHealth)
-  Assert.Equal(1582, warlock.MaxResource)
-  // 175 from the six cloth pieces, 86 from 43 Agility, 105 Mark of the Wild and
-  // 275 Devotion Aura from the roster.
-  Assert.Equal(641, warlock.Armor)
+  // Base health 266 with Stamina 61 (57 + Mark of the Wild, x1.1 for Kings = 67);
+  // base mana 467 with Intellect 93 (82 + 4 + Arcane Intellect 7, x1.1 = 102), which
+  // is the largest pool of the nine and the point of the class.
+  Assert.Equal(756, warlock.MaxHealth)
+  Assert.Equal(1717, warlock.MaxResource)
+  // 175 from the six cloth pieces, 86 from 43 Agility (39 before Kings, so 90), 105
+  // Mark of the Wild and 275 Devotion Aura from the roster.
+  Assert.Equal(649, warlock.Armor)
   // Gravestone Scepter, 30-57 at 1.50 s for 29 DPS.
   Assert.Equal((30, 57), (warlock.AutoAttack.Value.Min, warlock.AutoAttack.Value.Max))
 

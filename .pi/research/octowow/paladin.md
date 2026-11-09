@@ -110,8 +110,9 @@ tree" (slots 25, 16, 8; Repentance's rider is "80 Holy damage each time they per
 
 ## 5. What this costs in `src/WowRoguelike.Core/Content.fs`
 
-Three buckets, counted over the 17 talents this build takes (§6): **7 expressible today, 9 needing a new
-axis, 1 collapsing a kit row.**
+Three buckets, counted over the 17 talents this build takes (§6): **8 expressible today, 8 needing a new
+axis, 1 collapsing a kit row.** Kings moved from (b) to (a) after being priced and built — see the end of
+this section.
 
 **(a) Expressible today — coefficient, rank, cooldown, cost edits. 7.** Divine Intellect 5/5 →
 `IntellectBp = 1000`, already there. Spiritual Focus 2/2 → `healerTraits 500 7000` already carries the
@@ -123,7 +124,7 @@ behaviour, since payload 5/5 refunds 60%, not the whole cost. Holy Power 3/3 →
 port starts. Benediction 3/5 → `SpellTalent { Spell = "Judgement"; CostBp = 900 }`. Improved Judgement
 2/2 → `CooldownOff = [ "Judgement", secTicks -2.0 ]`, Judgement 10 s → 8 s.
 
-**(b) Needs a new model axis. 9.** Holy Judgement 3/3 — `Empower` is `{ Instant; FreeMana; SureCrit }`
+**(b) Needs a new model axis. 8.** Holy Judgement 3/3 — `Empower` is `{ Instant; FreeMana; SureCrit }`
 with **no cast-time field**, and no Judgement-cast trigger. Improved Lay on Hands 2/2 — Lay on Hands is
 not in the kit and no `Effect` raises a target's armour (`CritArmorBp` is talent-wide, crit-triggered).
 Improved Concentration Aura 3/3 — no aura system, no resistance to `Silence`. Ironclad 2/2 — no armour →
@@ -135,8 +136,12 @@ nothing converts healing power). Daybreak 1/1 — a **reactive** heal: every `Ef
 time, nothing fires on taking damage. Improved Blessings 5/5 — the mechanic exists but is named
 `TotemEffectBp` ("percent added to what a totem gives the party"); blessing effectiveness is the same
 shape and a different axis, so reuse-and-rename or a second field is a decision, not a constant.
-Blessing of Kings 1/1 — a new `PartyBuffKind` case whose branch **multiplies** all five stats by 10%;
-every branch of `buffed` today adds a flat number.
+Blessing of Kings 1/1 — **landed.** A `PartyBuffKind` case whose branch multiplies all five stats by
+10%; `buffed` now folds the flat branches first and applies one percentage to the total, which is the
+order the game uses, and `Talents.PartyBuffs` is how a *talent* hands the party a passive. Armour and
+attack power are not stats, so Kings does not multiply them. Priced first on a twelve-seed A/B at 60:
+**−5.4% clear time (library), −2.5% (armory)**, 11/12 and 9/12 seeds faster, all seeds clearing in both
+arms, party end-state unchanged.
 
 Out of the build but in the same file: Holy Strike's "percentage of weapon damage as Holy" needs a damage
 school on `WeaponDamage` (it runs the physical armour pipeline today), and Crusader Strike's stacking

@@ -4,11 +4,11 @@ Written at commit `aba0722`, with that session's work on top as one WIP commit
 `40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**251 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
-Release`, 260 total), Release build clean — re-verified 2026-11-05 on the tree at
-`42975a1` (Hunter port `67d7c1c`, swing hook `42975a1`) and again on the proc axis
-(§"The proc axis is built", below) and on Nightfall (§"Nightfall is built", below). The
-10 skips are the operator's parked Bear/Cat/Moonkin specs.
+**255 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
+Release`, 265 total), Release build clean — re-verified on the tree that carries the
+Hunter's last four increments (`a3f6d10`, the snare's null result) and again on the
+Paladin's Blessing of Kings (§"The Paladin", below). The 10 skips are the operator's
+parked Bear/Cat/Moonkin specs.
 
 Everything settled — the brief, the architecture rules, the run table, and every
 decision with its reason — is in `docs/agents/domain.md`. Read that first, then §9
@@ -257,6 +257,62 @@ fights. `dotnet fsi` probes `#r` the *copy* of Core in
 without refreshing it. `dotnet build -c Release` on the Harness is required before trusting
 any probe — the fourth measurement trap on this port.
 
+## The Paladin — Blessing of Kings, priced before it was built
+
+Asked for after the Hunter closed, on the rule the Hunter's snare established: **price a
+talent before building its axis.** The snare had been cheap and worthless; Kings was cheap
+and is worth more than anything else in this port, and the price came back before the code
+did.
+
+Ten per cent to all five of the party's stats, multiplicative. Priced with a one-line hack
+(multiply the dressed stats by 1.1 in `buffed`) on twelve seeds at 60, roster
+Warrior/Paladin/Mage/Rogue/Priest, 3000-tick budget:
+
+| | ticks/fight (mean) | faster seeds | cleared |
+|---|---|---|---|
+| library, off | 5490 | — | 12/12 |
+| library, on | **5196 (−5.4%)** | 11 of 12 | 12/12 |
+| armory, off | 5370 | — | 12/12 |
+| armory, on | **5236 (−2.5%)** | 9 of 12 | 12/12 |
+
+The landed version reproduces those twenty-four numbers exactly, seed for seed, which is
+the check that the talent's plumbing (record → `partyBuffsFor` → every member's derivation)
+reaches all five characters and not just the Paladin. Party end-state health and resource
+are unchanged, so this is a throughput buff, not a survivability one — the Stamina half is
+invisible at the margins the sim fights at.
+
+Two vocabulary additions, both forced by Kings being the odd one out:
+
+- **`Talents.PartyBuffs`** — the first talent that hands *other* characters an effect. Every
+  other field describes the holder. `partyBuffsFor` therefore has two halves: what the
+  roster's classes bring by being present (`innateBuffsFor`, unchanged) and what a class's
+  *talent record* adds (`talentBuffsOf`). A Paladin is seated with Kings because its record
+  spends the point; that split is what lets the point be spent or not.
+- **A percentage column in `buffed`.** Every other branch adds a flat number, so the fold
+  produced a total and stopped. It now folds flats first and applies one `statsBp` once, at
+  the end, because multiplying the flats is what the game does — a Kings blessing multiplies
+  the stats you have, buffs included.
+
+That ordering is worth knowing in a test: the level-24 Paladin's Stamina is 89 after the
+flats and 97 after Kings (health 957 → 1037), and its Intellect is 55 → 60 → 66 because
+Divine Intellect's `IntellectBp` lands *after* the multiplier (`paladinTalents` sets both).
+Armour and attack power are not stats and are not multiplied; Kings carries only the extra
+Agility's armour, which moved the Paladin 1027 → 1035 and the Warlock 641 → 649.
+
+Gates: `dotnet test -c Release` **255 passed / 10 skipped** (eight assertions updated across
+three tests — six on the new health/mana/armour numbers, one on `MeleeDamageBonus` 60 → 64
+because Strength 78 × 1.1 is 85 and 280 AP is 64 a swing, and one on the roster's passive
+list gaining `BlessingOfKings`), `comps 2 --level 60` **36/36 clean**,
+bench byte-identical (no Paladin in `defaultRoster`). `--level 36` shows one wipe, in
+Warrior/Druid/Mage/Rogue/Warlock armory — a party with no Paladin, so it predates this
+change; it is the grid's standing armory margin, not a regression.
+
+**What it leaves:** the Paladin's remaining eight talents need eight separate axes (cast-time
+field, reactive heal, reset proc, armour→healing, silence resistance, either-target cast,
+blessing effectiveness, target armour). Kings was the ninth and the only one that was a
+constant away. The class is now the most expensive per point in the port, which is a fact
+about OctoWoW's Paladin rather than about the port.
+
 ## What this session changed
 
 Details and measured outcomes are in `docs/agents/domain.md`; these are pointers
@@ -271,6 +327,7 @@ only.
 | Per-ability attribution — `sim attrib`, nine-band table | shipped, `Attribution.fs` (new) |
 | Composition ladder — 36 cells, one healer per class | re-measured after the totem fix: 32 cells clean, 4 cells with one seed parked, 0 wipes |
 | Corridor parks — a Tank whose next step is held by a settled ally now counts as stuck | fixed: 5 of 6 park seeds clear; graveyard 5 shuffles instead, below |
+| Blessing of Kings — `Talents.PartyBuffs`, a percentage column in `buffed` | implemented, tested, **−5.4% / −2.5%** clear time, above |
 
 ## Totems are scenery (changed after the above)
 
@@ -778,7 +835,7 @@ not measured. No ladder or `comps` cell seats them either, so nothing else needs
 | Mage | Arcane 40/Frost 11 | **4 of 19** | four data-only, incl. Presence of Mind as a kit row; 15 need axes |
 | Priest | Disc 11/Holy 40 | **8 of 16** | best hit rate of the port; two talents had to be *deleted* |
 | Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
-| Paladin | 40/0/11 | **7 of 17** | five lines and one deletion; Illumination is a **nerf** (10000 → 6000) and Divine Favor's cooldown row is gone; `comps 6 --level 60` 36/36 clean, bench 30/30 with the snapshot unmoved |
+| Paladin | 40/0/11 | **8 of 17** | six lines and one deletion; Illumination is a **nerf** (10000 → 6000) and Divine Favor's cooldown row is gone; `comps 6 --level 60` 36/36 clean, bench 30/30 with the snapshot unmoved. **Blessing of Kings 1/1** is the first talent in the port that hands the *party* a passive (`Talents.PartyBuffs`) and the first passive that multiplies instead of adding, so `buffed` grew a percentage column that lands after the flats — **−5.4% clear time (library), −2.5% (armory)** at 60 on a twelve-seed A/B, priced before it was built. Its eight remaining talents need eight separate axes (cast-time field, reactive heal, reset proc, armour→healing, silence resistance, either-target, blessing effectiveness, target armour), so the class is now expensive per point |
 | Warlock | 31/0/20 | **8 of 17** | needed a model change: DoT ticks now take `Talents.damageBp` at aura-application time; `comps 6 --level 60` 36/36 clean, but the warlock ends every arm at 99-100% mana |
 | Hunter | 0/41/10 | **11 of 16** | first class to get cheaper from an earlier port: Improved Stings rides the Warlock's DoT-at-application change with no new code; Lethal Shots had to become `Traits.CritBonusBp` (hero-wide crit). **The class then turned out to have never fired a shot** — the AI's lane test filed it as melee because of Raptor Strike. Fixed (`ranged` = a damaging `Foe` row past range 1), 15103 → 21381 damage at L36, `comps 2 --level 60` 36/36 clean, bench byte-identical (no Hunter in `defaultRoster`). **(b)-bucket re-ranked on the live class (§10 of the note) and its first three picks built:** Mortal Shots 5/5 as `Talents.CritDamageBp = 3000` (**+10.8% damage/tick L36, +14.4% L60** on a 12-seed A/B), Improved Slaying 3/3 as `Talents.SlayingBp = 300` — the first talent in the port whose value depends on the target's `CreatureType` (**+2.9% damage/tick L60**, §12 of the note), and Piercing Shots 2/2 as `Talents.CritBleedShareBp = 3000` — the first that pays the *target* (**~17-19% of the class's direct damage**, clock unresolvable at n=96). `comps 2 --level 60` 36/36, `--level 36` 34/36, bench unchanged. Aimed Shot's cost/cooldown row was then corrected to the source (Cost 50, 26 s, §5(a)) before Swiftshot was finished: Swiftshot 3/3 now holds Aimed at **21 s** and the Arrow costs 50. **Lock and Load 1/1** (`ProcEvent.OnCritOf` + `ProcResult.ResetCooldown`) resets Aimed on any crit of Arcane/Aimed — **+6.35% L36, +3.73% L60**, more resets a fight than casts, the largest single talent in the port. The three that remain are blocked on engine axes (queued next-cast rider, parry, Beast Mastery
 build), not on rules, and a fourth — Improved Concussive Shot — was closed by measurement
@@ -891,7 +948,7 @@ the talents each build actually takes, not over the tree:
 | Shaman (healer + totems) | 7 of 16 | 7 | 2 |
 | Priest (healer) | 8 of 16 | 7 | 1 (+3 named outside the build) |
 | Rogue (melee dps) | 6 of 18 | 9 | 3 |
-| Paladin (healer) | 7 of 17 | 9 | 1 |
+| Paladin (healer) | 8 of 17 | 8 | 1 |
 | Warlock (caster dps) | 8 of 17 | 9 | 0 |
 | Hunter (dps + pet) | 6 of 16 | 9 | 1 |
 | Druid (caster dps) | 5 of 19 | 14 | 0 |

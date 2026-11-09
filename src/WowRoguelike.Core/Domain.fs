@@ -1246,6 +1246,34 @@ type SpellTalent =
     /// Ticks taken off this spell's cast time.
     CastTicksOff: int<tick> }
 
+/// A passive the party has because some class is present (Q2a). Each case is a
+/// real Classic buff at the highest rank a level-24 caster can train.
+///
+/// Declared up here rather than beside `World`, which is where a party-wide thing
+/// would sit, because `Talents` names one: a talent can hand the party a passive
+/// (Blessing of Kings), and `Talents` is defined above `World`.
+type PartyBuffKind =
+  /// Mage: Arcane Intellect rank 2, +7 Intellect.
+  | ArcaneIntellect
+  /// Priest: Divine Spirit rank 1. Level 30 — out of reach at 24, kept for the
+  /// day the encounter roster outgrows that ceiling.
+  | DivineSpirit
+  /// Priest: Power Word: Fortitude rank 3, +20 Stamina.
+  | PowerWordFortitude
+  /// Druid: Mark of the Wild rank 3, +105 armour and +4 to all five stats.
+  | MarkOfTheWild
+  /// Warrior: Battle Shout rank 3, +55 melee attack power to the party.
+  | BattleShout
+  /// Paladin: Blessing of Might rank 3, +55 melee attack power to the party.
+  | BlessingOfMight
+  /// Paladin: Devotion Aura rank 3, +275 armour to the party.
+  | DevotionAura
+  /// Paladin: Blessing of Kings 1/1, +10% to all five of the party's stats. The
+  /// only *multiplicative* passive here, and the only one a talent gates: every
+  /// other branch of `buffed` adds a flat number, which is why the buff layer
+  /// had to grow a percentage column to hold this one.
+  | BlessingOfKings
+
 /// The talent points a character has spent, for the handful of effects modelled.
 /// A build is fixed for the length of a run — nothing here respecs — so it is a
 /// constant on the hero sheet, next to the level-60 gear it was chosen with, and
@@ -1314,7 +1342,12 @@ type Talents =
     /// The triggers this build hangs off the combat path: rage when it blocks,
     /// a free spell when its next hit lands. A list because a build carries
     /// several and their order is the order they fire in.
-    Procs: Proc list }
+    Procs: Proc list
+    /// Party-wide passives this build hands out rather than receives (Blessing of
+    /// Kings). Unlike every other field here the effect lands on *other* members,
+    /// so it is read when the party's passives are assembled and never by the
+    /// holder's own combat path.
+    PartyBuffs: PartyBuffKind list }
 
 module Talents =
 
@@ -1335,7 +1368,8 @@ module Talents =
       TotemEffectBp = 0
       Spells = []
       CooldownOff = []
-      Procs = [] }
+      Procs = []
+      PartyBuffs = [] }
 
   let spell (name: string) (t: Talents) = t.Spells |> List.tryFind (fun s -> s.Spell = name)
 
@@ -1540,25 +1574,6 @@ type Outcome =
   | Running
   | PartyWiped
   | EncounterCleared
-
-/// A passive the party has because some class is present (Q2a). Each case is a
-/// real Classic buff at the highest rank a level-24 caster can train.
-type PartyBuffKind =
-  /// Mage: Arcane Intellect rank 2, +7 Intellect.
-  | ArcaneIntellect
-  /// Priest: Divine Spirit rank 1. Level 30 — out of reach at 24, kept for the
-  /// day the encounter roster outgrows that ceiling.
-  | DivineSpirit
-  /// Priest: Power Word: Fortitude rank 3, +20 Stamina.
-  | PowerWordFortitude
-  /// Druid: Mark of the Wild rank 3, +105 armour and +4 to all five stats.
-  | MarkOfTheWild
-  /// Warrior: Battle Shout rank 3, +55 melee attack power to the party.
-  | BattleShout
-  /// Paladin: Blessing of Might rank 3, +55 melee attack power to the party.
-  | BlessingOfMight
-  /// Paladin: Devotion Aura rank 3, +275 armour to the party.
-  | DevotionAura
 
 /// A quest, as the sim can actually track it: kill `Required` creatures drawn from
 /// `Targets`. Quests double as the scripted encounters — the awakening of Naralex

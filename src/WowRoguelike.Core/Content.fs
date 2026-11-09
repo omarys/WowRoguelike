@@ -3155,7 +3155,11 @@ module Content =
   /// A passive is the class's, not the spec's, so a roster entry is read as its
   /// class alone: `"Druid (Bear)"` is a Druid and brings Mark of the Wild exactly
   /// as `"Druid"` does. Class names are one word, so the first word is the class.
-  let partyBuffsFor (roster: string list) : PartyBuffKind list =
+  ///
+  /// This is the *innate* half only. A passive a talent hands out is added by
+  /// `partyBuffsFor`, which is defined below the class builders because it has to
+  /// read their talent records.
+  let private innateBuffsFor (roster: string list) : PartyBuffKind list =
     let roster = roster |> List.map (fun entry -> entry.Split(' ').[0])
 
     [ if List.contains "Mage" roster then ArcaneIntellect
@@ -3165,19 +3169,20 @@ module Content =
       if List.contains "Paladin" roster then BlessingOfMight
       if List.contains "Paladin" roster then DevotionAura ]
 
-  /// The default party's passives.
-  let partyBuffs: PartyBuffKind list = partyBuffsFor defaultRoster
-
   /// Apply the party passives. Armour and attack power come back separately:
-  /// they are not one of the five stats, but they are just as real.
+  /// they are not one of the five stats, but they are just as real. The five stats
+  /// also carry a percentage column, because Blessing of Kings is multiplicative
+  /// and every other passive here adds a flat number: the flat folds run first and
+  /// the multiplier lands once on the total, which is the order the game applies
+  /// them in (a Kings blessing multiplies the stats you have, buffs included).
   let private buffed (buffs: PartyBuffKind list) (stats: Stats) =
     buffs
     |> List.fold
-      (fun (acc: Stats, armor: int, ap: int) b ->
+      (fun (acc: Stats, armor: int, ap: int, statsBp: int) b ->
         match b with
-        | ArcaneIntellect -> { acc with Intellect = acc.Intellect + 7 }, armor, ap
-        | DivineSpirit -> { acc with Spirit = acc.Spirit + 17 }, armor, ap
-        | PowerWordFortitude -> { acc with Stamina = acc.Stamina + 20 }, armor, ap
+        | ArcaneIntellect -> { acc with Intellect = acc.Intellect + 7 }, armor, ap, statsBp
+        | DivineSpirit -> { acc with Spirit = acc.Spirit + 17 }, armor, ap, statsBp
+        | PowerWordFortitude -> { acc with Stamina = acc.Stamina + 20 }, armor, ap, statsBp
         | MarkOfTheWild ->
           { acc with
               Strength = acc.Strength + 4
@@ -3186,11 +3191,24 @@ module Content =
               Intellect = acc.Intellect + 4
               Spirit = acc.Spirit + 4 },
           armor + 105,
-          ap
-        | BattleShout -> acc, armor, ap + 55
-        | BlessingOfMight -> acc, armor, ap + 55
-        | DevotionAura -> acc, armor + 275, ap)
-      (stats, 0, 0)
+          ap,
+          statsBp
+        | BattleShout -> acc, armor, ap + 55, statsBp
+        | BlessingOfMight -> acc, armor, ap + 55, statsBp
+        | DevotionAura -> acc, armor + 275, ap, statsBp
+        | BlessingOfKings -> acc, armor, ap, statsBp + 1000)
+      (stats, 0, 0, 0)
+    |> fun (s, armor, ap, statsBp) ->
+      let up (n: int) = n * (10000 + statsBp) / 10000
+
+      { s with
+          Strength = up s.Strength
+          Agility = up s.Agility
+          Stamina = up s.Stamina
+          Intellect = up s.Intellect
+          Spirit = up s.Spirit },
+      armor,
+      ap
 
   /// Health or mana from an attribute: the first 20 points are worth 1 each and
   /// every point after that is worth `perPoint` (10 health, 15 mana).
@@ -3516,8 +3534,8 @@ module Content =
 
   /// Paladin Holy 40 / Protection 0 / Retribution 11 under OctoWoW's tree — the
   /// operator's build, decoded in `.pi/research/octowow/paladin.md` §6: a healer
-  /// build whose 31-point talent is Daybreak rather than the old 31/20/0. **Seven of
-  /// the seventeen talents** it takes are expressible as data; the other nine are
+  /// build whose 31-point talent is Daybreak rather than the old 31/20/0. **Eight of
+  /// the seventeen talents** it takes are expressible as data; the other eight are
   /// named with the axis each needs in that note's §5(b).
   ///
   /// - Divine Intellect 5/5: `IntellectBp 1000`.
@@ -3531,6 +3549,8 @@ module Content =
   ///   here used to claim Holy Power 5/5 while the record set no crit at all.
   /// - Benediction 3/5: `CostBp 900` on Judgement.
   /// - Improved Judgement 2/2: `CooldownOff [ "Judgement", secTicks -2.0 ]`.
+  /// - Blessing of Kings 1/1: `PartyBuffs [ BlessingOfKings ]` — the buff lands on the
+  ///   party rather than on the holder, so it is read when the passives are assembled.
   ///
   /// **Divine Favor is gone from the kit, not retuned.** 1.12's Divine Favor is a
   /// two-minute cooldown that makes the next heal a guaranteed crit; OctoWoW's is a
@@ -3539,10 +3559,10 @@ module Content =
   /// Shock is not in the kit either. The Paladin therefore has no panic button, which
   /// is a real loss of power and shows up on the ladder rather than being argued away.
   /// Paladin Holy 40 / Protection 0 / Retribution 11 under OctoWoW's tree — the
-  /// operator's build, decoded in `.pi/research/octowow/paladin.md` §6. **Seven of the
-  /// seventeen talents in it are expressible as data**, and two of the seven (Divine
-  /// Intellect, Spiritual Focus) were already here, so the port itself is five lines and
-  /// one deletion.
+  /// operator's build, decoded in `.pi/research/octowow/paladin.md` §6. **Eight of the
+  /// seventeen talents in it are expressible as data**, and two of the seven originally
+  /// ported (Divine Intellect, Spiritual Focus) were already here, so the port itself is
+  /// six lines and one deletion.
   ///
   /// - Illumination 5/5: `ManaRefundOnCritBp` 10000 → 6000. **This is a nerf to live
   ///   behaviour**: payload 5/5 refunds sixty per cent of the cost, not all of it, and the
@@ -3562,10 +3582,16 @@ module Content =
   /// adds the crit line without deleting the row leaves two Divine Favors live, so the row
   /// is gone and `SureCrit` is now set only by the Priest's Inner Focus.
   ///
-  /// The nine that need an axis are named with their missing field in §5(b) — they are
+  /// The eight that need an axis are named with their missing field in §5(b) — they are
   /// concentrated in the Paladin because its interesting talents are all triggers: Holy
   /// Shock's either-target cast, Daybreak's reactive heal, Blessed Strikes' reset proc,
-  /// Ironclad's armour-to-healing conversion, Blessing of Kings' multiplicative party buff.
+  /// Ironclad's armour-to-healing conversion, Holy Judgement's cast-time cut.
+  ///
+  /// Blessing of Kings 1/1 was on that list and is no longer: `PartyBuffs` is a talent
+  /// that hands the *party* a passive, and `buffed` grew a percentage column to hold one
+  /// that multiplies where everything else adds. It is worth what §5(b) said it would be
+  /// and was priced before it was built — **2.5% to 5.4% off clear time** at level 60 on a
+  /// twelve-seed A/B across two wings, with 11 of 12 and 9 of 12 seeds faster.
   ///
   /// shortcut: seals are still not modelled, so Judgement remains the comment's plain Holy
   /// nuke (see `judgementRanks`). That is the Paladin's largest remaining gap and it is
@@ -3575,6 +3601,7 @@ module Content =
         IntellectBp = 1000
         ManaRefundOnCritBp = 6000
         CooldownOff = [ "Judgement", secTicks -2.0 ]
+        PartyBuffs = [ BlessingOfKings ]
         Spells =
           [ for spell, healBp, critBp, costBp in
               [ "Flash of Light", 1200, 600, 0
@@ -3586,6 +3613,26 @@ module Content =
                 DamageBp = 0
                 CritBp = critBp
                 CastTicksOff = ticks 0 } ] }
+
+  /// The passives a class's *talent record* hands the party, as opposed to the ones its
+  /// presence does (`innateBuffsFor`). Blessing of Kings is the only one so far, and it is
+  /// why this layer needs the record at all: a class can be seated and not have spent the
+  /// point.
+  let private talentBuffsOf (className: string) =
+    match className with
+    | "Paladin" -> paladinTalents.PartyBuffs
+    | _ -> []
+
+  /// The party-wide passives for a roster: what each class brings by being present, plus
+  /// what each one's talents hand out. Defined below the class builders because the second
+  /// half has to read their records.
+  let partyBuffsFor (roster: string list) : PartyBuffKind list =
+    let classes = roster |> List.map (fun entry -> entry.Split(' ').[0])
+
+    innateBuffsFor classes @ (classes |> List.distinct |> List.collect talentBuffsOf)
+
+  /// The default party's passives.
+  let partyBuffs: PartyBuffKind list = partyBuffsFor defaultRoster
 
   /// Warlock Affliction 31 / Demonology 0 / Destruction 20 under OctoWoW's tree — the
   /// operator's build, decoded in `.pi/research/octowow/warlock.md` §6. **Eight of the
