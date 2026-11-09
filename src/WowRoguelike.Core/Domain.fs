@@ -185,63 +185,6 @@ module Empower =
     | None -> true
     | Some named -> named = ability
 
-/// What a build can fire off an event it did not choose: a block it made, a
-/// critical it landed, a damage spell that hit. These are the events the combat
-/// path already resolves and can name — the swing hook landed with the Hunter
-/// port, so a crit or a block is a case here rather than a new pipeline.
-///
-/// Adding an event is a case here and one `SimCombat.procOn` call at the place
-/// that event is decided. Nothing else in the engine has to know it exists.
-[<Struct>]
-type ProcEvent =
-  /// A physical hit of this character's landed critically.
-  | OnCrit
-  /// A critical strike landed by one *named* ability. The crit sites know the
-  /// name — a `WeaponDamage` row hands its own to `meleeStrike`, a damage spell
-  /// is resolved under it — which is what a talent like Lock and Load needs: it
-  /// fires off three shots and not off the same character's Raptor Strike.
-  | OnCritOf of ability: string
-  /// This character blocked a physical hit aimed at it.
-  | OnBlock
-  /// A damage spell of this character's landed. A resisted spell is not a hit.
-  | OnSpellHit
-  /// One tick of a damage-over-time this character applied. Fired on the
-  /// *caster*, from the tick, which is why `Corrupted` records who applied it:
-  /// the damage lands on the target and the talent belongs to the applier.
-  | OnDoTTick
-
-/// What one proc hands over when it fires. Three shapes, because the talents
-/// that need more than these three are talents the vocabulary cannot express yet
-/// and are named in a comment beside their build instead.
-type ProcResult =
-  /// Resource in the character's own pool (rage on a block, rage on a crit).
-  /// It does nothing to a pool that is not rage, which is what makes Primal
-  /// Fury's "while in Bear or Dire Bear Form" clause the resource kind rather
-  /// than a field: a cat builds energy, and energy is not rage.
-  | GrantResource of amount: int
-  /// The "next spell" buff a caster is holding — Clearcasting's free mana.
-  | EmpowerNext of duration: int<tick> * empower: Empower
-  /// One named ability's cooldown goes to zero. A reset is not a reduction:
-  /// `CooldownOff` is the build-time fold that shortens a row, this is the state
-  /// the tick map holds, and it is cleared because the ability has just been
-  /// used rather than because a tree was spent.
-  | ResetCooldown of ability: string
-
-/// One talent's trigger: the chance, how soon it may fire again, and what it
-/// hands over. `Talent` is the name it is logged and cooled down under — the
-/// internal cooldown lives in `Entity.Cooldowns`, the same tick map abilities
-/// use, so an ICD needs no state of its own.
-type Proc =
-  { Talent: string
-    Event: ProcEvent
-    /// Percent chance in basis points: Arcane Concentration 5/5 is 1000. A
-    /// chance of 10000 fires without drawing a random number at all, so a
-    /// deterministic talent leaves the seed's stream where it found it.
-    ChanceBp: int
-    /// Ticks before it may fire again; `ticks 0` fires whenever the event does.
-    InternalCooldown: int<tick>
-    Then: ProcResult }
-
 /// A Warrior stance or a Druid form. An ability that requires one cannot be used
 /// outside it, which is what makes Overpower a Battle Stance decision rather
 /// than a button. Declared above `Aura` because an aura carries one.
@@ -378,10 +321,83 @@ type Aura =
   /// a target that keeps casting multiplies the five-second trickle and gets
   /// nearly nothing, which is what vanilla's +400% does to a casting priest.
   | Innervated of remaining: int<tick> * regenBp: int
+  /// Swift Aspects: ranged attack speed, held for its duration rather than paid in
+  /// one lump. `speedBp` shortens the holder's *ranged* swing timer only, and the
+  /// port's only ranged timer is a Hunter's bow — which is why this is the first
+  /// attack-speed stat anywhere in the model and why it names no school: every
+  /// future haste buff that is not a bow's would have to say so here.
+  | Hastened of remaining: int<tick> * speedBp: int
 
 /// Every case of `Aura` is matched in exactly one place — here. Everywhere else
 /// asks this module a question, so adding an aura breaks compilation in this
 /// module and nowhere else.
+/// What a build can fire off an event it did not choose: a block it made, a
+/// critical it landed, a damage spell that hit. These are the events the combat
+/// path already resolves and can name — the swing hook landed with the Hunter
+/// port, so a crit or a block is a case here rather than a new pipeline.
+///
+/// Adding an event is a case here and one `SimCombat.procOn` call at the place
+/// that event is decided. Nothing else in the engine has to know it exists.
+[<Struct>]
+type ProcEvent =
+  /// A physical hit of this character's landed critically.
+  | OnCrit
+  /// A critical strike landed by one *named* ability. The crit sites know the
+  /// name — a `WeaponDamage` row hands its own to `meleeStrike`, a damage spell
+  /// is resolved under it — which is what a talent like Lock and Load needs: it
+  /// fires off three shots and not off the same character's Raptor Strike.
+  | OnCritOf of ability: string
+  /// This character blocked a physical hit aimed at it.
+  | OnBlock
+  /// A damage spell of this character's landed. A resisted spell is not a hit.
+  | OnSpellHit
+  /// One tick of a damage-over-time this character applied. Fired on the
+  /// *caster*, from the tick, which is why `Corrupted` records who applied it:
+  /// the damage lands on the target and the talent belongs to the applier.
+  | OnDoTTick
+  /// This character fired a ranged attack that landed. Fired from the swing site
+  /// and only for a timer with range on it (`AutoAttack.Range > 1`), because the
+  /// era's "after firing" talents are about the bow, not about a dagger: Swift
+  /// Aspects hangs its haste off this and must not care how a Rogue swings.
+  | OnShot
+
+/// What one proc hands over when it fires. Four shapes, because the talents that
+/// need more than these four are talents the vocabulary cannot express yet and are
+/// named in a comment beside their build instead.
+type ProcResult =
+  /// Resource in the character's own pool (rage on a block, rage on a crit).
+  /// It does nothing to a pool that is not rage, which is what makes Primal
+  /// Fury's "while in Bear or Dire Bear Form" clause the resource kind rather
+  /// than a field: a cat builds energy, and energy is not rage.
+  | GrantResource of amount: int
+  /// The "next spell" buff a caster is holding — Clearcasting's free mana.
+  | EmpowerNext of duration: int<tick> * empower: Empower
+  /// One named ability's cooldown goes to zero. A reset is not a reduction:
+  /// `CooldownOff` is the build-time fold that shortens a row, this is the state
+  /// the tick map holds, and it is cleared because the ability has just been
+  /// used rather than because a tree was spent.
+  | ResetCooldown of ability: string
+  /// A buff the holder gains. The aura carries its own clock, so a talent that
+  /// says "15% attack speed for 12 seconds" is one case and no state: Swift
+  /// Aspects is the first user and `Hastened` is the first attack-speed stat in
+  /// the model.
+  | Gain of aura: Aura
+
+/// One talent's trigger: the chance, how soon it may fire again, and what it
+/// hands over. `Talent` is the name it is logged and cooled down under — the
+/// internal cooldown lives in `Entity.Cooldowns`, the same tick map abilities
+/// use, so an ICD needs no state of its own.
+type Proc =
+  { Talent: string
+    Event: ProcEvent
+    /// Percent chance in basis points: Arcane Concentration 5/5 is 1000. A
+    /// chance of 10000 fires without drawing a random number at all, so a
+    /// deterministic talent leaves the seed's stream where it found it.
+    ChanceBp: int
+    /// Ticks before it may fire again; `ticks 0` fires whenever the event does.
+    InternalCooldown: int<tick>
+    Then: ProcResult }
+
 module Aura =
 
   /// One Tick of ageing. None when the aura has run out.
@@ -412,6 +428,7 @@ module Aura =
     | Empowered(r, e) when r > ticks 1 -> Some(Empowered(r - ticks 1, e))
     | RecentlyCast r when r > ticks 1 -> Some(RecentlyCast(r - ticks 1))
     | Innervated(r, bp) when r > ticks 1 -> Some(Innervated(r - ticks 1, bp))
+    | Hastened(r, bp) when r > ticks 1 -> Some(Hastened(r - ticks 1, bp))
     | _ -> None
 
   /// The name a form is drawn and labelled with. Declared before `describe`
@@ -452,6 +469,7 @@ module Aura =
          | Some named -> ">" + named
          | None -> "")
     | RecentlyCast r -> sprintf "recent(%d)" r
+    | Hastened(r, bp) -> sprintf "haste(%d,+%d)" r bp
     | Innervated(r, bp) -> sprintf "innervated(%d,x%d)" r bp
 
   /// The name a player sees, short enough to fit over a sprite.
@@ -465,6 +483,7 @@ module Aura =
     | Polymorphed _ -> "POLYMORPH"
     | Silenced _ -> "SILENCED"
     | Drained _ -> "DRAINED"
+    | Hastened _ -> "HASTE"
     | Rejuvenation(_, _, source) -> source
     | Sundered _ -> "SUNDER"
     | Corrupted _ -> "CORRUPTION"
@@ -517,7 +536,8 @@ module Aura =
     | HealingWay _
     | Inspired _
     | Empowered _
-    | Innervated _ -> Magic
+    | Innervated _
+    | Hastened _ -> Magic
     | DeadlyPoisoned _
     | Wounded _
     | Numbed _
@@ -553,6 +573,7 @@ module Aura =
     | Empowered(r, _) -> r
     | RecentlyCast r
     | Innervated(r, _)
+    | Hastened(r, _)
     | DeadlyPoisoned(r, _, _)
     | Wounded(r, _, _)
     | Numbed(r, _)
@@ -785,6 +806,7 @@ module Aura =
     | Wounded _ -> 19
     | Numbed _ -> 20
     | Crippled _ -> 21
+    | Hastened _ -> 24
 
   /// Does casting `newer` overwrite `older`?
   let replaces (older: Aura) (newer: Aura) =
@@ -1231,6 +1253,30 @@ type AutoAttack =
     Ticks: int<tick>
     Range: int }
 
+module AutoAttack =
+
+  /// The interval one swing actually takes, after the holder's attack-speed auras.
+  /// `Hastened` is the port's only one, and it only ever reaches a ranged timer:
+  /// the content's one ranged auto-attack is the Hunter's bow (`Range = 8`), where
+  /// every other entity swings at `Range = 1`, and `PartyAi.ranged` already draws
+  /// that same line. A melee character that somehow held the buff would keep its
+  /// old cadence, which is the honest reading of "ranged attack speed".
+  let cadence (attack: AutoAttack) (auras: Aura list) =
+    let speedBp =
+      auras
+      |> List.sumBy (fun a ->
+        match a with
+        | Hastened(_, bp) -> bp
+        | _ -> 0)
+
+    if speedBp <= 0 || attack.Range <= 1 then
+      attack.Ticks
+    else
+      // Time, not rate: 15% faster is 100/115 of the interval, and the division
+      // keeps it in whole ticks so the timer stays an `int<tick>` like every other
+      // clock in the model. A 2.5 s bow at +15% is 22 ticks instead of 25.
+      attack.Ticks * 10000 / (10000 + speedBp)
+
 type Cast =
   { Ability: Ability
     Target: EntityId
@@ -1317,6 +1363,14 @@ type SpellTalent =
     DamageBp: int
     /// Percent added to this spell's crit chance, in basis points.
     CritBp: int
+    /// Percent of this spell's own weapon damage dealt a second time as
+    /// *unmitigated* spell damage (Experimental Ammunition, 5% on Aimed Shot =
+    /// 500). Not a `DamageBp` and not a `DamageDoneBp`: those raise the hit and
+    /// let armour take its share, where the era's "additional 5% as Fire" lands
+    /// after mitigation. Measured on a level-36 hunter the difference is about a
+    /// tenth of the talent's worth, which is why it is a separate field rather
+    /// than the cheaper — and wrong — multiplier.
+    ElementShareBp: int
     /// Ticks taken off this spell's cast time.
     CastTicksOff: int<tick> }
 
@@ -1498,6 +1552,13 @@ module Talents =
   let costBp (name: string) (healing: bool) (t: Talents) =
     (if healing then t.HealCostBp else t.SpellCostBp)
     + (spell name t |> Option.map (fun s -> s.CostBp) |> Option.defaultValue 0)
+
+  /// Percent of one spell's landed damage that lands a second time as
+  /// unmitigated damage (Experimental Ammunition, 5% on Aimed Shot). Read off the
+  /// spell's own line only: no tree-wide field feeds it, because the era's
+  /// "additional damage as Fire" is a rider on named shots, not a damage bonus.
+  let elementShareBp (name: string) (t: Talents) =
+    spell name t |> Option.map (fun s -> s.ElementShareBp) |> Option.defaultValue 0
 
   /// Ticks off one spell's cast time.
   let castOff (name: string) (t: Talents) =

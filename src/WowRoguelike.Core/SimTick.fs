@@ -548,7 +548,10 @@ module SimTick =
       else
         let w =
           if mainReady then
-            mapEntity e.Id (fun x -> { x with SwingTicksLeft = attack.Ticks }) w
+            // The interval is re-read on every reset, so a haste buff that lands
+            // mid-swing shortens the *next* swing rather than retroactively
+            // speeding up the one in flight — the timer already spent is spent.
+            mapEntity e.Id (fun x -> { x with SwingTicksLeft = AutoAttack.cadence attack e.Auras }) w
           else
             mapEntity e.Id (fun x -> { x with SwingTicksLeft = x.SwingTicksLeft - ticks 1 }) w
 
@@ -592,6 +595,13 @@ module SimTick =
               |> fun w ->
                 if total > 0 && SimCombat.carriesPoison e then
                   SimCombat.poisonHit e mainPoison t.Id w
+                else
+                  w
+              // "After firing": only a timer with range on it. Rolled once per
+              // landed shot, so a miss or a dodge is not a chance to proc.
+              |> fun w ->
+                if total > 0 && attack.Range > 1 then
+                  SimCombat.procOn OnShot e.Id w
                 else
                   w
 

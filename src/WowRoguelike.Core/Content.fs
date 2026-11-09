@@ -3503,7 +3503,7 @@ module Content =
           HealBp = 0
           DamageBp = 0
           CritBp = 0
-          CastTicksOff = ticks 0 } ]
+          ElementShareBp = 0; CastTicksOff = ticks 0 } ]
 
   /// Shaman 0/5/46: Purification 5/5 (+10% healing), Improved Healing Wave 5/5
   /// (-0.5 s cast), Tidal Focus 5/5 (-5% healing mana), Tidal Mastery 5/5 (+5%
@@ -3539,7 +3539,7 @@ module Content =
             HealBp = 0
             DamageBp = 0
             CritBp = 0
-            CastTicksOff = secTicks 0.5 }
+            ElementShareBp = 0; CastTicksOff = secTicks 0.5 }
           :: totemDiscount }
 
   /// Warrior 3/0/48 under OctoWoW's tree — the operator's own build
@@ -3579,7 +3579,7 @@ module Content =
               HealBp = 0
               DamageBp = 0
               CritBp = 0
-              CastTicksOff = ticks 0 } ]
+              ElementShareBp = 0; CastTicksOff = ticks 0 } ]
         // Shield Specialization 5/5 says "and generates five rage when a block
         // occurs", which is the half that is a trigger rather than a number. The
         // block chance itself is in `warriorTraits`.
@@ -3670,7 +3670,7 @@ module Content =
                 HealBp = healBp
                 DamageBp = 0
                 CritBp = critBp
-                CastTicksOff = ticks 0 } ] }
+                ElementShareBp = 0; CastTicksOff = ticks 0 } ] }
 
   /// The passives a class's *talent record* hands the party, as opposed to the ones its
   /// presence does (`innateBuffsFor`). Blessing of Kings is the only one so far, and it is
@@ -3740,25 +3740,25 @@ module Content =
               HealBp = 0
               DamageBp = 1000
               CritBp = 500
-              CastTicksOff = secTicks 0.5 }
+              ElementShareBp = 0; CastTicksOff = secTicks 0.5 }
             { Spell = "Corruption"
               CostBp = 0
               HealBp = 0
               DamageBp = 1000
               CritBp = 0
-              CastTicksOff = secTicks 1.5 }
+              ElementShareBp = 0; CastTicksOff = secTicks 1.5 }
             { Spell = "Curse of Agony"
               CostBp = 0
               HealBp = 0
               DamageBp = 1000
               CritBp = 0
-              CastTicksOff = ticks 0 }
+              ElementShareBp = 0; CastTicksOff = ticks 0 }
             { Spell = "Immolate"
               CostBp = 0
               HealBp = 0
               DamageBp = 600
               CritBp = 500
-              CastTicksOff = secTicks 0.5 } ]
+              ElementShareBp = 0; CastTicksOff = secTicks 0.5 } ]
         // Nightfall 2/2: two percent per rank that a damage-over-time this
         // Warlock applied makes the next Shadow Bolt instant. The page's buff is
         // "instant and cannot miss"; only the instant half is modelled, because a
@@ -3800,19 +3800,19 @@ module Content =
               HealBp = 0
               DamageBp = 0
               CritBp = 0
-              CastTicksOff = ticks 0 }
+              ElementShareBp = 0; CastTicksOff = ticks 0 }
             { Spell = "Rejuvenation"
               CostBp = 0
               HealBp = 1500
               DamageBp = 0
               CritBp = 0
-              CastTicksOff = ticks 0 }
+              ElementShareBp = 0; CastTicksOff = ticks 0 }
             { Spell = "Regrowth"
               CostBp = 0
               HealBp = 0
               DamageBp = 0
               CritBp = 5000
-              CastTicksOff = ticks 0 } ] }
+              ElementShareBp = 0; CastTicksOff = ticks 0 } ] }
 
   /// Priest Discipline 11 / Holy 40 / Shadow 0 under OctoWoW's tree — the operator's
   /// build, decoded in `.pi/research/octowow/priest.md` §6. **Eight of sixteen talents
@@ -3857,13 +3857,13 @@ module Content =
               HealBp = 1500
               DamageBp = 0
               CritBp = 0
-              CastTicksOff = ticks 0 }
+              ElementShareBp = 0; CastTicksOff = ticks 0 }
             { Spell = "Shadow Word: Pain"
               CostBp = 1000
               HealBp = 0
               DamageBp = 0
               CritBp = 0
-              CastTicksOff = ticks 0 }
+              ElementShareBp = 0; CastTicksOff = ticks 0 }
             // Mental Agility 5/5 plus Divine Fury 5/5 on the one row. Half a second is
             // `secTicks 0.5` — ten ticks, because the sim runs twenty a second; `ticks 5`
             // would be a quarter second and would halve the talent silently.
@@ -3872,7 +3872,7 @@ module Content =
               HealBp = 0
               DamageBp = 0
               CritBp = 0
-              CastTicksOff = secTicks 0.5 }
+              ElementShareBp = 0; CastTicksOff = secTicks 0.5 }
             // Divine Fury 5/5 shortens Heal and not Lesser Heal: the tree names Heal,
             // Greater Heal and Smite, and the downrank is not one of them.
             for name, castOff in [ "Lesser Heal", ticks 0; "Heal", secTicks 0.5 ] do
@@ -3881,7 +3881,7 @@ module Content =
                 HealBp = 0
                 DamageBp = 0
                 CritBp = 0
-                CastTicksOff = castOff } ] }
+                ElementShareBp = 0; CastTicksOff = castOff } ] }
 
   /// Fold a build's per-spell lines into the kit: a talent that shortens a cast
   /// or cheapens a spell changes the `Ability` record once, at construction, so
@@ -4320,19 +4320,19 @@ module Content =
               HealBp = 0
               DamageBp = 0
               CritBp = 0
-              CastTicksOff = secTicks 0.5 }
+              ElementShareBp = 0; CastTicksOff = secTicks 0.5 }
             { Spell = "Arcane Missiles"
               CostBp = 0
               HealBp = 0
               DamageBp = 0
               CritBp = 600
-              CastTicksOff = ticks 0 }
+              ElementShareBp = 0; CastTicksOff = ticks 0 }
             { Spell = "Arcane Explosion"
               CostBp = 0
               HealBp = 0
               DamageBp = 0
               CritBp = 600
-              CastTicksOff = ticks 0 } ]
+              ElementShareBp = 0; CastTicksOff = ticks 0 } ]
         // Arcane Concentration 5/5: a damage spell that lands has a ten percent
         // chance to make the next one free, and the page adds an eight-second
         // internal cooldown between procs (`.pi/research/octowow/mage.md`). The
@@ -5062,24 +5062,38 @@ module Content =
                 Event = OnCritOf shot
                 ChanceBp = 10000
                 InternalCooldown = ticks 0
-                Then = ResetCooldown "Aimed Shot" } ]
+                Then = ResetCooldown "Aimed Shot" }
+            // Swift Aspects 5/5: a 10% chance after firing to gain 15% ranged attack
+            // speed for 12 s. The era gates it on Aspect of the Hawk being up; the
+            // port has no aspects at all (see the note above `hunter`), so the gate
+            // is the hunter's own bow — every hunter in this content is behind one.
+            { Talent = "Swift Aspects"
+              Event = OnShot
+              ChanceBp = 1000
+              InternalCooldown = ticks 0
+              Then = Gain(Hastened(secTicks 12.0, 1500)) } ]
         Spells =
-          [ for spell, costBp, damageBp in
-              [ "Arcane Shot", 1000, 1000
-                "Serpent Sting", 1000, 4000
-                "Aimed Shot", 1000, 2000
-                "Multi-Shot", 1000, 1000
-                "Viper Sting", 1000, 0
-                "Scatter Shot", 1000, 0
-                "Raptor Strike", 1000, 0
+          [ for spell, costBp, damageBp, elementShareBp in
+              [ "Arcane Shot", 1000, 1000, 0
+                "Serpent Sting", 1000, 4000, 0
+                // Experimental Ammunition 1/1: 5% of Aimed Shot's damage lands
+                // again as an element armour does not stop. 500 bp is the top of
+                // the era's "[3/5/7/10]%" band, and the band is a known unknown:
+                // see the note in `.pi/research/octowow/hunter.md` §10.
+                "Aimed Shot", 1000, 2000, 500
+                "Multi-Shot", 1000, 1000, 0
+                "Viper Sting", 1000, 0, 0
+                "Scatter Shot", 1000, 0, 0
+                "Raptor Strike", 1000, 0, 0
                 // The bow's white damage. A swing has no ability row, so
                 // `SimTick.swingName` is the one name it answers to.
-                "Attack", 0, 1000 ] do
+                "Attack", 0, 1000, 0 ] do
               { Spell = spell
                 CostBp = costBp
                 HealBp = 0
                 DamageBp = damageBp
                 CritBp = 0
+                ElementShareBp = elementShareBp
                 CastTicksOff = ticks 0 } ] }
 
   /// Lethal Shots 5/5: +5% ranged crit, which `Traits.CritBonusBp` is the only place

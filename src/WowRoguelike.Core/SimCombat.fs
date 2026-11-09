@@ -282,6 +282,25 @@ module SimCombat =
         w
         |> mapEntity id (fun x -> { x with Auras = Aura.refresh (Empowered(duration, empower)) x.Auras })
         |> logLine (sprintf "%s: %s procs" e.Name p.Talent)
+      // The payload is a buff the holder carries, so it lands through the same
+      // `Aura.refresh` every castable buff uses: a second proc refreshes the first
+      // rather than stacking a second copy. A buff that moves the swing interval
+      // also re-arms the timer it landed on — measured, the shot that procced it
+      // has already re-set that timer from the pre-proc auras, so without this the
+      // first swing after a Swift Aspects proc is the un-hasted one and the talent
+      // loses a fifth of its value.
+      | Gain aura ->
+        w
+        |> mapEntity id (fun x ->
+          let auras = Aura.refresh aura x.Auras
+
+          let armed =
+            match x.AutoAttack with
+            | Some atk -> min x.SwingTicksLeft (AutoAttack.cadence atk auras)
+            | None -> x.SwingTicksLeft
+
+          { x with Auras = auras; SwingTicksLeft = armed })
+        |> logLine (sprintf "%s: %s procs" e.Name p.Talent)
       // `Map.remove` reads as "never cast", which is ready: the ability's own
       // cooldown entry is the only thing standing between it and its next cast.
       | ResetCooldown ability ->
@@ -613,6 +632,32 @@ module SimCombat =
         let critBonus = if ability.Name = "Backstab" then actor.BackstabCritBonusBp else 0
         let amount, w = meleeStrike actor victim (swing * multiplierBp / 10000 + bonus) critBonus (Some ability.Name) w
         let w = dealDamage victim amount w
+
+        // Experimental Ammunition: a share of what just landed lands again as
+        // damage no armour stops. Read off the *landed* amount, so a crit shares its
+        // crit, and through `spellHit` rather than `meleeStrike`, so the armour the
+        // physical half just paid is not charged a second time — the whole
+        // difference between this field and a `DamageBp` multiplier. The shot still
+        // reports its own damage: the burn is a second line and a second threat tick,
+        // exactly as the era's combat log splits them.
+        let w =
+          let shareBp = Talents.elementShareBp ability.Name actor.Talents
+
+          if shareBp <= 0 || amount <= 0 then
+            w
+          else
+            let share, w = spellHit "Experimental Ammunition" actor victim (amount * shareBp / 10000) w
+            let w = dealDamage victim share w
+
+            let w =
+              if share > 0 then
+                w |> logLine (sprintf "%s's ammunition burns %s for %d" actor.Name (nameOf victim w) share)
+              else
+                w
+
+            // Only the Party builds threat on Mobs.
+            if actor.Faction = Party then addThreat victim actor share w else w
+
         // Only the Party builds threat on Mobs.
         let w = if actor.Faction = Party then addThreat victim actor amount w else w
         amount, w

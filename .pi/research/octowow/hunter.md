@@ -569,24 +569,25 @@ is now false, and the pet is the one thing this port models least: `Content.hunt
 swing at 2.0 s, `Summon Pet` ranks at 1/24/48) but no talent touches it, and `Talents` has no pet fields
 at all.
 
-Portability split, against `hunterTalents` as committed:
+Portability split, against `hunterTalents` as committed — the split as it stood before the two
+mechanisms in §13.1/§13.2 existed:
 
-- **Marksmanship 35 of 36 points are already ported.** The twelve talents here are exactly the bundle
+- **Marksmanship 36 of 36 points are now ported.** The twelve talents here are exactly the bundle
   `Content.fs` encodes (Mortal Shots 5/5 as `CritDamageBp = 3000`, Piercing Shots 2/2 as
   `CritBleedShareBp`, Improved Stings 5/5 as Serpent's `DamageBp = 4000`, Improved Marksmanship 2/2,
-  Ranged Weapon Spec 5/5, Lethal Shots 5/5, Efficiency 5/5, Swiftshot, Lock and Load). The only point
-  that is not is **Experimental Ammunition 1/1** (§10's queued next-cast rider).
-- **Beast Mastery 15 of 15 points are unported, but three of the five talents are cheap** — they scale
-  the pet that already fights: Endurance Training (`[6/12/18/24/30]%` health to owner and pet, 2/5 = 12%),
-  Thick Hide (`[12/24/36]%` pet armour, 3/3 = 36%), Unleashed Fury (`[4/8/12/16/20]%` pet damage, 4/5 =
-  16%), Coordinated Assault (pet's next attack within 6 s also strikes for 20% of the owner's attack
-  power, at most once a 3 s). Swift Aspects (`10%` chance of `[3/6/9/12/15]%` ranged attack speed under
-  Aspect of the Hawk, 5/5) needs an attack-speed stat the engine does not have, and Coordinated Assault
-  needs the owner's AP read at the pet's swing.
+  Ranged Weapon Spec 5/5, Lethal Shots 5/5, Efficiency 5/5, Swiftshot, Lock and Load), and
+  **Experimental Ammunition 1/1** closed the last of them (§13.1).
+- **Beast Mastery 15 of 15 points are ported.** Four are fields on the pet: Endurance Training
+  (`[6/12/18/24/30]%` health to owner and pet, 2/5 = 12%), Thick Hide (`[12/24/36]%` pet armour, 3/3 =
+  36%), Unleashed Fury (`[4/8/12/16/20]%` pet damage, 4/5 = 16%), Coordinated Assault (pet's next
+  attack within 6 s also strikes for 20% of the owner's attack power, at most once a 3 s). The fifth,
+  **Swift Aspects** (`10%` chance of `[3/6/9/12/15]%` ranged attack speed under Aspect of the Hawk,
+  5/5), is the model's first attack-speed stat (§13.2).
 
-So the build is *more* portable than the first one in the only sense that matters here: its dead points
-drop from 15 (5 Concussive + 10 Survival) to 1 (Experimental Ammunition) plus whatever the pet axis
-leaves out.
+So the build's dead points went from 15 (5 Concussive + 10 Survival) to **one conditional**:
+Coordinated Assault pays only while something else — a Warrior's Battle Shout — is handing the hunter
+melee attack power, because his own attack power is ranged and unmodelled. §13.1 and §13.2 below are
+how the other fifteen came in.
 
 ### Port result (§13 build)
 
@@ -597,10 +598,10 @@ and the summon), `PetArmorBp = 3600` (Thick Hide 3/3), `PetDamageBp = 1600` (Unl
 4/5), `PetApBp = 2000` (Coordinated Assault 1/1). Guarded on `spec.Totem.IsNone`, so a
 Shaman's totem is never scaled by a hunter talent.
 
-**44 of 51 points land.** Blocked: Experimental Ammunition 1/1 (queued next-cast rider),
-Swift Aspects 5/5 (no ranged attack-speed stat), and Coordinated Assault is *implemented but
-nearly inert* — it shares "20% of your attack power" and the engine's only attack power is the
-melee per-swing `MeleeDamageBonus`, which a hunter's own Strength and Agility do not feed.
+**44 of 51 points landed** at the end of that increment. Blocked then: Experimental Ammunition 1/1
+(queued next-cast rider), Swift Aspects 5/5 (no ranged attack-speed stat), and Coordinated Assault is
+*implemented but nearly inert* — it shares "20% of your attack power" and the engine's only attack
+power is the melee per-swing `MeleeDamageBonus`, which a hunter's own Strength and Agility do not feed.
 
 Measured, 8 seeds/wing, Warrior/Priest/Hunter/Mage/Rogue: pet damage **+19.4%** (library L36)
 and **+18.4%** (armory L39); hunter health **+12%**; clear time **+1.1%** and **−0.4%** — i.e.
@@ -608,3 +609,42 @@ flat. The reason is in the attribution: Warrior 32-34%, Rogue 21-25%, Mage 18-19
 **Pet 5.7-5.9%**, Priest 0.4-3.7% of party damage. A fixed ~6% pet means ten BM points buy ~1%
 of the party, which no measurement on this harness can resolve. Port them because they are four
 fields and one branch; never for throughput.
+
+### 13.1 Experimental Ammunition 1/1 — a rider on the spell, not a multiplier on the hit
+
+The era's line is "your Aimed Shot deals an additional 5% of its damage as Fire". That is a **second,
+small event**, and it lands *after* mitigation: armour does not touch it. So it is
+`SpellTalent.ElementShareBp = 500`, read in `SimCombat`'s weapon-strike path, logged on its own line
+(`"%s's ammunition burns %s for %d"`) rather than folded into the hit, and deliberately not a
+`DamageBp` — that multiplies the hit and lets armour take its share.
+
+Measured on the hunter's own damage: **+0.85% at L36, +1.50% at L60** (16 seeds a wing, roster
+Warrior/Priest/Mage/Warlock/Hunter). Its smallness is the honest reading of a 5% share of one ability
+in a class that deals 25 000 damage a fight. The size is not the lesson; the lesson is that a rider
+stated as a multiplier on the *hit* is a different number, and at 1/1 that difference is a tenth of
+the talent's whole worth.
+
+### 13.2 Swift Aspects 5/5 — the model's first haste
+
+`Aura.Hastened(remaining, speedBp)` plus `AutoAttack.cadence` is the whole mechanism: the interval
+scales by `10000 / (10000 + bp)`, and `cadence` only ever reaches a timer with `Range > 1` — every
+non-hunter entity in the content swings at `Range = 1`, which is the same line `PartyAi.ranged`
+draws. There is no Aspect of the Hawk system and none is pretended: the gate is "this hunter is
+behind a bow", which is true of every hunter here. Scaling the *rate* instead of the interval is the
+tempting version and it is wrong in a way that only shows at odd intervals — the timer is whole ticks
+and dividing a rate leaves the remainder nowhere to go. 2.5 s at +15% is 21 ticks.
+
+The proc is `ProcEvent.OnShot` + `ProcResult.Gain(Hastened(12 s, 1500))`, fired from the ranged swing
+site on a landed shot only.
+
+Measured over 16 seeds a wing: **+5.9% shots at L36, +5.0% at L60**; uptime **25% (L36) / 31% (L60)**
+of the fight, which is what 10% a shot on a 12 s buff buys. Hunter damage: **+0.7%** and **+1.4%**.
+The gap between the shot rate and the damage is the class's shape rather than a bug: at L60 four
+shots in five are Aimed's, so the auto-shot the haste buys is a fifth of a bar that is already
+cooldown- and mana-bound.
+
+**One trap, for any future haste or haste-like buff:** the first version read auras at the next timer
+reset, and the reset happens *before* the swing resolves — so the shot that procced the buff had
+already armed the next swing at the un-hasted interval, and the talent lost one swing in five (the
+measured shot rate was +3.0% instead of +5.9%). `ProcResult.Gain`'s branch now takes
+`min (SwingTicksLeft) (cadence ...)`: a buff that moves a clock moves the clock it is standing on.

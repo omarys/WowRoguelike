@@ -3580,6 +3580,50 @@ let ``the hunter's kit is the marksmanship build`` () =
   Assert.Equal(10000, tagOf "Raptor Strike")
   Assert.Equal(11000, tagOf SimTick.swingName)
 
+/// Experimental Ammunition 1/1 — the last point of the operator's build this port
+/// could not carry until the element share existed. 5% of Aimed Shot's damage lands
+/// again as damage armour does not stop, every swing of it: `ElementShareBp` and not
+/// `DamageBp`, because it is read off the hit that already landed and the armour
+/// that hit paid is not charged twice.
+///
+/// Pinned as a *relationship* across a whole fight rather than as a number: a single
+/// roll can resist the rider outright, and a hard-coded 5 would only re-test the
+/// fixture's mob. Driven through the bench's own policy, because a cast-time shot
+/// does not resolve inside the command that starts it.
+[<Fact>]
+let ``experimental ammunition burns a share of what aimed shot landed`` () =
+  let hunter = Content.partyOf [ "Hunter" ] 36 |> List.exactlyOne
+  Assert.Equal(500, Talents.elementShareBp "Aimed Shot" hunter.Talents)
+  // The rider belongs to the one row the talent names.
+  Assert.Equal(0, Talents.elementShareBp "Arcane Shot" hunter.Talents)
+  Assert.Equal(0, Talents.elementShareBp SimTick.swingName hunter.Talents)
+
+  let amountOf (line: string) = line.Split(" for ") |> Array.last |> int
+
+  let mutable shares = 0
+
+  for seed in [ 1UL .. 3UL ] do
+    let roster = [ "Warrior"; "Priest"; "Mage"; "Warlock"; "Hunter" ]
+
+    let mutable x =
+      Content.scarletMonasteryAt "library" Content.Median seed |> Content.withRosterAt 36 roster
+
+    for _ in 1 .. 9000 do
+      if SimState.continues x then x <- SimTick.step (Bench.autoPilot x) x
+
+    // The log pairs a shot with its burn, in order, so the burn must be 5% of the
+    // shot immediately above it and nothing else.
+    let mutable landed = 0
+
+    for line in x.Log do
+      if line.Contains "Aimed Shot hits" then
+        landed <- amountOf line
+      elif line.Contains "ammunition burns" then
+        shares <- shares + 1
+        Assert.Equal(landed * 500 / 10000, amountOf line)
+
+  Assert.True(shares > 0, "the rider never landed in three library fights")
+
 /// Lethal Shots 5/5 is +5% ranged crit, and `Traits.CritBonusBp` is the only place a
 /// crit can come from — so it lands on the hero, as the rogue's Malice does.
 [<Fact>]
@@ -7394,3 +7438,94 @@ let ``the warlock's build carries Nightfall`` () =
   Assert.True(nightfall.IsSome)
   Assert.Equal(OnDoTTick, (Option.get nightfall).Event)
   Assert.Equal(400, (Option.get nightfall).ChanceBp)
+
+/// Swift Aspects 5/5 is 15% ranged attack speed after firing, and the port had no
+/// attack-speed stat at all before it. `AutoAttack.cadence` is where that lives, so
+/// the first thing to pin is that it is the *interval* that moves and that it only
+/// moves for a timer with range on it.
+[<Fact>]
+let ``haste shortens a ranged interval and leaves a melee one alone`` () =
+  let bow = { Min = 38; Max = 62; Ticks = ticks 25; Range = 8 }
+  let sword = { bow with Ticks = ticks 25; Range = 1 }
+  let haste = [ Hastened(secTicks 12.0, 1500) ]
+
+  // 2.5 s cut by 15% is 2.17 s, floored to 21 ticks: time is the quantity that
+  // scales, not rate, so the divisor is 10000 + bp.
+  Assert.Equal(ticks 21, AutoAttack.cadence bow haste)
+  // The era's version is "ranged attack speed", and this content has exactly one
+  // ranged timer. A melee swing keeps its cadence even holding the buff.
+  Assert.Equal(ticks 25, AutoAttack.cadence sword haste)
+  Assert.Equal(ticks 25, AutoAttack.cadence bow [])
+
+/// And it is reached through content rather than by hand: only the hunter's build
+/// carries an `OnShot` proc, and firing one is what puts the aura up.
+[<Fact>]
+let ``Swift Aspects is the hunter's, and a bow's`` () =
+  let _ = Content.heroicStrike
+
+  let hunter =
+    Content.partyOf [ "Hunter"; "Priest" ] 60
+    |> List.find (fun e -> e.Name = "Hunter")
+
+  Assert.Contains(hunter.Talents.Procs, fun p -> p.Talent = "Swift Aspects" && p.Event = OnShot)
+
+  let warrior =
+    Content.partyOf [ "Warrior"; "Priest" ] 60
+    |> List.find (fun e -> e.Name = "Warrior")
+
+  Assert.DoesNotContain(warrior.Talents.Procs, fun p -> p.Event = OnShot)
+
+[<Fact>]
+let ``a landed shot puts the hunter's haste up`` () =
+  let _ = Content.heroicStrike
+
+  let hunter =
+    Content.partyOf [ "Hunter" ] 60 |> List.exactlyOne
+
+  let sword = { Min = 1; Max = 1; Ticks = ticks 5; Range = 1 }
+
+  let mob =
+    { Content.mob 900 "Dummy" CreatureType.Humanoid 60 4000000 0 (Some sword) [] None { X = 8; Y = 5 } with
+        Engaged = true
+        Target = Some hunter.Id }
+
+  let world =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 20 10
+      Entities = [ { hunter with Pos = { X = 5; Y = 5 } }; mob ]
+      Pending = []
+      Rng = Rng.streamsOf 7UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  // Ten percent a shot at one shot per 5 s is roughly one proc a minute, so the
+  // window is swept rather than pinned: the first seed that fires is the one whose
+  // world the assertions read. Step by step, because the aura lasts 12 s and the
+  // end of a long run is usually the seconds after it expired.
+  let armedWorld (seed: uint64) =
+    let mutable w = { world with Rng = Rng.streamsOf seed }
+    let mutable armed = false
+
+    for _ in 1 .. 600 do
+      if not armed && SimState.continues w then
+        w <- SimTick.step (Bench.autoPilot w) w
+        armed <- w.Log |> List.exists (fun l -> l.Contains "Swift Aspects procs")
+
+    if armed then Some w else None
+
+  let fired =
+    [ 1UL .. 12UL ]
+    |> List.tryPick armedWorld
+    |> Option.defaultWith (fun () -> failwith "the talent never fired over twelve seeded minutes")
+
+  let hunter = fired.Entities |> List.find (fun e -> e.Name = "Hunter")
+
+  Assert.Contains(hunter.Auras, function Hastened _ -> true | _ -> false)
+  // The timer armed for the next shot is the hasted interval, not the 5 s the bow
+  // would otherwise take: 50 ticks cut by 15% is 43.
+  Assert.True(
+    (int hunter.SwingTicksLeft) < 50,
+    sprintf "expected the timer to be re-armed for the hasted interval, got %d" (int hunter.SwingTicksLeft)
+  )

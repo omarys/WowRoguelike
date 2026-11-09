@@ -1111,14 +1111,14 @@ outcome changes** — which is what a rule that only fires on healers and long c
 should look like. Supply the era's rule and let the AI be selective; do not read
 "interrupts are good" as "interrupt everything".
 
-### The operator's second Hunter build: 44 of 51 points, and a pet worth 6%
+### The operator's second Hunter build: 50 of 51 points, and the first haste in the model
 
 `?points=FQAYBg-AoFoBDAoJQQoB-` — Beast Mastery 15 / Marksmanship 36 / Survival 0. It
-is the same Marksmanship bundle this port already encodes (36 points, of which only
-Experimental Ammunition is unported), so the whole increment is the fifteen Beast
-Mastery points that the first build spent in Survival and that this port had never
-touched. Four talent fields carry them, all read at one site — `SimCombat`'s `Summon`
-branch — because a pet has no abilities to hang a `Talents.Spells` row on:
+is the same Marksmanship bundle this port already encodes (36 points, all of them now
+ported), so the whole increment is the fifteen Beast Mastery points that the first
+build spent in Survival and that this port had never touched. Four talent fields carry
+them, all read at one site — `SimCombat`'s `Summon` branch — because a pet has no
+abilities to hang a `Talents.Spells` row on:
 
 | field | talent | value |
 |---|---|---|
@@ -1150,18 +1150,59 @@ runs: Warrior 32-34%, Rogue 21-25%, Mage 18-19%, Hunter 18%, **Pet 5.7-5.9%**, P
 them because they are four fields and one branch; do not expect the clock to move, and
 do not chase BM talents for throughput.
 
-Two of the fifteen are blocked, and both are the same missing stat seen from opposite
-ends:
+The last two points of the build went to the two talents the first pass called
+blocked, and both needed a new mechanism rather than a new number (§ below):
 
-- **Swift Aspects 5/5** needs ranged attack speed — there is no haste stat at all.
-  Same blocker as Swift Reflexes' attack-speed leg and as the reason Aimed Shot's 3 s
-  cast is data rather than a number a talent can bend.
-- **Coordinated Assault 1/1 is implemented but nearly inert**: it shares "20% of your
-  attack power", and the engine's only attack power is the melee per-swing
-  `MeleeDamageBonus`. A hunter's Strength and Agility contribute nothing to it by
-  design (his attack power is ranged and not modelled), so the share is zero until
-  something else hands him attack power — a Warrior's Battle Shout is what makes the
-  field non-zero in the test. Worth keeping for that reason: it is as live as the buff.
+- **Experimental Ammunition 1/1** — a fired-shot rider, 5% of Aimed Shot's weapon
+damage again as unmitigated Fire. Measured on the hunter's own damage: **+0.85% at
+L36, +1.50% at L60.** Small, and honestly so: it rides a 400-damage hit in a class
+that does 25 000 a fight.
+- **Swift Aspects 5/5** — 10% chance after firing for 15% ranged attack speed, 12 s.
+Measured over 16 seeds a wing: **+5.9% shots at L36, +5.0% at L60**, worth **+0.7%**
+and **+1.4%** of the hunter's damage. The gap between the shot rate and the damage is
+the class's shape: at L60 it is cooldown- and mana-bound, so four shots in five are
+Aimed's and the auto-shot the haste buys is a fifth of the bar.
+
+**Only Coordinated Assault 1/1 is still conditional.** It shares "20% of your attack
+power", and the engine's only attack power is the melee per-swing `MeleeDamageBonus`.
+A hunter's Strength and Agility contribute nothing to it by design (his attack power is
+ranged and not modelled), so the share is zero until something else hands him attack
+power — a Warrior's Battle Shout is what makes the field non-zero in the test. Worth
+keeping for that reason: it is as live as the buff. The 51-point build is therefore
+**50 of 51**, with one point that pays only behind a shaman-free party's Battle Shout.
+
+### The fired-shot rider, and the first haste in the model
+
+Two talents that look unrelated needed one thing each that the port had never had, and
+both are worth knowing before the next class asks for them.
+
+**A rider is a field on the spell, not a multiplier on the hit.** Experimental
+Ammunition's 5% is *additional unmitigated spell damage*, i.e. a second, small damage
+event that armour does not touch, which is why it is
+`SpellTalent.ElementShareBp` and read in `SimCombat`'s weapon-strike path rather than a
+`DamageBp`. Stated as a multiplier it would have been wrong by about a tenth of its
+value — and a tenth is the whole talent at 1/1. The site logs it as its own line
+(`"ammunition burns"`), both because a player should see a second number and because
+the only honest way to measure it is to count that line.
+
+**Haste is time, not rate.** `Aura.Hastened(remaining, speedBp)` is the model's first
+attack-speed stat, and `AutoAttack.cadence` is the only place it is read: the interval
+scales by `10000 / (10000 + bp)`, so 15% haste on a 2.5 s bow is 21 ticks. Scaling the
+*rate* instead is the tempting version and it is wrong in a way that only shows at
+odd intervals — the timer is whole ticks, and dividing a rate leaves the remainder
+nowhere to go. `cadence` also only ever reaches a timer with `Range > 1`: every
+non-hunter entity in the content swings at `Range = 1`, and `PartyAi.ranged` draws the
+same line, so "ranged attack speed" needs no aspect system to be honest.
+
+**A proc that changes an interval has to re-arm the timer it landed on.** Measured:
+the first version read the auras at the *next* reset, and the reset happens before the
+swing resolves — so the shot that procced the buff had already armed the next swing at
+the un-hasted interval, and the talent lost one swing in five. `ProcResult.Gain`'s
+branch now takes `min (SwingTicksLeft) (cadence ...)`, which is the general form of
+"a buff that moves a clock moves the clock it is standing on". Support for this was
+cheap to add and is the second half of why `ProcResult.Gain` exists at all: the other
+three cases all hand over a resource or a cooldown, and none of them can express "hold
+this for twelve seconds".
 
 ### Hunter: seven of sixteen, and a talent that cannot reach the bow
 
