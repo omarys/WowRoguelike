@@ -62,6 +62,15 @@ module SimTick =
           // hero's own Agility into.
           let boon = TotemBoon(ticks 2, 0, agility * 10, agility * 5)
           mapEntity e.Id (fun m -> { m with Auras = Aura.refresh boon m.Auras }) w
+        | Cleanses school ->
+          mapEntity
+            e.Id
+            (fun m ->
+              { m with
+                  Auras =
+                    m.Auras
+                    |> List.filter (fun a -> Aura.isHelpful a || Aura.dispelType a <> school) })
+            w
         | Heals _ -> w
 
       (w, totems)

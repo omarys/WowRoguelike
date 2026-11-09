@@ -2735,6 +2735,7 @@ let ``the shaman's kit is the level-24 one`` () =
       "Healing Wave"
       "Stoneskin Totem"
       "Healing Stream Totem"
+      "Cure Poison Totem"
       "Nature's Swiftness"
       "Reincarnation"
       "Ancestral Spirit"
@@ -3282,6 +3283,47 @@ let ``a totem claims no tile and never expires`` () =
   Assert.Equal({ X = 6; Y = 5 }, (at tank.Id).Pos)
   Assert.Equal({ X = 6; Y = 5 }, (at totem.Id).Pos)
   Assert.True(SimState.alive (at totem.Id), "walking onto the totem killed it")
+
+/// A cleansing totem on its own clock, the same shape as the healing stream: the
+/// pulse takes auras of one school off the party in reach, and only harmful ones —
+/// a totem that stripped its own party's buffs would not be a totem.
+[<Fact>]
+let ``a cleansing totem takes the poison off the party`` () =
+  let poisoned =
+    { (Content.partyOf [ "Warrior" ] 24).[0] with
+        Auras = [ DeadlyPoisoned(secTicks 20.0, 12, 1) ] }
+
+  let totem =
+    { poisoned with
+        Id = EntityId 200
+        Name = "Cure Poison Totem"
+        Pos = { X = 6; Y = 5 }
+        MaxHealth = 5
+        Health = 5
+        Abilities = []
+        AutoAttack = None
+        Owner = Some poisoned.Id
+        Auras = []
+        Totem = Some { Pulse = Cleanses Poison; Radius = 5; Period = secTicks 2.0 } }
+
+  let mutable w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 12 10
+      Entities = [ poisoned; totem ]
+      Pending = []
+      Rng = Rng.streamsOf 11UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  // One pulse is two seconds of ticks, so the loop has to cross one: a shorter run
+  // asserts nothing at all, which is how this test first passed as a failure.
+  for _ in 1..60 do
+    w <- SimTick.step [] w
+
+  let hurt = w.Entities |> List.find (fun e -> e.Id = poisoned.Id)
+  Assert.DoesNotContain(hurt.Auras, fun a -> Aura.dispelType a = Poison)
 
 /// A totem is an Entity that pulses on its own clock: the Healing Stream totem
 /// heals every party member in reach every two seconds, and stops the Tick it runs

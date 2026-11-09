@@ -4,8 +4,8 @@ Written at commit `aba0722`, with that session's work on top as one WIP commit
 `40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**263 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
-Release`, 273 total), Release build clean — re-verified on the tree that carries the
+**264 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
+Release`, 274 total), Release build clean — re-verified on the tree that carries the
 era pushback model (`SimCombat.fs:462`), the Hunter's last four increments (`a3f6d10`,
 the snare's null result), the Paladin's Blessing of Kings, the mob ability rotation
 fix (`2a65a63`), the stun-is-an-interrupt rule (`81e17b1`) and the dispel axis. The 10
@@ -33,9 +33,17 @@ Two engine truths were missing, and both were cheap:
   8 470 → 8 311 ticks (−1.9%)**.
 
 What a next session should know about the dispel axis specifically: the party carries
-**no poison, disease or curse in this content**, so five of the eight cleaners are
-inert by measurement, not by omission. Adding a hostile that afflicts would light them
-up for free.
+**no poison, disease or curse in this content**, so six of the nine cleaners (spells and
+totems) are inert by measurement, not by omission. Adding a hostile that afflicts would
+light them up for free.
+
+The Shaman's cleaner totems are in and inert the same way: `TotemPulse.Cleanses school`
+reaches the water slot, so Cure Poison Totem and Cleansing Totem pulse a school off the
+party every two seconds — and both sit after Mana Spring in the kit, so ordinary play
+still drops the trickle. Still open on this axis, and the only piece of the operator's
+list not landed: **Grounding Totem**, which redirects a harmful spell rather than
+removing an effect. That needs a hook in cast resolution (a totem that intercepts the
+target of a spell aimed at a party member), not another aura school.
 
 ## Where the work stands after the pushback increment
 

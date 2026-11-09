@@ -1426,6 +1426,10 @@ module Content =
   let purify = rank24 (dispelRanks "Purify" Ally Poison 1 60)
   /// Druid: one curse off a member.
   let removeCurse = rank24 (dispelRanks "Remove Curse" Ally Curse 1 60)
+  /// Druid: one poison off a member, and the era's version keeps cleaning for a
+  /// while — modelled as one effect now, because a repeating cleanse has no
+  /// vocabulary and no target in this content to justify inventing one.
+  let abolishPoison = rank24 (dispelRanks "Abolish Poison" Ally Poison 1 60)
   /// Priest: one disease off a member.
   let abolishDisease = rank24 (dispelRanks "Abolish Disease" Ally Disease 1 90)
 
@@ -4513,7 +4517,7 @@ module Content =
               entanglingRootsRanks
               wrathRanks
               moonfireRanks ]
-          @ [ swiftmend; naturesSwiftness; rebirth; innervate; removeCurse ])
+          @ [ swiftmend; naturesSwiftness; rebirth; innervate; removeCurse; abolishPoison ])
         @ [ treeOfLife; humanForm ]
       | CatDruid ->
         // The Rogue's energy economy with feral names on it: Claw is Sinister
@@ -4857,7 +4861,14 @@ module Content =
       totem "Grace of Air Totem" 120 (ticks 0) 42  20 (ticks 0) (AgilityBoon 77)
       totem "Mana Tide Totem" 240 (secTicks 300.0) 40 20 (secTicks 2.0) (ManaFraction 400)
       totem "Healing Stream Totem" 100 (ticks 0) 20  20 (secTicks 2.0) (Heals 44)
-      totem "Mana Spring Totem" 100 (ticks 0) 26  20 (secTicks 2.0) (RestoresMana 12) ]
+      totem "Mana Spring Totem" 100 (ticks 0) 26  20 (secTicks 2.0) (RestoresMana 12)
+      // The water-slot cleaners. They compete with Mana Spring for the slot, which
+      // is the era's own trade, and they are worthless in this content for the
+      // same measured reason the spells are: no Scarlet mob poisons or infects the
+      // party. Kept because the operator listed them and because the tick loop's
+      // `Cleanses` pulse is one line once the vocabulary exists.
+      totem "Cure Poison Totem" 60 (ticks 0) 22  20 (secTicks 2.0) (Cleanses Poison)
+      totem "Cleansing Totem" 60 (ticks 0) 34  20 (secTicks 2.0) (Cleanses Disease) ]
     |> List.filter (fun (requirement, _) -> level >= requirement)
     |> List.map snd
 

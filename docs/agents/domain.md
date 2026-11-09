@@ -1051,9 +1051,18 @@ Renew. Per-wing aura census over whole fights (admin-ticks per case, 4 seeds):
 
 The party carries **no poison, disease or curse at all** — the hostile DoTs land on the
 hostile side because they are the Warlock's. So `Purify`, `Cure Poison`, `Cure Disease`,
-`Remove Curse` and `Abolish Disease` are era-correct data with no target in the current
-content, and they say so in their doc comments. They are carried anyway because a
-cleaner is cheaper to already have than to add the day a mob afflicts somebody.
+`Remove Curse`, `Abolish Poison` and `Abolish Disease` are era-correct data with no target
+in the current content, and they say so in their doc comments. They are carried anyway
+because a cleaner is cheaper to already have than to add the day a mob afflicts somebody,
+and because the Shaman's totems need the same vocabulary.
+
+**The totems ride the same mechanism.** `TotemPulse.Cleanses school` (`Domain.fs:905`)
+reaches the water slot, so a Cure Poison Totem or a Cleansing Totem is a pulse that takes
+harmful auras of one school off the party in reach every two seconds (`SimTick.fs`,
+`advanceTotems`). Helpful auras are never stripped — a totem that removed its own party's
+buffs is not a thing the game has. Both sit *after* Mana Spring in the kit, so the water
+slot still goes to the standing trickle in ordinary play and the cleaners are the reason
+the slot exists only when a body is actually poisoned.
 
 Measured: **52 dispels over four library seeds** (49 in armory), library mean clear
 **8 470 → 8 311 ticks (−1.9%)**, armory 7 697 → 7 685 (−0.2%), graveyard unchanged (nothing

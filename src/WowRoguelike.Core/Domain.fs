@@ -915,6 +915,10 @@ type TotemPulse =
   /// Agility for as long as the totem stands (Grace of Air). Agility is crit and
   /// dodge in this stat model and nothing else, so it arrives as basis points of
   /// each.
+  /// A cleaner on a clock (Cure Poison, Cleansing): every pulse takes auras of
+  /// this school off the party members in reach. Harmful ones only, because a
+  /// totem that strips its own party's buffs is not a thing the game has.
+  | Cleanses of school: DispelType
   | AgilityBoon of amount: int
 
 /// Which totem slot a pulse occupies. A Shaman drops one totem per slot and a
@@ -928,7 +932,8 @@ module TotemSlot =
     | AgilityBoon _ -> 1 (* air *)
     | Heals _
     | RestoresMana _
-    | ManaFraction _ -> 2 (* water *)
+    | ManaFraction _
+    | Cleanses _ -> 2 (* water *)
 
 /// A Shaman's totem: what it gives, how often, and how far. A totem is an
 /// ordinary Entity — it has health, a tile and a lifetime — and this is the only
