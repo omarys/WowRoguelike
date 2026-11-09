@@ -1954,6 +1954,53 @@ let ``Charge is refused in combat while Intercept is not`` () =
   Assert.True(Pos.chebyshev (movedTo intercepted) { X = 6; Y = 1 } <= 1, "Intercept should close the gap in combat")
 
 [<Fact>]
+let ``anything that stuns is an interrupt too`` () =
+  // The engine already cancels a cast when a Stun, a Sleep or a Polymorph lands, so
+  // a Gouge or a Shield Bash is a kick written as control. Reading only the
+  // `Interrupt` effect meant the party spent those buttons on the nearest body
+  // while a Chaplain healed through them.
+  let slow = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
+
+  let control name ability =
+    { Content.hero 1 name Dps 1000 1000 slow 50000 (AbilityDef.kitAt 24 [ ability ]) { X = 2; Y = 1 } with
+        Target = Some(EntityId 100) }
+
+  let caster =
+    { Content.mob 100 "Caster" CreatureType.Humanoid 21 2000 0 (Some slow) [] None { X = 3; Y = 1 } with
+        Engaged = true
+        Target = Some(EntityId 1)
+        Casting =
+          Some
+            { Ability = Content.lightningBolt
+              Target = EntityId 1
+              Remaining = ticks 20
+              Pushes = 0 } }
+
+  let world =
+    { Tick = ticks 100
+      RestTicks = ticks 0
+      Grid = Grid.create 10 5
+      Entities = [ control "Rogue" Content.gouge; caster ]
+      Pending = []
+      Rng = Rng.streamsOf 1UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let onCaster =
+    PartyAi.decide world
+    |> List.filter (fun c ->
+      match c.Kind with
+      | UseAbility(_, _, target) -> target = EntityId 100
+      | _ -> false)
+
+  Assert.Single(onCaster) |> ignore
+
+  match onCaster.Head.Kind with
+  | UseAbility(_, name, _) -> Assert.Equal("Gouge", name)
+  | other -> failwithf "expected a Gouge at the caster, got %A" other
+
+[<Fact>]
 let ``one caster in mid-spell gets exactly one interrupter`` () =
   let slow = { Min = 1; Max = 1; Ticks = ticks 100000; Range = 1 }
 

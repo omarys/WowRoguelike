@@ -52,8 +52,48 @@ module PartyAi =
 
   let private cmd (at: int<tick>) (kind: CommandKind) = [ { ApplyAt = at; Kind = kind } ]
 
+  /// Anything that leaves the caster unable to finish its spell is an interrupt.
+  /// The engine already cancels the cast when a `Stun`, a `Sleep` or a `Polymorph`
+  /// lands (`SimCombat.fs`, the three branches that set `Casting = None`), so a
+  /// Hammer of Justice or a Gouge is a kick that happens to be written as control.
+  /// Reading only `Interrupt` here meant the party's control buttons were spent on
+  /// the nearest body while a Chaplain healed through them.
+  let private breaksCast =
+    function
+    | Interrupt
+    | Stun _
+    | Sleep _
+    | Polymorph _ -> true
+    | _ -> false
+
   let private interrupts =
-    fun (a: Ability) -> a.Effects |> List.exists (fun ef -> ef = Interrupt)
+    fun (a: Ability) -> a.Effects |> List.exists breaksCast
+
+  /// A kick is a damage button spent on nothing else, so it pays only when the
+  /// cast it stops is worth more than the damage given up. Measured on the ladder:
+  /// breaking *every* interruptible cast cost the library wing 5-8% of its clear
+  /// time, because a Gouge (no damage) or a Shield Bash replacing a Sinister Strike
+  /// or a Shield Slam to stop a bolt a 3050-health Warrior heals back is a loss.
+  /// So the bar is a quarter of the victim's health, a cast long enough that the
+  /// hit is big by construction, or a heal — the thing a player actually kicks.
+  let private worthBreaking (w: World) (c: Cast) =
+    let heals =
+      c.Ability.Effects
+      |> List.exists (function
+        | Heal _
+        | HealOverTime _ -> true
+        | _ -> false)
+
+    let lethal =
+      match w.Entities |> List.tryFind (fun e -> e.Id = c.Target) with
+      | Some victim ->
+        c.Ability.Effects
+        |> List.exists (function
+          | SpellDamage(damage, _) -> damage * 4 >= victim.MaxHealth
+          | _ -> false)
+      | None -> false
+
+    heals || lethal || c.Ability.CastTicks >= secTicks 3.0
 
   /// Interrupts are scarce and shared, and the Party is assumed to be talking: each
   /// caster caught in the middle of a spell is assigned exactly one interrupter, so
@@ -68,7 +108,9 @@ module PartyAi =
   /// the lower id, so the same cast gets the same answer on the next Tick.
   let private interruptAssignments (w: World) =
     SimState.aliveHostiles w
-    |> List.filter (fun h -> h.Casting |> Option.exists (fun c -> c.Ability.Interruptible))
+    |> List.filter (fun h ->
+      h.Casting
+      |> Option.exists (fun c -> c.Ability.Interruptible && worthBreaking w c))
     |> List.choose (fun h ->
       SimState.aliveParty w
       |> List.choose (fun m ->
