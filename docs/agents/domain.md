@@ -837,7 +837,7 @@ level-scaled axis **36/36 for the first time**, including the library cell that 
 2 of 2. That cell is not "fixed by the Rogue" in any proven sense — the whole party's
 numbers moved, and this is a one-seed run — but there is no failing cell left to debug.
 
-### Mage: the OctoWoW build, seven of nineteen, and the first attack-speed stat
+### Mage: the OctoWoW build, eight of nineteen, and the first attack-speed stat
 
 The operator's build (`?points=TAFOLISYZKAoB--FADD`, Arcane 40 / Fire 0 / Frost 11, every
 taken talent at maximum) landed four of nineteen: Improved Frostbolt 5/5 (half a second
@@ -847,12 +847,16 @@ Explosion, and on nothing else — this build takes no Fire talents), Improved C
 an `Effect`), and Presence of Mind as a kit row built from the same `nextSpell` helper as
 Nature's Swiftness: no talent record can hand over an ability the kit did not have.
 
-The remaining twelve are exactly the ones that would change the class: Arcane Potency, the
+The remaining eleven are exactly the ones that would change the class: Arcane Potency, the
 Improved Arcane Missiles line, the mana talents. That is not a porting oversight, it is §5(b) —
-none of them has a field to land in. **Arcane Power, Arcane Instability and Arcane Rupture
-came off that list**: the fifth needed the engine's first attack-speed stat, the sixth needed
-two fields that are *spell*-scoped, and the seventh needed the first effect that multiplies a
-*named* spell's hit and its price rather than the caster's.
+none of them has a field to land in. **Arcane Concentration** came off that list before this
+note was written and the tally went on saying six for it: the proc axis landed it in `7fc0694`
+(`Procs`, ten percent on spell hit behind an eight-second internal cooldown), and a "landed"
+column that was maintained by naming rows out loud dropped the one row that arrived by engine
+work rather than by a data edit. **Arcane Power, Arcane Instability and Arcane Rupture came off
+that list**: the fifth needed the engine's first attack-speed stat, the sixth needed two fields
+that are *spell*-scoped, and the seventh needed the first effect that multiplies a *named*
+spell's hit and its price rather than the caster's.
 
 #### Arcane Instability, and why a caster's swing is not a spell
 

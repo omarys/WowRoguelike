@@ -925,7 +925,7 @@ not measured. No ladder or `comps` cell seats them either, so nothing else needs
 |---|---|---|---|
 | Warrior | Prot 3/0/48 | **6 of 18** | all six data-only; 12 need axes |
 | Rogue | 17/34/0 | **6 of 18** | six data-only, plus two flat energy costs from the baseline changes |
-| Mage | Arcane 40/Frost 11 | **7 of 19** | seven data-only, incl. Presence of Mind as a kit row, **Arcane Power** (`CastHaste`, a 20 s window worth +1.34% at L33), **Arcane Instability** (`SpellDoneBp`/`SpellCritBp`, +4.3% mage damage) and **Arcane Rupture** (`Aura.Ruptured`/`Effect.Rupture`, the first effect that scales a *named* spell's hit and cost, worth ~7% of a bench clear); the other 12 need axes |
+| Mage | Arcane 40/Frost 11 | **8 of 19** | eight landed, incl. Presence of Mind as a kit row, **Arcane Concentration** (`Procs`, landed with the proc axis in `7fc0694` and uncounted here until now), **Arcane Power** (`CastHaste`, a 20 s window worth +1.34% at L33), **Arcane Instability** (`SpellDoneBp`/`SpellCritBp`, +4.3% mage damage) and **Arcane Rupture** (`Aura.Ruptured`/`Effect.Rupture`, the first effect that scales a *named* spell's hit and cost, worth ~7% of a bench clear); the other 11 need axes |
 | Priest | Disc 11/Holy 40 | **8 of 16** | best hit rate of the port; two talents had to be *deleted* |
 | Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
 | Paladin | 40/0/11 | **8 of 17** | six lines and one deletion; Illumination is a **nerf** (10000 → 6000) and Divine Favor's cooldown row is gone; `comps 6 --level 60` 36/36 clean, bench 30/30 with the snapshot unmoved. **Blessing of Kings 1/1** is the first talent in the port that hands the *party* a passive (`Talents.PartyBuffs`) and the first passive that multiplies instead of adding, so `buffed` grew a percentage column that lands after the flats — **−5.4% clear time (library), −2.5% (armory)** at 60 on a twelve-seed A/B, priced before it was built. Its eight remaining talents need eight separate axes (cast-time field, reactive heal, reset proc, armour→healing, silence resistance, either-target, blessing effectiveness, target armour), so the class is now expensive per point |
@@ -1056,6 +1056,12 @@ the talents each build actually takes, not over the tree:
 **62 of 177 talent spends are data edits; 107 need a model change.** That ratio is the
 headline: this is not a content port, it is a vocabulary change with a content port
 attached.
+
+**Read this table as a dated snapshot, not a live count.** It is the per-class breakdown from
+the research pass that wrote §5 of each note, and it has drifted since — the Mage row's 4 of 19
+is where that pass left the class, before the attack-speed stat, the proc axis, the spell-scoped
+fields and `Aura.Ruptured` each took a row off it (eight now). The maintained number is the
+per-class table above; re-derive this one wholesale if it is ever needed for a decision.
 
 ### The four blockers that decide the order
 

@@ -5832,6 +5832,62 @@ let ``no ally steps aside onto a tile a body already holds`` () =
   for (who, p) in aside do
     Assert.False(held p, sprintf "%A stepped aside onto %A, where a body already stands" who p)
 
+/// Two movers, one free tile, the same Tick. Neither body's tile reads as `held` —
+/// both are mid-step — so nothing in the old rule stopped both landings, and the
+/// generated-dungeon invariant found it in `dungeon 2` at tick 20 with a Druid of the
+/// Fang and a Deviate Ravager on `{X=58;Y=5}`. The rule is the one the corridor
+/// already used: the tile takes one body, the earlier in the world's order, and a
+/// later claimant waits the Tick exactly as it would for a body that had stopped.
+/// Deterministic on purpose — the world's order is the tiebreak, so replay holds.
+[<Fact>]
+let ``two movers landing on one tile do not share it`` () =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  // 4,4 -> 5,4 and 6,4 -> 5,4, both one Tick from landing.
+  let first =
+    { Content.hero 1 "Warrior" Tank 1000 1000 tap 50000 [] { X = 4; Y = 4 } with
+        Destination = Some { X = 5; Y = 4 }
+        MoveTicksLeft = ticks 1
+        MoveTicksTotal = ticks 2 }
+
+  let second =
+    { Content.hero 2 "Mage" Dps 1000 1000 tap 10000 [] { X = 6; Y = 4 } with
+        Destination = Some { X = 5; Y = 4 }
+        MoveTicksLeft = ticks 1
+        MoveTicksTotal = ticks 2 }
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid =
+        Grid.ofRows
+          [ "#########"
+            "#.......#"
+            "#.......#"
+            "#.......#"
+            "#.......#"
+            "#.......#"
+            "#########" ]
+      Entities = [ first; second ]
+      Pending = []
+      Rng = Rng.streamsOf 5UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let landed = SimTick.advanceMovement w
+
+  Assert.Equal<Pos>({ X = 5; Y = 4 }, (entBy 1 landed).Pos)
+  Assert.Equal<Pos>({ X = 6; Y = 4 }, (entBy 2 landed).Pos)
+
+  // The waiter keeps its intent: it is not a cancellation, it is a Tick of waiting.
+  Assert.Equal<Pos option>(Some { X = 5; Y = 4 }, (entBy 2 landed).Destination)
+
+  let tiles =
+    landed.Entities |> List.filter SimState.alive |> List.countBy (fun e -> e.Pos)
+
+  Assert.DoesNotContain(tiles, fun (_, n) -> n > 1)
+
 /// A one-wide tube with the Tank at the sealed end and four allies stacked behind
 /// it. Only the ally at the very back has floor to step onto, and it is five tiles
 /// from the Tank — further than the aside used to look. Seed 1 graveyard level 60
