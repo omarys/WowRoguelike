@@ -321,7 +321,9 @@ off. So the `SpellDamage` branch calls `procDamage` for a multiplier and applies
 the multiplier away everywhere else (`SimCombat.fs:391`). The mana comes off
 `Entity.BaseResource` — the pool the payload prices, before Intellect — and it is spent rather
 than gated on, so a mage on an empty bar still erupts and pays what is left
-(`SimCombat.fs:327-340`), logged as "`%s: %s erupts, +%d%% damage for %d mana`".
+(`SimCombat.fs:327-340`), logged as "`%s: %s erupts, +%d%% damage for %d mana`". Two eruptions
+on one hit multiply rather than the last one winning, because each is independently "this hit is
+bigger" (`SimCombat.fs:382-383`).
 
 **Why a proc and not a field.** `DamageDoneBp` would have carried a flat damage half for free
 and quietly handed the mage's staff the same percentage, because **a caster still swings**; a
@@ -332,11 +334,12 @@ returns nothing, `Talents.damageBp` (`Domain.fs:1654`) is the only talent-wide d
 left in that branch, and `MagicSchool` is what a school-wide bonus would be built on if a talent
 that needs one is ported.
 
-**What it can and cannot be measured by.** Not an A/B at 25%: a shipped proc draws one more
-random number per landed damaging spell, so every downstream roll moves and all 30 seeds differ
-— the only clean arm is a forced 100%, which draws nothing (`docs/agents/domain.md`, the Temporal
-Convergence finding). What is readable is the eruption itself: it writes its own line, so the
-share is counted rather than inferred, with `hitLine`'s "critically hits" (`SimCombat.fs:462`)
-beside it. The arithmetic is pinned by `an arcane eruption makes that hit a quarter bigger and
-bills base mana`: same seed, chance 0 against 10000, Arcane Missiles lands 25% harder, the bill
-differs by `BaseResource / 50`, and a Frostbolt of the same mage logs no `erupts` at all.
+**What it measures as.** The bench at the shipped 25%: all 30 seeds still clear, median ticks
+894 → 896.5, mean 873.2 → 869.9, mean party HP 97.7% → 97.1%, `bench-30.txt` regenerated with all
+30 lines moving. A median up with the mean down is the stream re-rolling rather than a buff — the
+mage now draws a die where nothing drew one, so every seed fights a different fight — which is why
+the axes are pinned by ratio tests and not by totals: `an arcane eruption makes that hit a quarter
+bigger and bills base mana` casts the same seed with the proc at 0 and at 10000 bp, lands Arcane
+Missiles 25% harder, bills exactly `BaseResource / 50` more, and gets no `erupts` at all from a
+Frostbolt. The eruption is countable in the log directly (`Mage: Arcane Instability erupts, +25%
+damage for 12 mana`), with `hitLine`'s "critically hits" (`SimCombat.fs:462`) beside it.
