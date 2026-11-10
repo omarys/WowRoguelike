@@ -4,8 +4,8 @@ Written at commit `aba0722`, with that session's work on top as one WIP commit
 `40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**275 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
-Release`, 285 total), Release build clean — re-verified on the tree that carries the
+**278 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
+Release`, 288 total), Release build clean — re-verified on the tree that carries the
 era pushback model (`SimCombat.fs:462`), the Hunter's last four increments (`a3f6d10`,
 the snare's null result), the Paladin's Blessing of Kings, the mob ability rotation
 fix (`2a65a63`), the stun-is-an-interrupt rule (`81e17b1`), the dispel axis, Grounding
@@ -14,8 +14,11 @@ Totem (`33a8fb5`), the Hunter's second build's Beast Mastery points (`HealthBp`,
 (`SpellTalent.ElementShareBp`, `Aura.Hastened` + `AutoAttack.cadence` +
 `ProcResult.Gain`), ranged attack power + Coordinated Assault (`Talents.RangedApField`),
 the Mage's Arcane Power (`Effect.CastHaste` → `Aura.Casting` → `SimCombat.castClock`,
-the engine's first casting-speed stat), Arcane Instability (`Talents.SpellDoneBp` /
-`SpellCritBp`, the first spell-scoped fields, and `SimCombat.hitLine` — the log now marks a
+the engine's first casting-speed stat), Arcane Instability (`ProcEvent.OnSpellSchoolHit` +
+`ProcResult.AmplifyHit`, with a `MagicSchool` on `Effect.SpellDamage` — a landed Arcane hit
+erupts 25% of the time for +25% damage at 2% of base mana, the first talent priced off the
+hit's school and the first that makes the hit it rode in on bigger; the two flat per-spell
+`Talents` fields it first carried are gone, and `SimCombat.hitLine` — the log now marks a
 crit, which it never did) and Arcane Rupture (`Aura.Ruptured` + `Effect.Rupture` read at
 `SimCombat`'s cost and damage sites, the first payload that scales a *named* spell, plus
 the `Aura.disposition` fix that stopped the party dispelling its own Mage's windows and
@@ -927,7 +930,7 @@ not measured. No ladder or `comps` cell seats them either, so nothing else needs
 |---|---|---|---|
 | Warrior | Prot 3/0/48 | **6 of 18** | all six data-only; 12 need axes |
 | Rogue | 17/34/0 | **6 of 18** | six data-only, plus two flat energy costs from the baseline changes |
-| Mage | Arcane 40/Frost 11 | **9 of 19** | nine landed, incl. Presence of Mind as a kit row, **Arcane Concentration** (`Procs`, landed with the proc axis in `7fc0694` and uncounted here until now), **Arcane Power** (`CastHaste`, a 20 s window worth +1.34% at L33), **Arcane Instability** (`SpellDoneBp`/`SpellCritBp`, +4.3% mage damage — **and wrong: the server reworked it into a proc, which needs a spell school and a hit-modifying proc the model lacks; `domain.md` §8**) , **Arcane Rupture** (`Aura.Ruptured`/`Effect.Rupture`, the first effect that scales a *named* spell's hit and cost, worth ~7% of a bench clear) and **Temporal Convergence** (`ProcEvent.OnSpellHitOf`, the first proc that names its spell, resetting Arcane Rupture off Arcane Missiles - measured inert on the bench, see below); the other 10 need axes |
+| Mage | Arcane 40/Frost 11 | **9 of 19** | nine landed, incl. Presence of Mind as a kit row, **Arcane Concentration** (`Procs`, landed with the proc axis in `7fc0694` and uncounted here until now), **Arcane Power** (`CastHaste`, a 20 s window worth +1.34% at L33), **Arcane Instability** (`ProcEvent.OnSpellSchoolHit Arcane` + `ProcResult.AmplifyHit`, a landed Arcane hit erupting 25% of the time for +25% damage at 2% of base mana, no ICD — school-scoped, not the flat multiplier it first landed as; `domain.md` §8), **Arcane Rupture** (`Aura.Ruptured`/`Effect.Rupture`, the first effect that scales a *named* spell's hit and cost, worth ~7% of a bench clear) and **Temporal Convergence** (`ProcEvent.OnSpellHitOf`, the first proc that names its spell, resetting Arcane Rupture off Arcane Missiles - measured inert on the bench, see below); the other 10 need axes |
 | Priest | Disc 11/Holy 40 | **8 of 16** | best hit rate of the port; two talents had to be *deleted* |
 | Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
 | Paladin | 40/0/11 | **8 of 17** | six lines and one deletion; Illumination is a **nerf** (10000 → 6000) and Divine Favor's cooldown row is gone; `comps 6 --level 60` 36/36 clean, bench 30/30 with the snapshot unmoved. **Blessing of Kings 1/1** is the first talent in the port that hands the *party* a passive (`Talents.PartyBuffs`) and the first passive that multiplies instead of adding, so `buffed` grew a percentage column that lands after the flats — **−5.4% clear time (library), −2.5% (armory)** at 60 on a twelve-seed A/B, priced before it was built. Its eight remaining talents need eight separate axes (cast-time field, reactive heal, reset proc, armour→healing, silence resistance, either-target, blessing effectiveness, target armour), so the class is now expensive per point |
@@ -1061,9 +1064,10 @@ attached.
 
 **Read this table as a dated snapshot, not a live count.** It is the per-class breakdown from
 the research pass that wrote §5 of each note, and it has drifted since — the Mage row's 4 of 19
-is where that pass left the class, before the attack-speed stat, the proc axis, the spell-scoped
-fields and `Aura.Ruptured` each took a row off it (eight now). The maintained number is the
-per-class table above; re-derive this one wholesale if it is ever needed for a decision.
+is where that pass left the class, before the attack-speed stat, the proc axis, a school on
+`Effect.SpellDamage` and `Aura.Ruptured` each took a row off it (eight now). The maintained
+number is the per-class table above; re-derive this one wholesale if it is ever needed for a
+decision.
 
 ### The four blockers that decide the order
 
