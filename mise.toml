@@ -88,7 +88,11 @@ run = "dotnet run --project src/WowRoguelike.Harness -c Release -- attrib"
 
 [tasks.hooks]
 description = "Install the git hooks (run once after cloning)"
-run = "pre-commit install --install-hooks && pre-commit install --hook-type pre-push"
+# `mise trust` first: an untrusted config is not applied, so `dotnet` on PATH
+# falls back to the system SDK — .NET 8 here — and every hook that touches a
+# `.slnx` dies with `MSB4068: The element <Solution> is unrecognized`. Trusting
+# the file is what makes `dotnet = "10"` above take effect.
+run = "mise trust . && pre-commit install --install-hooks && pre-commit install --hook-type pre-push"
 
 [tasks.hooks-run]
 description = "Run every hook against the whole tree"

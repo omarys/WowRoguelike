@@ -1,5 +1,13 @@
 # Install with: mise run hooks
 #
+# Every dotnet hook runs through `mise exec --` so it uses the SDK `mise.toml`
+# pins rather than whatever `dotnet` the caller's PATH resolves to. That is not
+# belt-and-braces: this repo's project files are `.slnx`, which needs SDK 9.0.200
+# or newer, and a machine whose system `dotnet` is .NET 8 fails the build hook
+# with `MSB4068: The element <Solution> is unrecognized`. mise also ignores a
+# config file it has not been told to trust — so `mise trust` once per clone,
+# and the failure then reads "config is not trusted" instead of an SDK error.
+#
 # Two speeds, deliberately. Building is ~6s and catches compile errors and new
 # warnings on every commit; the test suite is ~4.5min and runs on push. Putting
 # the suite in pre-commit would make every commit slow enough to reach for
@@ -28,7 +36,7 @@ repos:
     hooks:
       - id: dotnet-build
         name: dotnet build (Release, zero warnings)
-        entry: dotnet build WowRoguelike.slnx -c Release -v q --nologo
+        entry: mise exec -- dotnet build WowRoguelike.slnx -c Release -v q --nologo
         language: system
         pass_filenames: false
         files: \.(fs|fsproj|slnx)$
@@ -49,7 +57,7 @@ repos:
       # because it is slow, and on pre-push because a broken push is worse.
       - id: dotnet-test
         name: dotnet test
-        entry: dotnet test tests/WowRoguelike.Tests/WowRoguelike.Tests.fsproj --nologo -v q
+        entry: mise exec -- dotnet test tests/WowRoguelike.Tests/WowRoguelike.Tests.fsproj --nologo -v q
         language: system
         pass_filenames: false
         stages: [pre-push]
@@ -57,7 +65,7 @@ repos:
 
       - id: sim-runs
         name: sim runs (120 seeds still resolve)
-        entry: dotnet src/WowRoguelike.Harness/bin/Release/net10.0/sim.dll runs 120 4000
+        entry: mise exec -- dotnet src/WowRoguelike.Harness/bin/Release/net10.0/sim.dll runs 120 4000
         language: system
         pass_filenames: false
         stages: [pre-push]
