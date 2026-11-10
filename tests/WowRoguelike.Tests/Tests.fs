@@ -577,6 +577,73 @@ let ``resolving an ability spends its resource`` () =
   let after = (w.Entities |> List.find (fun e -> e.Id = EntityId 1)).Resource
   Assert.Equal<int>(before - Content.heroicStrike.ResourceCost, after)
 
+/// Arcane Rupture is one aura carrying two numbers on purpose: "increases the damage
+/// **and** mana cost of your Arcane Missiles by 20%". Splitting them would let a
+/// future edit buy the damage and keep the cheap cast, which is not the trade.
+[<Fact>]
+let ``the rupture window pays for its extra damage`` () =
+  let baseWorld = arena 0 0 { X = 7; Y = 5 }
+
+  let ruptured =
+    baseWorld
+    |> SimState.mapEntity (EntityId 1) (fun e ->
+      { e with Auras = Aura.Ruptured(secTicks 8.0, 2000) :: e.Auras })
+
+  let before = (baseWorld.Entities |> List.find (fun e -> e.Id = EntityId 1)).Resource
+
+  let plain =
+    SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.arcaneMissiles baseWorld
+
+  let up =
+    SimCombat.resolveAbility (EntityId 1) (EntityId 100) Content.arcaneMissiles ruptured
+
+  let spent (w: World) =
+    before - (w.Entities |> List.find (fun e -> e.Id = EntityId 1)).Resource
+
+  Assert.Equal<int>(Content.arcaneMissiles.ResourceCost, spent plain)
+  Assert.Equal<int>(Content.arcaneMissiles.ResourceCost * 12 / 10, spent up)
+
+[<Fact>]
+let ``the rupture window hits harder`` () =
+  let mage = (Content.partyOf [ "Mage" ] 60).[0]
+
+  let dummy =
+    { Content.mob 100 "Dummy" CreatureType.Humanoid 60 400000 400000 None [] None { X = 6; Y = 5 } with
+        Engaged = true
+        Target = Some mage.Id }
+
+  let baseWorld =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 12 10
+      Entities = [ { mage with Pos = { X = 5; Y = 5 } }; dummy ]
+      Pending = []
+      Rng = Rng.streamsOf 11UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let hit (w: World) =
+    let health (w: World) =
+      (w.Entities |> List.find (fun e -> e.Id = EntityId 100)).Health
+
+    let after = SimCombat.resolveAbility mage.Id (EntityId 100) Content.arcaneMissiles w
+    health w - health after
+
+  // Same seed: the roll and the jitter are identical, so the two hits differ only by
+  // the window's multiplier.
+  let plainHit = hit baseWorld
+
+  let upHit =
+    hit (
+      baseWorld
+      |> SimState.mapEntity mage.Id (fun e ->
+        { e with Auras = Aura.Ruptured(secTicks 8.0, 2000) :: e.Auras })
+    )
+
+  Assert.True(plainHit > 0, sprintf "a missile should hit at all, got %d" plainHit)
+  Assert.Equal<int>(plainHit * 12 / 10, upHit)
+
 /// Resource is spent on resolution, not on the attempt, so an interrupted cast
 /// costs nothing.
 [<Fact>]
@@ -2572,11 +2639,14 @@ let ``a paladin heals a wounded tank`` () =
 /// read something, since an empty ability table would sum just as well.
 [<Fact>]
 let ``per-ability attribution adds up to the per-entity totals`` () =
-  let mutable w = Content.gully 4UL
+  let mutable w = Content.gully 1UL
 
   // A whole party needs no healing — out-of-combat regeneration refills it in five
   // seconds — so a healthy run logs only mobs healing to zero and the healing half of
-  // this split would have nothing to read. Half a Tank guarantees the healer works.
+  // this split would have nothing to read. Half a Tank is the pressure that makes the
+  // healer work, but it is not sufficient on its own: this seed was 4 until the Mage
+  // gained a window row and the party started clearing the wing with the Tank still
+  // whole, which logged no heal at all. Seed 1 keeps the Tank in trouble.
   w <-
     { w with
         Entities =
@@ -2936,17 +3006,17 @@ let ``a damage talent raises a weapon strike and a nuke alike`` () =
       else
         0
 
+    // The **first** landing hit, not a fight's total. Two whole runs diverged the
+    // moment the mage gained a window row to press — different kill order, different
+    // rolls — and the sums stopped being comparable at all: a 3% gap the wrong way
+    // read as "the talent lowered damage". A single hit off the same seed differs
+    // only by the multiplier under test.
     let mutable dealt = 0
 
-    // Twenty seconds: the mage's first nuke lands well after the rogue's first
-    // Backstab, and the comparison is worthless if one of them never fires. It is
-    // a minute now, not twenty seconds, because the sums are compared whole: one
-    // 50% spike inside the window once landed the plain and talented runs on the
-    // same total to the point (1540 against 1540, 280+280+420+280+280 against five
-    // 308s), which reads as "the talent did nothing". More rolls, less coincidence.
     for _ in 1..1200 do
-      w <- SimTick.step (Bench.autoPilot w) w
-      dealt <- dealt + (w.Log |> List.sumBy damageIn)
+      if dealt = 0 then
+        w <- SimTick.step (Bench.autoPilot w) w
+        dealt <- w.Log |> List.sumBy damageIn
 
     dealt
 
@@ -2958,14 +3028,13 @@ let ``a damage talent raises a weapon strike and a nuke alike`` () =
 
     Assert.True(plain > 0, sprintf "expected %s to land a %s at all, dealt %d" hero.Name ability plain)
 
+    // Not exactly 10%: the talent scales the swing, and armour and the attack-power
+    // bonus on top of it answer to their own arithmetic. Measured, a 10% Backstab
+    // arrives as 270 -> 284. What this pins is that the field reaches a sword and a
+    // spell alike; how much survives mitigation is the talent tests' business.
     Assert.True(
       boosted > plain,
-      sprintf
-        "a 10%% damage talent should raise %s's %s: %d vs %d"
-        hero.Name
-        ability
-        boosted
-        plain
+      sprintf "a 10%% damage talent should raise %s's %s: %d -> %d" hero.Name ability plain boosted
     )
 
 /// The Druid's two changes: the Nature's Swiftness button, which the class was
@@ -5115,13 +5184,18 @@ let ``the mage spends mana for throughput and a low pool for efficiency`` () =
           Pos = magePos })
 
   // `decide` answers with one order per member, and the mage's first tick of a
-  // fight spends Arcane Power, so the school under test is what it picks once that
-  // cooldown is out of the way. The cooldown is set by hand rather than the world
-  // being advanced: the question here is the rotation, not the opening tick.
+  // fight spends its window rows (Arcane Power, then Arcane Rupture), so the school
+  // under test is what it picks once those cooldowns are out of the way. The
+  // cooldowns are set by hand rather than the world being advanced: the question
+  // here is the rotation, not the opening tick.
   let schools (w: WowRoguelike.Core.World) =
     w
     |> SimState.mapEntity (EntityId 4) (fun e ->
-      { e with Cooldowns = e.Cooldowns |> Map.add "Arcane Power" (ticks 1800) })
+      { e with
+          Cooldowns =
+            e.Cooldowns
+            |> Map.add "Arcane Power" (ticks 1800)
+            |> Map.add "Arcane Rupture" (ticks 1800) })
     |> PartyAi.decide
     |> abilitiesFor (EntityId 4)
 

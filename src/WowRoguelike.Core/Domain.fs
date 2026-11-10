@@ -334,6 +334,10 @@ type Aura =
   /// *starts* while it stands; a cast already in progress keeps its clock, because
   /// a timer that is part-spent has already been paid for.
   | Casting of remaining: int<tick> * speedBp: int
+  /// Arcane Rupture: the caster's own Arcane Missiles hit — and cost — more. One
+  /// number, because the payload moves both by the same 20% ("increasing the damage
+  /// and mana cost of your Arcane Missiles spell by 20% for 8 sec", #51949).
+  | Ruptured of remaining: int<tick> * damageBp: int
 
 /// Every case of `Aura` is matched in exactly one place — here. Everywhere else
 /// asks this module a question, so adding an aura breaks compilation in this
@@ -437,6 +441,7 @@ module Aura =
     | Innervated(r, bp) when r > ticks 1 -> Some(Innervated(r - ticks 1, bp))
     | Hastened(r, bp) when r > ticks 1 -> Some(Hastened(r - ticks 1, bp))
     | Casting(r, bp) when r > ticks 1 -> Some(Casting(r - ticks 1, bp))
+    | Ruptured(r, bp) when r > ticks 1 -> Some(Ruptured(r - ticks 1, bp))
     | _ -> None
 
   /// The name a form is drawn and labelled with. Declared before `describe`
@@ -479,6 +484,7 @@ module Aura =
     | RecentlyCast r -> sprintf "recent(%d)" r
     | Hastened(r, bp) -> sprintf "haste(%d,+%d)" r bp
     | Casting(r, bp) -> sprintf "casting(%d,+%d)" r bp
+    | Ruptured(r, bp) -> sprintf "ruptured(%d,+%d)" r bp
     | Innervated(r, bp) -> sprintf "innervated(%d,x%d)" r bp
 
   /// The name a player sees, short enough to fit over a sprite.
@@ -496,6 +502,7 @@ module Aura =
     // Not "CASTING": `RecentlyCast` already wears that label, and the aura
     // invariant keys on it — a Mage holding both would read as one aura twice.
     | Casting _ -> "QUICKENED"
+    | Ruptured _ -> "RUPTURED"
     | Rejuvenation(_, _, source) -> source
     | Sundered _ -> "SUNDER"
     | Corrupted _ -> "CORRUPTION"
@@ -523,7 +530,14 @@ module Aura =
     | TotemBoon _
     | HealingWay _
     | Inspired _
-    | Empowered _ -> true
+    | Empowered _
+    // The party's own windows. A `Magic` aura that is not listed here reads as a
+    // debuff to `PartyAi`'s cleaner, so the Priest spends its globals dispelling its
+    // own Mage's Arcane Power and Arcane Rupture instead of healing — measured, a
+    // gully run logged no heal at all and two Regrowths for zero.
+    | Hastened _
+    | Casting _
+    | Ruptured _ -> true
     | _ -> false
 
   /// Which dispel takes this aura off. `Physical` answers "none of them" — see
@@ -550,7 +564,8 @@ module Aura =
     | Empowered _
     | Innervated _
     | Hastened _
-    | Casting _ -> Magic
+    | Casting _
+    | Ruptured _ -> Magic
     | DeadlyPoisoned _
     | Wounded _
     | Numbed _
@@ -588,6 +603,7 @@ module Aura =
     | Innervated(r, _)
     | Hastened(r, _)
     | Casting(r, _)
+    | Ruptured(r, _)
     | DeadlyPoisoned(r, _, _)
     | Wounded(r, _, _)
     | Numbed(r, _)
@@ -831,6 +847,7 @@ module Aura =
     | Crippled _ -> 21
     | Hastened _ -> 24
     | Casting _ -> 25
+    | Ruptured _ -> 26
 
   /// Does casting `newer` overwrite `older`?
   let replaces (older: Aura) (newer: Aura) =
@@ -913,6 +930,15 @@ module Aura =
     function
     | TotemBoon(_, _, _, d) -> d
     | _ -> 0
+
+  /// Percent Arcane Rupture is raising this character's Arcane Missiles by, in basis
+  /// points, or 0. The aura carries the number; the talent granted the ability, not
+  /// the figure, so a re-tuned talent moves the aura and nothing else.
+  let ruptureBp (auras: Aura list) =
+    auras
+    |> List.sumBy (function
+      | Ruptured(_, bp) -> bp
+      | _ -> 0)
 
   /// Healing Way stacks on a target, zero when the buff is not running.
   let healingWayStacks (auras: Aura list) =
@@ -1072,6 +1098,11 @@ type Effect =
   /// stands, and kept out of `Hastened` because the era's attack speed and casting
   /// speed are different stats.
   | CastHaste of duration: int<tick> * speedBp: int
+  /// A `duration`-long buff on the *caster* that raises its Arcane Missiles hit and
+  /// cost by `damageBp`: Arcane Rupture (#51949). Not an `Empowers` rider — the
+  /// payload gives it eight seconds, not one cast — and not `CastHaste`, because it
+  /// moves damage and mana rather than the cast.
+  | Rupture of duration: int<tick> * damageBp: int
   /// This ability's own crit chance, above the caster's (Improved Regrowth's +50%
   /// on Regrowth). A crit heal is worth half again as much, so this is a healing
   /// talent; it sits on the ability because the tree raises one spell, not the

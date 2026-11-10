@@ -1104,12 +1104,27 @@ module PartyAi =
       let isMultiShot (a: Ability) =
         a.Effects |> List.exists (function MultiShot _ -> true | _ -> false)
 
+      // A row that exists to open a window is not a damage spell, whatever hit it
+      // carries. `perCast` divides by `max 1 castTicks`, so a zero-cast ability's
+      // score is its damage times a thousand and it heads every ranking it appears
+      // in — measured, the Mage led with Arcane Rupture at L36 and never channelled
+      // the missile the window was for, and at L42 the AI stop-start was the row
+      // itself. The window is pressed by its own rule below; the rotation keeps the
+      // spells it buffs.
+      let isWindow (a: Ability) =
+        a.Effects
+        |> List.exists (function
+          | Rupture _
+          | CastHaste _ -> true
+          | _ -> false)
+
       let shots =
         e.Abilities
         |> List.filter (fun a ->
           a.TargetKind = Foe
           && a.Range > 1
           && not (interrupts a)
+          && not (isWindow a)
           && damageOf a > 0
           && (crowded || not (isMultiShot a)))
         |> List.filter (fun a -> canUse e a.Name)
@@ -1144,6 +1159,18 @@ module PartyAi =
         (if lowMana then paid |> List.sortByDescending perMana else paid |> List.sortByDescending perCast)
         |> List.tryHead
         |> Option.orElse (free |> List.sortByDescending damageOf |> List.tryHead)
+
+      // The spell the rotation casts when mana is not the binding constraint — the
+      // one an "Arcane Missiles" window is actually worth pressing for. `shot` is
+      // the wrong gate: below 15% mana it flips to a per-mana ordering, and on those
+      // ticks pressing the window is precisely what stops the channel it is for.
+      // Measured with `shot` as the gate: 87 presses a fight at library and not one
+      // missile to ride them.
+      let channels =
+        paid
+        |> List.sortByDescending perCast
+        |> List.tryHead
+        |> Option.exists (fun b -> b.Name = "Arcane Missiles")
 
       // A buff that names its spell is a reason to cast that spell. Nightfall
       // makes the next Shadow Bolt instant and free of cast time, and the ranking
@@ -1180,9 +1207,29 @@ module PartyAi =
           && e.Casting.IsNone
           && not (e.Auras |> List.exists (function Casting _ -> true | _ -> false)))
 
+      // Arcane Rupture: eight seconds of harder — and dearer — Arcane Missiles on a 15
+      // second cooldown, so it is up for roughly half of a fight and the aura is the
+      // only thing worth checking. Pressed before the rotation for the same reason as
+      // Arcane Power: the buff has to be standing when the channel starts.
+      let rupture =
+        e.Abilities
+        |> List.filter (fun a ->
+          a.Effects |> List.exists (function Rupture _ -> true | _ -> false))
+        |> List.tryFind (fun a ->
+          canUse e a.Name
+          && e.Casting.IsNone
+          && SimState.canReach a.Range e f w
+          && not (e.Auras |> List.exists (function Ruptured _ -> true | _ -> false))
+          // Only when the rotation is picking the spell this row rides. The kit
+          // carries Arcane Missiles at every level, but the ranking picks Fireball
+          // while Fireball is the better spell per cast — at L36 it does — and a
+          // press there buys nothing but 150 mana and a tick.
+          && channels)
+
       match counterspell, casting with
       | Some a, Some c when canUse e a.Name -> cmd at (UseAbility(e.Id, a.Name, c.Id))
       | _ when quicken.IsSome -> cmd at (UseAbility(e.Id, quicken.Value.Name, e.Id))
+      | _ when rupture.IsSome -> cmd at (UseAbility(e.Id, rupture.Value.Name, f.Id))
       | _ when worthStinging -> cmd at (UseAbility(e.Id, sting.Value.Name, f.Id))
       | _ when scopedShot |> Option.exists (fun a -> SimState.canReach a.Range e f w) ->
         cmd at (UseAbility(e.Id, scopedShot.Value.Name, f.Id))

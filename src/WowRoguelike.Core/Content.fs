@@ -3993,6 +3993,31 @@ module Content =
       TargetKind = Self
       Effects = [ CastHaste(secTicks 20.0, 3000) ] }
 
+  /// Arcane Rupture 1/1: level 20, 15 sec cooldown, talent-granted. "dealing 101 to
+  /// 114 Arcane damage and increasing the damage and mana cost of your Arcane
+  /// Missiles spell by 20% for 8 sec" (#51949).
+  ///
+  /// The buff is on the caster, not the target, even though the ability reads "rupture
+  /// the target": what it raises is the mage's own Arcane Missiles, so a second mage
+  /// in the party gets nothing. Eight seconds is about one channel and a half at
+  /// rank 5, which is what makes the 15-second cooldown a real rotation decision
+  /// rather than a button that happens to be off cooldown.
+  ///
+  /// shortcut: no mana cost. `.pi/research/octowow/mage.md` §1 records the row as
+  /// "level 20, 15 sec cd, no cost stated", so any fee here would be a guess; the
+  /// 15-second cooldown is what prices the press. Same treatment as `arcanePower`'s
+  /// row — where the page is silent the slot stays zero and the gap is named.
+  let private arcaneRupture =
+    { Name = "Arcane Rupture"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 15.0
+      ResourceCost = 0
+      Stance = None
+      Interruptible = false
+      Range = 8
+      TargetKind = Foe
+      Effects = [ SpellDamage(101, 114); Rupture(secTicks 8.0, 2000) ] }
+
   /// A Druid form. Entering one costs mana; leaving one costs nothing, which is why
   /// `humanForm` is built separately below rather than through this helper. A single
   /// `Ability` rather than an `AbilityDef`, because a form has no ranks — it does not
@@ -4417,7 +4442,7 @@ module Content =
             blizzardRanks
             polymorphRanks
             counterspellRanks ])
-      @ [ presenceOfMind; arcanePower ]
+      @ [ presenceOfMind; arcanePower; arcaneRupture ]
 
     heroStats
       buffs

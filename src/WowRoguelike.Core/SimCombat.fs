@@ -612,7 +612,17 @@ module SimCombat =
       let waived = scoped && (empowered || named) && (held.Instant || held.FreeMana || held.SureCrit)
       let freeMana = scoped && held.FreeMana && ability.ResourceCost > 0
       let empower = if empowered && scoped then held else Empower.none
-      let cost = if freeMana then 0 else ability.ResourceCost
+      // Arcane Rupture raises the cost as well as the hit ("increasing the damage and
+      // mana cost of your Arcane Missiles"), so it is read here rather than at the
+      // damage site alone: a free-ish buff that also cost more was the whole trade.
+      let ruptureBp =
+        if ability.Name = "Arcane Missiles" then Aura.ruptureBp actor.Auras else 0
+
+      let listCost =
+        if ruptureBp <= 0 then ability.ResourceCost
+        else ability.ResourceCost * (10000 + ruptureBp) / 10000
+
+      let cost = if freeMana then 0 else listCost
 
       let w0 =
         mapEntity
@@ -738,6 +748,14 @@ module SimCombat =
           // `spellBp`, not `damageBp`: Arcane Instability raises spell damage and
           // must not raise the same caster's staff swing.
           let rolled = rolled * Talents.spellBp ability.Name actor.Talents / 10000
+
+          // Arcane Rupture's share, on the same spell only: the aura names one spell
+          // and the talent that grants it grants the ability, not the number.
+          let rolled =
+            if ability.Name = "Arcane Missiles" then
+              rolled * (10000 + Aura.ruptureBp actor.Auras) / 10000
+            else
+              rolled
           let amount, w = spellHit ability.Name actor targetId rolled w
 
           let amount, crit, w =
@@ -917,6 +935,14 @@ module SimCombat =
           |> mapEntity actorId (fun a ->
             { a with Auras = Aura.refresh (Casting(duration, speedBp)) a.Auras })
           |> logLine (sprintf "%s's casting quickens" actor.Name)
+
+        // Arcane Rupture: eight seconds in which the caster's own Arcane Missiles hit
+        // harder and cost more. One aura, because the payload moves both together.
+        | Rupture(duration, damageBp) ->
+          w
+          |> mapEntity actorId (fun a ->
+            { a with Auras = Aura.refresh (Ruptured(duration, damageBp)) a.Auras })
+          |> logLine (sprintf "%s ruptures the weave" actor.Name)
 
         // A per-ability crit chance was folded into the heal (or the strike) that
         // rolled it, so resolving it again would do nothing.

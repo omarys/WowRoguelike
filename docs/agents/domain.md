@@ -134,13 +134,16 @@ never recompiled commits a narrative the game does not play.
   fails with "You must install or update .NET".
 
 **`mise run runs` is a fingerprint.** Currently:
-`seeds=120 cleared=120 wiped=0 unresolved=0 median-ticks=870 min=778 max=1095`
+`seeds=120 cleared=120 wiped=0 unresolved=0 median-ticks=809 min=685 max=992`
 (`README.md` §How correctness is checked records 950/794/1080 from `72e15f9`; the
 +38 median was the walking fix in §8 and the pre-pull crowd control in §9 item 3
 both re-applying to the level-24 party, and it has since come **down** 114 ticks,
 because the between-pull drinking gate stops the followers shuffling: the party
 stands still while its casters drink instead of stepping aside to unseal a Tank
-that is not walking. Every seed still clears. `median-ticks=1331 min=1116 max=2248`
+that is not walking. The last measurement before §8's Arcane Rupture work read
+`median-ticks=811 min=756 max=1039`, not the 870 quoted here for months — the
+number had drifted on commits that did not re-measure it, which is the cost of a
+fingerprint nobody is forced to refresh. Every seed still clears. `median-ticks=1331 min=1116 max=2248`
 is the older still, from before the level-24 rebalance and the nine-class roster
 landed — this file predicted that shift, but no commit body records which change
 produced it. Re-measure whenever behaviour
@@ -692,6 +695,16 @@ corridor — there is no free neighbour to push to. `held` now includes bodies w
 `MoveTicksLeft > ticks 1`, which is exactly "will still be standing here when this tick
 ends". Suite 215/215, `bench-30.txt` regenerated.
 
+**The second half of the same race** was still in there, and only a property test over
+generated dungeons found it: two bodies that are *both* mid-step onto one tile are each
+legal against `held`, so both landed. `dungeon 2` at tick 20, a Druid of the Fang (id 7)
+and a Deviate Ravager (id 8) on `{X=58;Y=5}`, and `separateStacked` could only report it —
+there is no free neighbour to push to. `advanceMovement` now computes the landings before
+it walks the list: the earlier body in the world's own order takes the tile and a later
+claimant waits the tick, exactly as it would for a body that had stopped there. Nothing
+about the fix depends on randomness, so replay is unaffected. Both halves are one lesson:
+"free" is a question about the world *after* the tick, not before it.
+
 ### Composition ladder after the sight-first tank fix — measured
 
 `sim comps 3` on a pinned build (`/tmp/pin2`, Core sha `fe5101c2…`) walks four rounds of
@@ -824,7 +837,7 @@ level-scaled axis **36/36 for the first time**, including the library cell that 
 2 of 2. That cell is not "fixed by the Rogue" in any proven sense — the whole party's
 numbers moved, and this is a one-seed run — but there is no failing cell left to debug.
 
-### Mage: the OctoWoW build, six of nineteen, and the first attack-speed stat
+### Mage: the OctoWoW build, seven of nineteen, and the first attack-speed stat
 
 The operator's build (`?points=TAFOLISYZKAoB--FADD`, Arcane 40 / Fire 0 / Frost 11, every
 taken talent at maximum) landed four of nineteen: Improved Frostbolt 5/5 (half a second
@@ -834,11 +847,12 @@ Explosion, and on nothing else — this build takes no Fire talents), Improved C
 an `Effect`), and Presence of Mind as a kit row built from the same `nextSpell` helper as
 Nature's Swiftness: no talent record can hand over an ability the kit did not have.
 
-The remaining fifteen are exactly the ones that would change the class: Arcane Potency, the
+The remaining twelve are exactly the ones that would change the class: Arcane Potency, the
 Improved Arcane Missiles line, the mana talents. That is not a porting oversight, it is §5(b) —
-none of them has a field to land in. **Arcane Power and Arcane Instability came off that
-list**: the fifth needed the engine's first attack-speed stat, the sixth needed two fields
-that are *spell*-scoped.
+none of them has a field to land in. **Arcane Power, Arcane Instability and Arcane Rupture
+came off that list**: the fifth needed the engine's first attack-speed stat, the sixth needed
+two fields that are *spell*-scoped, and the seventh needed the first effect that multiplies a
+*named* spell's hit and its price rather than the caster's.
 
 #### Arcane Instability, and why a caster's swing is not a spell
 
@@ -914,6 +928,63 @@ Measured on a verified-current DLL: bench 30/30 clear with 18 seeds moved (all w
 both directions); `--level 60` **36/36 clean at six seeds**; level-scaled **32/36 at six
 seeds**, and the same single library cell fails at two seeds both before and after the
 port (median 9666 either way), so the port neither caused nor fixed that one.
+
+#### Arcane Rupture, and the first buff that prices what it buffs
+
+"Rupture the target, dealing 101 to 114 Arcane damage and increasing the damage and mana
+cost of your Arcane Missiles spell by 20% for 8 sec" (#51949): a level-20 talent-granted
+instant on a 15-second cooldown. `.pi/research/octowow/mage.md` records "no cost stated",
+so `arcaneRupture.ResourceCost` is `0` behind a `shortcut:` and the 15-second cooldown is
+what prices the press — the same treatment Arcane Power's row got, and the one the
+research notes ask for.
+
+Three things keep it from being another Arcane Power:
+
+- **The payload names a spell, not a class.** `Aura.Ruptured(remaining, damageBp)` is read
+  at exactly two sites in `SimCombat` — the `listCost` beside `spellCost`, and the
+  `SpellDamage` branch — and both gate on `ability.Name = "Arcane Missiles"`. One number
+  in the aura because the payload moves the hit and the price by the same 20%; the cost
+  half is the honest half, since dropping it would make the ability strictly better than
+  the page says.
+- **It is a window, not a rider.** Eight seconds is about one channel and a half at rank 5,
+  so it is not `Empowers` (next cast only) and it must still be standing when the channel
+  the AI chose finishes. That is why it is an `Aura` with a clock rather than a flag.
+- **Granting the ability is the talent's job, and the number is the aura's.** `Content` adds
+  it to the kit beside Presence of Mind and Arcane Power, level 20 onward; no talent record
+  can hand over an ability the kit never had.
+
+The AI needed two rules, and both were found by measuring rather than by reading:
+
+- **The ranking led with the window itself.** `perCast` divides by `max 1 castTicks`, so a
+  zero-cast ability scores its damage times a thousand and heads every ranking it appears
+  in — measured, the Mage opened with Arcane Rupture at L36 and never channelled the
+  missile the window was for, and at L42 the AI stop-start was the row. `isWindow` now
+  keeps `Rupture _` and `CastHaste _` rows out of the damage ranking, and the window is
+  pressed by its own rule before the rotation.
+- **The gate was the wrong ordering.** The window only pays while the rotation is picking
+  Arcane Missiles, so the press needs a gate. Gated on `shot` — the ordering that flips to
+  per-mana below 15% mana — it bought **87 presses a fight at library and not one missile
+to ride them**. `channels` asks the mana-blind `paid` ordering instead: the missile has to
+  be the best thing per cast *regardless of price*, which is the only condition under
+  which a tick and the cooldown are worth spending.
+
+**The bug it uncovered is the reusable part, and it was already live.** `Aura.disposition`
+is where a `Magic` aura says whether it is a debuff, and `PartyAi`'s cleaner dispels what
+the answer calls hostile — so an unlisted party buff makes the party dispel its own Mage.
+Measured before the fix: a gully run logged **no heal at all and two Regrowths for zero**,
+because the Priest spent its globals stripping `QUICKENED` and `RUPTURED` off the caster.
+`Hastened`, `Casting` and `Ruptured` are now `true` there. Arcane Power's aura had the
+same latent bug and nobody had looked; adding a second instance is what made it visible.
+Any new `Magic` buff on a party member needs that list or it is a dispel magnet.
+
+**Measured, on a `-t:Rebuild` A/B** (the lesson two paragraphs up): bench 30/30 still clear,
+`bench-30.txt` drift attributed in two steps from the committed baseline — movement fix
+alone median 907.5 → 927.0 with 13 seeds faster and 13 slower, i.e. noise, then Arcane
+Rupture median **927.0 → 858.5**, 22 seeds faster and 8 slower. `runs 120`: 811 → 818 →
+**809**, with `min` 756 → 685 and `max` 1039 → 992 as the window lands. A Mage ability is
+worth roughly **7% of a party clear** on the bench, and the bench is the one instrument
+that holds a fixed encounter — the 8 seeds that got slower are the usual chaos, a reordered
+damage stream fighting a different fight.
 
 ### Priest: eight of sixteen, and the first port where deleting was the work
 

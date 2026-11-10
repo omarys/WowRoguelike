@@ -326,6 +326,35 @@ module SimTick =
       |> List.map (fun e -> e.Pos)
       |> Set.ofList
 
+    // Two movers can land on the same free tile on the same Tick: both are mid-step,
+    // so neither of their tiles reads as `held`, and each destination is legal on its
+    // own. This was the second half of the same bug — a Druid of the Fang and a
+    // Deviate Ravager stepped onto one square together at tick 20 of `dungeon 2`, and
+    // `separateStacked` could only report it. The earlier body in the list lands and
+    // the later one waits the Tick, exactly as it would for a body that had stopped
+    // there; the list is the world's own order, so replay is unaffected.
+    let yields =
+      let landings =
+        w.Entities
+        |> List.choose (fun e ->
+          match e.Destination with
+          | Some d when
+            alive e
+            && e.Totem.IsNone
+            && canMove e
+            && e.MoveTicksLeft <= ticks 1
+            && not (Set.contains d held)
+            ->
+            Some(d, e.Id)
+          | _ -> None)
+
+      let firstToLand = landings |> List.distinctBy fst |> Map.ofList
+
+      landings
+      |> List.filter (fun (tile, id) -> Map.tryFind tile firstToLand <> Some id)
+      |> List.map snd
+      |> Set.ofList
+
     mapAll
       (fun e ->
         if not (alive e) then
@@ -350,7 +379,7 @@ module SimTick =
 
             if e.MoveTicksLeft > ticks 1 then
               { e with MoveTicksLeft = e.MoveTicksLeft - ticks 1 }
-            elif Set.contains dest held then
+            elif Set.contains dest held || Set.contains e.Id yields then
               e
             else
               { e with
