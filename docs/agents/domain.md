@@ -854,34 +854,71 @@ note was written and the tally went on saying six for it: the proc axis landed i
 (`Procs`, ten percent on spell hit behind an eight-second internal cooldown), and a "landed"
 column that was maintained by naming rows out loud dropped the one row that arrived by engine
 work rather than by a data edit. **Arcane Power, Arcane Instability and Arcane Rupture came off
-that list**: the fifth needed the engine's first attack-speed stat, the sixth needed two fields
-that are *spell*-scoped, and the seventh needed the first effect that multiplies a *named*
-spell's hit and its price rather than the caster's.
+that list**: the fifth needed the engine's first attack-speed stat, the sixth needed the
+spell's *school* on the hit plus a proc that changes the hit it rode in on, and the seventh
+needed the first effect that multiplies a *named* spell's hit and its price rather than the
+caster's.
 
-#### Arcane Instability, and why a caster's swing is not a spell
+#### Arcane Instability, and the two axes it needed: a school, and a hit that changes
 
-"Increases your spell damage and critical strike chance by 1/2/3%." `Talents` already had
-`DamageDoneBp`, documented as covering "melee or spell" and naming this talent — and reusing
-it would have been wrong: a mage swings a staff between casts, and 3% of that is not what the
-talent says. `SpellDoneBp` and `SpellCritBp` are read at exactly two sites (`Talents.spellBp`
-in the `SpellDamage` branch, and the `rollCrit` beside it), so a white swing still answers to
-`damageBp` alone.
+"Increases your spell damage and critical strike chance by 1/2/3%." That is the computed
+text; the payload's own row is *"an [16/…/25]% chance to erupt, consuming 2% of your base mana
+to deal 25% more damage"* — a proc on one landed hit, priced in the caster's base mana, with
+nothing to say about the crit roll or about the staff swing between casts. The first port
+believed the computed text: it grew `Talents.SpellDoneBp` and `Talents.SpellCritBp`, two fields
+whose only argument was that `DamageDoneBp` also reaches a swing while the talent says
+"spell", read them at two sites (`Talents.spellBp` in the `SpellDamage` branch and the
+`rollCrit` beside it), and measured +4.3% aggregate mage damage over eight seeds a wing. The
+measurement was sound and it was of the wrong talent. All three of those names are now gone —
+`grep -rn SpellDoneBp src/` finds nothing — and what replaced them is the pair of axes below.
 
-Measured over 8 seeds a wing: aggregate mage damage **+4.3%**, which is what +3% damage and
-three points of crit on a 1.5× multiplier are worth. The clear-time column was **noise** —
-three wings inside ±1.1% and one at +9.8% — because changing the crit roll reorders the
-whole world's random stream, so the same seeds fight a different fight. A chaotic sim can be
-A/B'd on aggregate damage, not on one wing's clear time; that is the same lesson as the
-two-seed lie above, one layer down.
+**A school on the hit.** `SpellDamage` carries a third field, `school: MagicSchool`
+(`Arcane | Fire | Frost | Nature | Shadow | Holy`), so a Fireball and an Arcane Missiles stop
+being the same record with a different name. `OnSpellSchoolHit` reads it — the third reading
+of a landed hit, beside "any spell" (`OnSpellHit`, Arcane Concentration) and "this named
+spell" (`OnSpellHitOf`, Temporal Convergence). Instability is priced on "your successful
+damaging **Arcane** spells", which is a fact about the tree the cast came from and not about
+the spell, so a school-scoped talent must not be spelled out as the class's three Arcane
+names: that copy is what breaks when the roster moves. There is deliberately no `Physical`
+case — physical damage never arrives as a `SpellDamage`, it is `Damage` or a `WeaponDamage`
+strike through the dodge/block/armour pipeline, so a school on those could only ever hold one
+value.
 
-The measurement turned up a hole in the instrument rather than in the talent: **the log never
-marked a crit**, melee or spell, so the first pass counted zero crits in four hundred
-Frostbolts and the crit half looked inert. `SimCombat.hitLine` now says "critically hits",
-`meleeStrike` returns its crit flag (it had one and threw it away), and the swing, off-hand,
-weapon-ability and spell lines all go through the one formatter. Two test helpers that summed
-damage by matching `" <ability> hits "` were silently dropping every crit — a helper that
-only knows the plain wording makes a crit talent measure as zero damage, which is the same
-class of error as an unmarked log line.
+**A hit that changes, and a price in base mana.** Every other `ProcResult` resolves through a
+`World`: it hands back an aura, an empower, a resource, a cooldown. None of them can say "this
+hit is 25% bigger", because by the time a `World` comes back `dealDamage` has already been
+told what to take off. `AmplifyHit(damageBp, manaBp)` is resolved inside the `SpellDamage`
+branch, before the number reaches `dealDamage`, and it charges the caster `manaBp` of **base**
+mana — 2% of `Entity.BaseResource`, before Intellect, which is why that field exists. Base and
+not the pool, because 2% of a level-60 bar is a rounding error and 2% of a level-24 bar is a
+decision, which is the whole point of the payload pricing it that way. The bill is *spent*, not
+gated on: an eruption is not a cast, so a mage on an empty bar still erupts and pays what is
+left. The line it logs is `"Mage: Arcane Instability erupts, +25% damage for 12 mana"`, and two
+eruptions on one hit multiply rather than the last one winning, because each is independently
+"this hit is bigger".
+
+Measured: the bench is neutral, which is what a talent worth ~1.5% of a mage's damage is
+allowed to be. All 30 seeds still clear, median ticks 894 → 896.5, mean 873.2 → 869.9, mean
+party HP 97.7% → 97.1%. The median rising while the mean falls is the stream re-rolling and not
+a buff: the mage now draws a die where nothing drew one, so every seed fights a different
+fight. `bench-30.txt` regenerated, all 30 lines moved.
+
+Two findings from the first port survive the rewrite, and they are why this section was
+revised rather than deleted. The instrument fix it forced: the log never marked a crit, melee
+or spell, so the crit half measured inert until `SimCombat.hitLine` learned "critically hits"
+and the swing, off-hand, weapon-ability and spell lines all went through the one formatter.
+And the lesson that came with it: two test helpers that summed damage by matching
+`" <ability> hits "` were silently dropping every crit, so a talent's crit half measured as
+zero — the same class of error as an unmarked log line, one layer down, and the reason the
+assertions below are ratios over a shared seed rather than totals.
+
+The tests pin the two axes apart from the talent. Every damaging ability's school is asserted
+row by row — a Fireball filed under Frost would be silent, not loud. The eruption is a ratio,
+not a number: the same cast and the same seed with the proc at 0 bp and at 10000 bp lands 25%
+harder, and the mana difference is exactly `BaseResource / 50`. And an Arcane Missiles from a
+mage whose Instability is at 10000 bp raises no `erupts` line at all when the spell is his
+Frostbolt — the school gate, which is the half of the axis the ability-name scope above could
+not have expressed.
 
 #### Arcane Power, and why "30% faster" is three quarters
 
@@ -1016,22 +1053,28 @@ moves. A proc can therefore never be measured by A/B at its shipped chance; the 
 arm is the one that fires without drawing. Any future "close to nothing" proc should be
 measured at 100% first, to find its ceiling before its chance is blamed.
 
-### The one landed talent that is wrong: Arcane Instability
+### ~~The one landed talent that is wrong: Arcane Instability~~
 
-Its row carries `SpellDoneBp = 300` and `SpellCritBp = 300`, and both are the *vanilla*
-talent's numbers. The server reworked it, and the recovered payload says so plainly: "Your
-successful damaging Arcane spells have an [8/16/25]% chance to uncontrollably erupt,
-consuming 2% of your base mana to deal 25% more damage." No spell damage, no crit, and it
-is a proc. It is marked `shortcut:` beside the row rather than quietly described as a
-defensive reading, because a wrong number that looks like a decision is worse than a wrong
-number that says it is wrong.
+**Fixed, and the section kept for the reason it was written.** It landed carrying
+`SpellDoneBp = 300` and `SpellCritBp = 300`, both the *vanilla* talent's numbers, while the
+recovered payload said plainly: "Your successful damaging Arcane spells have an [8/16/25]%
+chance to uncontrollably erupt, consuming 2% of your base mana to deal 25% more damage." The
+row was marked `shortcut:` rather than quietly described as a defensive reading, because a
+wrong number that looks like a decision is worse than a wrong number that says it is wrong.
+It now carries the proc the payload describes, and the two fields are deleted — see
+§"Arcane Instability, and the two axes it needed".
 
-It cannot be fixed by editing a field. Two additions are needed: a spell **school** on
-damaging abilities ("Arcane spells" is not expressible — nothing on `Ability` records which
-school a hit belongs to, which also blocks most of the panel's Fire and Frost rows), and a
-proc that changes the **current** hit's damage and spends mana (`procOn` returns a `World`,
-not an amount, so `ProcResult` can express a buff, a resource or a reset, but not "this hit
-is 25% bigger because of me").
+The prediction this section made was the useful part, and it held exactly:
+
+> It cannot be fixed by editing a field. Two additions are needed: a spell **school** on
+> damaging abilities ("Arcane spells" is not expressible), and a proc that changes the
+> **current** hit's damage and spends mana (`procOn` returns a `World`, not an amount, so
+> `ProcResult` can express a buff, a resource or a reset, but not "this hit is 25% bigger
+> because of me").
+
+Both were built, and the school arrived with a use beyond this talent: it is the axis the
+panel's Fire and Frost rows were blocked on too, because nothing on `Ability` recorded which
+school a hit belonged to.
 
 ### Priest: eight of sixteen, and the first port where deleting was the work
 
@@ -1878,7 +1921,7 @@ landed kits do not have:
 | Hunter Lock and Load | reset Aimed Shot, "line AoE" | the note's payload is self-contradictory; does not port until the ability's shape is settled |
 | ~~Warlock Nightfall~~ | 2/4% per DoT tick → instant Shadow Bolt | **landed** — `Corrupted` carries `caster: EntityId option`, `OnDoTTick` fires on the applier, `Empower.Only` scopes the buff. See §"The tick that belongs to the applier" |
 | Mage Resonance Cascade | a self-recursive chance to cast again | needs an extra-cast result *and* a recursion policy; not a data row |
-| Mage Arcane Instability | [16..25]% damage | a flat multiplier, not a proc — A9 axis |
+| ~~Mage Arcane Instability~~ | [16..25]% damage | **landed** — a school on the hit (`MagicSchool`) and `AmplifyHit`, 25% on `OnSpellSchoolHit Arcane` for +25% and 2% of base mana. See §"the two axes it needed" |
 | Mage Temporal Convergence | — | the note records "no coefficient"; nothing to port |
 | Druid Ancient Brutality | rage/energy from bleed ticks | **unblocked by the Nightfall increment** (a dot now knows its applier) and blocked on the rest: `GrantResource` pays rage only, so an energy tick needs Cat, which is parked; still needs a bleed that ticks
 | Druid Omen of Clarity | a free-cast proc | the source gives no chance percentage |

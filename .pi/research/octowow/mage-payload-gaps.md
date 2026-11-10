@@ -91,8 +91,22 @@ Value nodes are `["$","$L1e","1",{"tree":0,"talent":<i>,"values":["a","b","c"]}]
 - **Note:** **confirms** the page's rework and **fills the elided middle rank** (`[16/…/25]` → 8/16/25).
   The payload text contains **no** "+spell damage" and **no** "+crit chance" wording at all: the
   effect is purely a **proc** (damaging Arcane spell → 8/16/25% chance to erupt → costs 2% of *base*
-  mana → deals +25% more damage). The repo's landed "flat +spell damage and crit" reading is **not**
-  supported by the payload.
+  mana → deals +25% more damage).
+- **Landed as a proc** — `Content.fs:4484` `{ Talent = "Arcane Instability"; Event = OnSpellSchoolHit
+  Arcane; ChanceBp = 2500; InternalCooldown = ticks 0; Then = AmplifyHit(12500, 200) }`: rank 3/3
+  only (rank 1's 8% and rank 2's 16% have no record in `Content.fs`), 25% on a damaging Arcane
+  spell, +25% to that hit, 2% of `Entity.BaseResource`. It sits on two axes the port did not have
+  when this section was written — **spell school** (`MagicSchool = Arcane | Fire | Frost | Nature |
+  Shadow | Holy`, `Domain.fs:164`; `SpellDamage of min: int * max: int * school: MagicSchool`,
+  `Domain.fs:1107`, with no `Physical` case, because physical damage arrives as
+  `Damage`/`WeaponDamage`) and **hit amplification** (`ProcResult.AmplifyHit of damageBp: int *
+  manaBp: int`, `Domain.fs:434` — the only proc result that hands back a number beside the
+  `World`, since by the time one comes back the damage is already off; `SimCombat.fs:327` logs "erupts, +25% damage for N
+  mana", and two eruptions on one hit multiply rather than the last one winning). The
+  `Talents.SpellDoneBp`/`SpellCritBp`/`spellBp` flat reading is **deleted** (`grep -rn SpellDoneBp
+  src/` is empty): nothing here is a flat multiplier, and nothing here rides a white swing —
+  `OnSpellSchoolHit` reads the school of a landed hit, the third reading of a hit beside "any spell"
+  (`OnSpellHit`) and "this named spell" (`OnSpellHitOf`).
 
 ## 6. Resistance talents — full per-rank arrays
 

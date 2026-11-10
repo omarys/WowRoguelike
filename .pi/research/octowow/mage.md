@@ -150,7 +150,9 @@ is the structural fact this section is really about.
   absorbs damage.
 - **Temporal Convergence** — axis: **cooldown-reset proc** (`Talents.CooldownOff` only shortens).
 - **Arcane Instability** — axis: **proc** plus a **percentage-of-base-mana** cost (every `Rank.Cost`
-  is a flat int).
+  is a flat int) — **landed.** `ProcEvent.OnSpellSchoolHit` (`Domain.fs:396`) fires off the school the
+  `SpellDamage` carries and `ProcResult.AmplifyHit` (`Domain.fs:434`) hands back a multiplier the hit
+  applies before `dealDamage` is told the number; the 2% comes off `Entity.BaseResource`. See §9.
 - **Accelerated Arcana** — axis: **haste / cast-speed multiplier**. `CastTicks` is an absolute
   per-rank constant; there is no haste stat anywhere.
 - **Arcane Potency** — axis: **crit-damage multiplier**. `Traits.CritBonusBp` is crit *chance*.
@@ -279,37 +281,62 @@ cooldown by hand, because the first order of a fight is the buff and not the rot
 
 **Still not ported from this build:** Arcane Potency (crit damage of Arcane spells — magnitude is one
 visible "100%" in the payload with the per-rank array elided, so it is unportable without a guess),
-Accelerated Arcana, Arcane Rupture, Temporal Convergence, Resonance Cascade, Arcane Instability,
+Accelerated Arcana, Arcane Rupture, Temporal Convergence, Resonance Cascade,
 Arcane Subtlety (threat), Magic Absorption, Magic Attunement, Improved Mana Shield, Improved
 Counterspell's silence duration, and the whole Frost 11 (Frostbite/Permafrost need a root and a snare —
 the engine has both now, but nothing in the build spends them on a Mage). Arcane Power's own mana
 drain — the era's price for the speed — is still UNVERIFIED and therefore absent; see §7.
 
-## 9. Arcane Instability 3/3 — the first spell-scoped fields
+## 9. Arcane Instability 3/3 — the payload's proc, and the two axes it forced
 
-"Increases your spell damage and critical strike chance by 1/2/3%." Two multipliers on the
-same body, and the reason `Talents` grew `SpellDoneBp` and `SpellCritBp` rather than reusing
-`DamageDoneBp`: **a caster still swings.** `DamageDoneBp` would have carried the damage half
-for free and quietly handed the mage's staff 3% of its own. The fields are read at exactly
-two places — `Talents.spellBp` (the `SpellDamage` branch) and the `rollCrit` call beside it —
-so a white swing, an auto-attack and a weapon strike answer to `damageBp` and never see them.
+The payload replaces vanilla's tooltip outright: "Your successful damaging Arcane spells have
+an [8/16/25]% chance to uncontrollably erupt, consuming 2% of your base mana to deal 25% more
+damage" (#15058-60, talent entry #50 — `.pi/research/octowow/mage-payload-gaps.md` §5, which
+recovered the page's elided middle rank). Every number in the port comes from that sentence:
+`Talent = "Arcane Instability"`, `Event = OnSpellSchoolHit Arcane`, `ChanceBp = 2500` (the
+ladder's top rank, 3/3), `InternalCooldown = ticks 0` (the payload names no cooldown), `Then =
+AmplifyHit(12500, 200)` (`src/WowRoguelike.Core/Content.fs:4484`). One rank only — the 8% and
+16% rungs have no row of their own, and §6's build spends all three points. 25% × 25% is **+6.25%
+expected on damaging Arcane spells** — arithmetic on the payload's own two percentages, not a
+measurement.
 
-Measured over 8 seeds a wing, Armed/unarmed on an otherwise identical world:
+**The school had to become data.** `Effect.SpellDamage` is `min: int * max: int * school:
+MagicSchool` (`src/WowRoguelike.Core/Domain.fs:1107`), `MagicSchool = Arcane | Fire | Frost |
+Nature | Shadow | Holy` (`Domain.fs:164-170`), and `ProcEvent.OnSpellSchoolHit of school:
+MagicSchool` (`Domain.fs:396`) is the third reading of a landed hit beside "any spell" and "this
+named spell". The school rides the *effect* and not the ability because the effect is what the
+hit site has in hand — the `SpellDamage` branch resolves the roll, the crit and the procs off
+that one value — and there is no `Physical` case, since physical damage arrives as `Damage` or
+`WeaponDamage` and runs the armour pipeline, so a school there could only ever hold one value.
+The gate is the whole point of it: "Arcane spells" is a fact about the tree the cast came from
+and not about the spell, so a Frostbolt the same mage bought three points of Frost for must not
+pay (`an arcane eruption makes that hit a quarter bigger and bills base mana`,
+`tests/WowRoguelike.Tests/Tests.fs:1442`).
 
-| wing | L | clear | mage damage | crit rolls |
-|---|---|---|---|---|
-| graveyard | 33 | 74 925 → 82 276 (+9.8%) | +3.7% | 0 |
-| library | 36 | 64 977 → 64 860 (−0.2%) | +9.2% | 0 |
-| armory | 39 | 61 856 → 61 177 (−1.1%) | −0.2% | 0 |
-| cathedral | 42 | 72 437 → 71 750 (−0.9%) | +5.5% | 0 |
+**The current hit had to become mutable.** `ProcResult.AmplifyHit of damageBp: int * manaBp:
+int` (`Domain.fs:434`) is the one payload that is not "unchanged": the others resolve through a
+`World`, and by the time a `World` comes back `dealDamage` has already been told what to take
+off. So the `SpellDamage` branch calls `procDamage` for a multiplier and applies it to the hit
+*before* the damage (`SimCombat.fs:817-823`), which is exactly why `procOn` can keep throwing
+the multiplier away everywhere else (`SimCombat.fs:391`). The mana comes off
+`Entity.BaseResource` — the pool the payload prices, before Intellect — and it is spent rather
+than gated on, so a mage on an empty bar still erupts and pays what is left
+(`SimCombat.fs:327-340`), logged as "`%s: %s erupts, +%d%% damage for %d mana`".
 
-**The arithmetic is right and the per-wing number is not measurable this way.** Aggregate mage
-damage went 657 604 → 686 030 (+4.3%), which is what +3% damage and +3 points of crit on a
-1.5× multiplier should be worth. The clear-time column is noise: three wings inside ±1.1%
-and graveyard reading +9.8%, because any change to the crit roll reorders the whole world's
-random stream — the same seeds then fight a different fight. A chaotic sim can be A/B'd on
-*aggregate damage*, not on individual clear times, and a single wing's delta is worth nothing.
+**Why a proc and not a field.** `DamageDoneBp` would have carried a flat damage half for free
+and quietly handed the mage's staff the same percentage, because **a caster still swings**; a
+proc reaches the one hit it fired on. The port's first reading — two tree-wide *spell-scoped*
+fields, `SpellDoneBp` and `SpellCritBp`, read at `Talents.spellBp` and the `rollCrit` beside it —
+was vanilla's talent and not this server's, and both are deleted: `grep -rn SpellDoneBp src/`
+returns nothing, `Talents.damageBp` (`Domain.fs:1654`) is the only talent-wide damage multiplier
+left in that branch, and `MagicSchool` is what a school-wide bonus would be built on if a talent
+that needs one is ported.
 
-There is no "critically" marker in the combat log, so a crit count cannot be read off it
-either; verifying crit share needs the roll itself, not the log. The unit test asserts the
-arithmetic (`spellBp "Frostbolt" = 10300` while `damageBp "" = 10000`) instead.
+**What it can and cannot be measured by.** Not an A/B at 25%: a shipped proc draws one more
+random number per landed damaging spell, so every downstream roll moves and all 30 seeds differ
+— the only clean arm is a forced 100%, which draws nothing (`docs/agents/domain.md`, the Temporal
+Convergence finding). What is readable is the eruption itself: it writes its own line, so the
+share is counted rather than inferred, with `hitLine`'s "critically hits" (`SimCombat.fs:462`)
+beside it. The arithmetic is pinned by `an arcane eruption makes that hit a quarter bigger and
+bills base mana`: same seed, chance 0 against 10000, Arcane Missiles lands 25% harder, the bill
+differs by `BaseResource / 50`, and a Frostbolt of the same mage logs no `erupts` at all.
