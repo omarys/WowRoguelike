@@ -1400,28 +1400,101 @@ let ``the mage's OctoWoW build lands on his kit`` () =
   let pom = ability "Presence of Mind"
   Assert.Equal(secTicks 180.0, pom.CooldownTicks)
   Assert.Equal<Effect list>([ Empowers(secTicks 20.0, { Empower.none with Instant = true }) ], pom.Effects)
-  // Arcane Instability 3/3, the two tree-wide *spell* fields. Not `DamageDoneBp`:
-  // the mage's staff swing is not a spell.
-  Assert.Equal(300, mage.Talents.SpellDoneBp)
-  Assert.Equal(300, mage.Talents.SpellCritBp)
+  // Arcane Instability 3/3 is a proc, not the flat +3%/+3% the vanilla text
+  // implies (payload gaps file §5): 25% on a damaging Arcane spell, +25% to that
+  // hit, 2% of *base* mana, no internal cooldown. `DamageDoneBp` stays alone
+  // because a proc reaches one hit and a tree-wide field would reach the swing.
+  let instability =
+    mage.Talents.Procs |> List.find (fun p -> p.Talent = "Arcane Instability")
+
+  Assert.Equal(2500, instability.ChanceBp)
+  Assert.Equal(OnSpellSchoolHit Arcane, instability.Event)
+  Assert.Equal(AmplifyHit(12500, 200), instability.Then)
+  Assert.Equal<int<tick>>(ticks 0, instability.InternalCooldown)
   Assert.Equal(0, mage.Talents.DamageDoneBp)
 
-/// Arcane Instability raises *spell* damage and crit, and a caster still swings. The
-/// distinction is the whole reason `Talents` grew two fields instead of reusing
-/// `DamageDoneBp`: same body, two different numbers.
+/// A damaging ability carries the school it deals, because `OnSpellSchoolHit` reads
+/// that field: a Fireball filed under Frost would be silent, not loud.
 [<Fact>]
-let ``spell damage and crit are separate from the staff's swing`` () =
-  let baseT = Talents.none
-  let instability = { Talents.none with SpellDoneBp = 300; SpellCritBp = 300 }
-  Assert.Equal(10300, Talents.spellBp "Frostbolt" instability)
-  Assert.Equal(10000, Talents.damageBp "Frostbolt" instability)
-  // The swing answers to `damageBp` and so is left alone...
-  Assert.Equal(10000, Talents.damageBp "" instability)
-  Assert.Equal(10000, Talents.damageBp "" baseT)
-  // ...and a tree-wide damage bonus still reaches both.
-  let forceOfWill = { Talents.none with DamageDoneBp = 1000 }
-  Assert.Equal(11000, Talents.spellBp "Frostbolt" forceOfWill)
-  Assert.Equal(11000, Talents.damageBp "" forceOfWill)
+let ``a damaging ability says which school it deals`` () =
+  let school className abilityName =
+    let entity =
+      Content.partyOf [ "Warrior"; className ] 24 |> List.find (fun e -> e.Name = className)
+
+    (entity.Abilities |> List.find (fun a -> a.Name = abilityName)).Effects
+    |> List.pick (function
+        | SpellDamage(_, _, s) -> Some s
+        | _ -> None)
+
+  Assert.Equal(Arcane, school "Mage" "Arcane Missiles")
+  Assert.Equal(Frost, school "Mage" "Frostbolt")
+  Assert.Equal(Fire, school "Mage" "Fireball")
+  Assert.Equal(Shadow, school "Warlock" "Shadow Bolt")
+  Assert.Equal(Holy, school "Paladin" "Judgement")
+  Assert.Equal(Nature, school "Shaman" "Earth Shock")
+  Assert.Equal(Arcane, school "Hunter" "Arcane Shot")
+
+/// The eruption is one hit made bigger, not a buff: the same cast with the proc at
+/// zero and at a hundred lands 25% harder, and the eruption bills 2% of base mana on
+/// top of the spell's own cost. The two arms share a seed, so the only difference
+/// between them is the proc.
+[<Fact>]
+let ``an arcane eruption makes that hit a quarter bigger and bills base mana`` () =
+  let mage =
+    (Content.partyOf [ "Mage" ] 60) |> List.exactlyOne
+
+  let instability =
+    mage.Talents.Procs |> List.find (fun p -> p.Talent = "Arcane Instability")
+
+  // A level-5 dummy: a level-60 mob resists a level-60 mage's spells outright, and a
+  // resist is not a hit, so the proc would rightly stay silent.
+  let mob =
+    Content.mob 100 "Dummy" CreatureType.Humanoid 5 1000000 1000 None [] None { X = 8; Y = 5 }
+
+  let world chance =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 20 10
+      Entities =
+        [ { mage with
+              Talents = { mage.Talents with Procs = [ { instability with ChanceBp = chance } ] }
+              Pos = { X = 7; Y = 5 } }
+          mob ]
+      Pending = []
+      Rng = Rng.streamsOf 2UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let cast name w =
+    let ability = mage.Abilities |> List.find (fun a -> a.Name = name)
+    SimCombat.resolveAbility (EntityId 1) (EntityId 100) ability w
+
+  /// The amount on the `hits` line, and proof the cast landed at all.
+  let landed w =
+    Assert.Contains(w.Log, fun line -> line.Contains "hits")
+
+    w.Log
+    |> List.filter (fun line -> line.Contains "hits")
+    |> List.last
+    |> fun line -> int (line.Split ' ' |> Array.last)
+
+  let plain = world 0 |> cast "Arcane Missiles" |> landed
+  let bigger = world 10000 |> cast "Arcane Missiles" |> landed
+
+  Assert.Equal(plain * 125 / 100, bigger)
+
+  // The same cast and the same seed, so the only difference in the bill is the
+  // eruption's 2% of *base* mana — not of the pool, which is what makes it cheap at
+  // 60 and expensive at 24.
+  let manaOf w = (w.Entities |> List.find (fun e -> e.Id = EntityId 1)).Resource
+  let eruptedCast = world 10000 |> cast "Arcane Missiles"
+  let quietCast = world 0 |> cast "Arcane Missiles"
+  Assert.Equal(mage.BaseResource / 50, manaOf quietCast - manaOf eruptedCast)
+
+  // The school gate: a Frost spell of the same mage does not erupt.
+  let frost = world 10000 |> cast "Frostbolt"
+  Assert.DoesNotContain(frost.Log, fun line -> line.Contains "erupts")
 
 /// The Priest's OctoWoW build (Discipline 11 / Holy 40 / Shadow 0). Eight of sixteen
 /// talents are data — the best hit rate of the port so far — and two of the sixteen are
@@ -2372,7 +2445,7 @@ let ``the paladin's kit is the level-24 one`` () =
   Assert.Equal<Effect list>([ Heal(67, 77); CritBonus 600 ], effectsOf "Flash of Light")
   // Judgement with Seal of Righteousness rank 3 up, and no crit: Holy Power names
   // the two heals only.
-  Assert.Equal<Effect list>([ SpellDamage(53, 57) ], effectsOf "Judgement")
+  Assert.Equal<Effect list>([ SpellDamage(53, 57, Holy) ], effectsOf "Judgement")
   // Hammer of Justice rank 2 is a 4 s stun, Divine Protection rank 2 is 8 s of
   // immunity.
   Assert.Equal<Effect list>([ Stun(secTicks 4.0) ], effectsOf "Hammer of Justice")
@@ -2709,11 +2782,11 @@ let ``the warlock's kit is the level-24 one, under the affliction build`` () =
 
   // Devastation 5/5 is `CritBonus 500` on the ability, because the crit roll belongs
   // to the spell that lands rather than to the caster (same shape as the healer lines).
-  Assert.Equal<Effect list>([ SpellDamage(86, 99); CritBonus 500 ], effectsOf "Shadow Bolt")
+  Assert.Equal<Effect list>([ SpellDamage(86, 99, Shadow); CritBonus 500 ], effectsOf "Shadow Bolt")
   Assert.Equal<Effect list>([ DamageOverTime(secTicks 18.0, 12) ], effectsOf "Corruption")
   Assert.Equal<Effect list>([ DamageOverTime(secTicks 24.0, 7) ], effectsOf "Curse of Agony")
   Assert.Equal<Effect list>(
-    [ SpellDamage(45, 45); DamageOverTime(secTicks 15.0, 6); CritBonus 500 ],
+    [ SpellDamage(45, 45, Fire); DamageOverTime(secTicks 15.0, 6); CritBonus 500 ],
     effectsOf "Immolate"
   )
   Assert.Equal<Effect list>([ Sleep(secTicks 10.0) ], effectsOf "Fear")
@@ -2831,10 +2904,10 @@ let ``the shaman's kit is the level-24 one`` () =
   let effectsOf name =
     (shaman.Abilities |> List.find (fun a -> a.Name = name)).Effects
 
-  Assert.Equal<Effect list>([ SpellDamage(88, 100) ], effectsOf "Lightning Bolt")
-  Assert.Equal<Effect list>([ SpellDamage(125, 133); Interrupt ], effectsOf "Earth Shock")
+  Assert.Equal<Effect list>([ SpellDamage(88, 100, Nature) ], effectsOf "Lightning Bolt")
+  Assert.Equal<Effect list>([ SpellDamage(125, 133, Nature); Interrupt ], effectsOf "Earth Shock")
   Assert.Equal<Effect list>(
-    [ SpellDamage(51, 51); DamageOverTime(secTicks 12.0, 4) ],
+    [ SpellDamage(51, 51, Fire); DamageOverTime(secTicks 12.0, 4) ],
     effectsOf "Flame Shock"
   )
   Assert.Equal<Effect list>([ Heal(389, 453) ], effectsOf "Healing Wave")
@@ -3023,7 +3096,11 @@ let ``a damage talent raises a weapon strike and a nuke alike`` () =
   let talented = { Talents.none with DamageDoneBp = 1000 }
 
   for hero, ability in [ rogue, "Backstab"; mage, "Arcane Missiles" ] do
-    let plain = dealtBy hero ability
+    // Both arms carry `Talents.none` underneath, so the only difference between them
+    // is the 10% under test. The hero's own build is not neutral any more: the mage's
+    // Arcane Instability is now a 25% eruption, which out-punches a flat 10% and would
+    // read as "the talent lowered damage".
+    let plain = dealtBy { hero with Talents = Talents.none } ability
     let boosted = dealtBy { hero with Talents = talented } ability
 
     Assert.True(plain > 0, sprintf "expected %s to land a %s at all, dealt %d" hero.Name ability plain)
@@ -3623,7 +3700,7 @@ let ``the hunter's kit is the level-24 one`` () =
 
   // Arcane Shot rank 3: 33 Arcane for 50 mana. Arcane is magic, so it is not
   // armour-mitigated — the record this replaced ran it through armour as physical.
-  Assert.Equal<Effect list>([ SpellDamage(33, 33) ], effectsOf "Arcane Shot")
+  Assert.Equal<Effect list>([ SpellDamage(33, 33, Arcane) ], effectsOf "Arcane Shot")
   // Serpent Sting rank 3: 80 Nature over 15 s, which is 5 a second.
   Assert.Equal<Effect list>([ DamageOverTime(secTicks 15.0, 5) ], effectsOf "Serpent Sting")
   // Raptor Strike rank 4: the next swing lands +34.
@@ -7497,7 +7574,7 @@ let ``a free-mana empower pays for the damage spell that spends it`` () =
         Name = "Test Bolt"
         ResourceCost = 100
         CastTicks = ticks 0
-        Effects = [ SpellDamage(10, 10) ] }
+        Effects = [ SpellDamage(10, 10, Arcane) ] }
 
   let w = procWorld Talents.none
 

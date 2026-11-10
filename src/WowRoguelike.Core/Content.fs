@@ -81,7 +81,7 @@ module Content =
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ SpellDamage(64, 86) ] }
+      Effects = [ SpellDamage(64, 86, Nature) ] }
 
   /// Healing Touch as the Wailing Caverns druids cast it (spell 5187, unranked):
   /// a flat 195 on a 2.5 s cast, roughly every 15 s. The rank-3 player spell's
@@ -367,7 +367,7 @@ module Content =
               CooldownTicks = ticks 0
               Range = 8
               Effects =
-                [ SpellDamage(lo, hi); DamageOverTime(secTicks duration, perTick) ] } ] }
+                [ SpellDamage(lo, hi, Fire); DamageOverTime(secTicks duration, perTick) ] } ] }
 
   let fireball = rank24 fireballRanks
 
@@ -388,7 +388,7 @@ module Content =
               CastTicks = ticks 0
               CooldownTicks = secTicks 6.0
               Range = 8
-              Effects = [ SpellDamage(damage, damage) ] } ] }
+              Effects = [ SpellDamage(damage, damage, Arcane) ] } ] }
 
   let arcaneShot = rank24 arcaneShotRanks
 
@@ -462,7 +462,7 @@ module Content =
             CastTicks = ticks 0
             CooldownTicks = secTicks 10.0
             Range = 1
-            Effects = [ SpellDamage(53, 57) ] } ] }
+            Effects = [ SpellDamage(53, 57, Holy) ] } ] }
 
   let judgement = rank24 judgementRanks
 
@@ -539,7 +539,7 @@ module Content =
               CastTicks = secTicks cast
               CooldownTicks = ticks 0
               Range = 8
-              Effects = [ SpellDamage(lo, hi) ] } ] }
+              Effects = [ SpellDamage(lo, hi, Shadow) ] } ] }
 
   let shadowBolt = rank24 shadowBoltRanks
 
@@ -621,7 +621,7 @@ module Content =
               CooldownTicks = ticks 0
               Range = 8
               Effects =
-                [ SpellDamage(direct, direct); DamageOverTime(secTicks 15.0, perTick) ] } ] }
+                [ SpellDamage(direct, direct, Fire); DamageOverTime(secTicks 15.0, perTick) ] } ] }
 
   let warlockImmolate = rank24 warlockImmolateRanks
 
@@ -875,7 +875,7 @@ module Content =
               CastTicks = secTicks cast
               CooldownTicks = ticks 0
               Range = 8
-              Effects = [ SpellDamage(lo, hi) ] } ] }
+              Effects = [ SpellDamage(lo, hi, Nature) ] } ] }
 
   let shamanLightningBolt = rank24 shamanLightningBoltRanks
 
@@ -902,7 +902,7 @@ module Content =
               CastTicks = ticks 0
               CooldownTicks = secTicks 6.0
               Range = 5
-              Effects = [ SpellDamage(lo, hi); Interrupt ] } ] }
+              Effects = [ SpellDamage(lo, hi, Nature); Interrupt ] } ] }
 
   let earthShock = rank24 earthShockRanks
 
@@ -924,7 +924,7 @@ module Content =
               CooldownTicks = secTicks 6.0
               Range = 5
               Effects =
-                [ SpellDamage(direct, direct); DamageOverTime(secTicks 12.0, perTick) ] } ] }
+                [ SpellDamage(direct, direct, Fire); DamageOverTime(secTicks 12.0, perTick) ] } ] }
 
   let flameShock = rank24 flameShockRanks
 
@@ -1279,7 +1279,7 @@ module Content =
               CastTicks = secTicks cast
               CooldownTicks = ticks 0
               Range = 8
-              Effects = [ SpellDamage(lo, hi) ] } ] }
+              Effects = [ SpellDamage(lo, hi, Frost) ] } ] }
 
   let frostbolt = rank24 frostboltRanks
 
@@ -1301,7 +1301,7 @@ module Content =
               CastTicks = secTicks channel
               CooldownTicks = ticks 0
               Range = 8
-              Effects = [ SpellDamage(total, total) ] } ] }
+              Effects = [ SpellDamage(total, total, Arcane) ] } ] }
 
   let arcaneMissiles = rank24 arcaneMissilesRanks
 
@@ -1570,7 +1570,7 @@ module Content =
               CastTicks = secTicks cast
               CooldownTicks = ticks 0
               Range = 8
-              Effects = [ SpellDamage(lo, hi) ] } ] }
+              Effects = [ SpellDamage(lo, hi, Nature) ] } ] }
 
   let wrath = rank24 wrathRanks
 
@@ -1600,7 +1600,7 @@ module Content =
               CooldownTicks = secTicks 6.0
               Range = 8
               Effects =
-                [ SpellDamage(lo, hi); DamageOverTime(secTicks duration, perTick) ] } ] }
+                [ SpellDamage(lo, hi, Arcane); DamageOverTime(secTicks duration, perTick) ] } ] }
 
   let moonfire = rank24 moonfireRanks
 
@@ -1626,7 +1626,7 @@ module Content =
               CastTicks = secTicks cast
               CooldownTicks = ticks 0
               Range = 8
-              Effects = [ SpellDamage(lo, hi) ] } ] }
+              Effects = [ SpellDamage(lo, hi, Holy) ] } ] }
 
   let smite = rank24 smiteRanks
 
@@ -1850,6 +1850,7 @@ module Content =
       Cooldowns = Map.empty
       Resource = resource
       MaxResource = resource
+      BaseResource = resource
       ResourceRegenPerTick = partyRegen
       ResourceKind = Mana
       ComboPoints = 0
@@ -1916,6 +1917,7 @@ module Content =
       Cooldowns = Map.empty
       Resource = resource
       MaxResource = resource
+      BaseResource = resource
       ResourceRegenPerTick = mobRegen
       ResourceKind = Mana
       ComboPoints = 0
@@ -3399,6 +3401,7 @@ module Content =
 
     {| MaxHealth = maxHealth
        MaxResource = defaultArg sheet.FixedPool (d.BaseMana + pool intellect 15)
+       BaseResource = defaultArg sheet.FixedPool d.BaseMana
        RegenPerTick = regen
        BonusHealing = bonusHealing
        CritChanceBp = 500 + s.Agility * 10 + traits.CritBonusBp
@@ -3462,6 +3465,7 @@ module Content =
       Cooldowns = Map.empty
       Resource = d.MaxResource
       MaxResource = d.MaxResource
+      BaseResource = d.BaseResource
       ResourceRegenPerTick = d.RegenPerTick
       ResourceKind = resource
       ComboPoints = 0
@@ -4016,7 +4020,7 @@ module Content =
       Interruptible = false
       Range = 8
       TargetKind = Foe
-      Effects = [ SpellDamage(101, 114); Rupture(secTicks 8.0, 2000) ] }
+      Effects = [ SpellDamage(101, 114, Arcane); Rupture(secTicks 8.0, 2000) ] }
 
   /// A Druid form. Entering one costs mana; leaving one costs nothing, which is why
   /// `humanForm` is built separately below rather than through this helper. A single
@@ -4390,26 +4394,24 @@ module Content =
   /// Missiles line (pushback resistance on a channel), and the mana-side talents —
   /// all of §5(b).
   ///
-  /// Arcane Instability 3/3 is the two tree-wide spell fields: `SpellDoneBp = 300` and
-  /// `SpellCritBp = 300`. They are spell-only on purpose. `DamageDoneBp` would have
-  /// carried the damage half for free, but a mage still swings a staff between casts and
-  /// the talent says "your spell damage".
+  /// Arcane Instability 3/3 is a proc, and the recovered payload says so: "Your
+  /// successful damaging Arcane spells have an [8/16/25]% chance to uncontrollably
+  /// erupt, consuming 2% of your base mana to deal 25% more damage" (§5 of
+  /// `.pi/research/octowow/mage-payload-gaps.md`, spell IDs #15058-60). The row used
+  /// to carry vanilla's +3% spell damage and +3% spell crit, which is a different
+  /// talent; both tree-wide fields are gone with it.
   ///
-  /// shortcut: these two numbers are the *vanilla* talent and they are wrong for this
-  /// server. The recovered payload text (§5 of `.pi/research/octowow/mage-payload-gaps.md`,
-  /// spell IDs #15058-60, reused IDs on reworked effects) reads "Your successful damaging
-  /// Arcane spells have an [8/16/25]% chance to uncontrollably erupt, consuming 2% of your
-  /// base mana to deal 25% more damage" — no spell damage, no crit, and it is a proc. Two
-  /// things the model lacks block the faithful version: a spell *school* on damaging
-  /// abilities ("Arcane spells" is not expressible — nothing on `Ability` says which of
-  /// three schools a hit is), and a proc that changes the *current* hit's damage and
-  /// spends mana, which `ProcResult` cannot do because `procOn` returns a `World` and not
-  /// an amount. Both are additions, not edits. Until then +3%/+3% is the reading a reader
-  /// of the vanilla text would have reached, and it is still the wrong talent.
+  /// It is the first talent in the model that is priced on the *school* of a hit and
+  /// the first that changes the hit it rode in on. Those were the two additions it
+  /// waited on: `MagicSchool` on `SpellDamage`, which makes "Arcane spells" a
+  /// question the engine can answer, and `ProcResult.AmplifyHit`, which hands back a
+  /// multiplier on the current hit (the other four results return a `World`, and by
+  /// then `dealDamage` has already been told the number).
+  ///
+  /// No internal cooldown: the payload gives none, and the price is the cooldown —
+  /// 2% of base mana per eruption is what stops it being free damage.
   let private mageTalents =
     { Talents.none with
-        SpellDoneBp = 300
-        SpellCritBp = 300
         Spells =
           [ { Spell = "Frostbolt"
               CostBp = 0
@@ -4467,7 +4469,23 @@ module Content =
               Event = OnSpellHitOf "Arcane Missiles"
               ChanceBp = 1500
               InternalCooldown = secTicks 15.0
-              Then = ResetCooldown "Arcane Rupture" } ] }
+              Then = ResetCooldown "Arcane Rupture" }
+
+            // Arcane Instability 3/3, the tree's thirty-point talent: 25% of the
+            // mage's damaging Arcane spells erupt for 25% more damage at 2% of base
+            // mana apiece. `OnSpellSchoolHit` and not `OnSpellHit`, because the
+            // payload says "Arcane spells" — a Frostbolt the same mage casts three
+            // points into Frost for must not pay for the Arcane tree.
+            //
+            // The mana is the whole reason this is not simply +25% damage: a mage
+            // at 25% crit and 30% haste on Arcane Missiles pays roughly one eruption
+            // per four casts, and base mana is what the payload names, not the max
+            // pool (`Entity.BaseResource`).
+            { Talent = "Arcane Instability"
+              Event = OnSpellSchoolHit Arcane
+              ChanceBp = 2500
+              InternalCooldown = ticks 0
+              Then = AmplifyHit(12500, 200) } ] }
 
   let private mage (buffs: PartyBuffKind list) (level: int) (id: int) =
     let abilities =
@@ -5998,7 +6016,7 @@ module Content =
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ SpellDamage(93, 107); DamageOverTime(secTicks 9.0, 50) ] }
+      Effects = [ SpellDamage(93, 107, Fire); DamageOverTime(secTicks 9.0, 50) ] }
 
   /// Immolate (11665): 148 up front, then 51 every 3 s for 15 s.
   let private immolate =
@@ -6010,7 +6028,7 @@ module Content =
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ SpellDamage(148, 148); DamageOverTime(secTicks 15.0, 51) ] }
+      Effects = [ SpellDamage(148, 148, Fire); DamageOverTime(secTicks 15.0, 51) ] }
 
   /// Hammer of Justice (853): instant, 3 s stun, one minute cooldown.
   let private hammerOfJustice =
@@ -6035,7 +6053,7 @@ module Content =
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ SpellDamage(139, 188) ] }
+      Effects = [ SpellDamage(139, 188, Fire) ] }
 
   /// Frostbolt, the level-37 rank: the snare is not modelled, only the damage.
   let private scarletFrostbolt =
@@ -6047,7 +6065,7 @@ module Content =
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ SpellDamage(120, 155) ] }
+      Effects = [ SpellDamage(120, 155, Frost) ] }
 
   /// A Scarlet priest's Smite at the level-36-40 rank.
   let private scarletSmite =
@@ -6059,7 +6077,7 @@ module Content =
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ SpellDamage(130, 160) ] }
+      Effects = [ SpellDamage(130, 160, Holy) ] }
 
   /// Heal (6064): 3 s cast, 734-827. The Chaplains and Abbots cast a lower rank,
   /// which is the same shape for less.
@@ -6097,7 +6115,7 @@ module Content =
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ SpellDamage(95, 102) ] }
+      Effects = [ SpellDamage(95, 102, Shadow) ] }
 
   /// A Scarlet mob before it is given an id and a place to stand.
   type private ScarletMob =

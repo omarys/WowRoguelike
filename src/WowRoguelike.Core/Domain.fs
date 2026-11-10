@@ -149,6 +149,26 @@ module CreatureType =
 [<Struct>]
 type EntityId = EntityId of int
 
+/// The damage school of a spell, which is a different question from `DispelType`:
+/// that one says which *dispel* answers a debuff (Magic, Curse, Disease, Poison),
+/// this one says what the damage *is*, and they disagree — Fireball's burn is Fire
+/// damage and a Magic debuff at once. Talents price themselves on this: Arcane
+/// Instability is "your successful damaging **Arcane** spells", and without a school
+/// on the hit there is no way to ask which of a mage's three trees a cast came
+/// from (`.pi/research/octowow/mage-payload-gaps.md` §5).
+///
+/// There is no `Physical`: physical damage never arrives as a `SpellDamage` — it is
+/// `Damage` or `WeaponDamage`, which run the dodge/block/armour pipeline. A school
+/// on those would be a field that can only ever hold one value.
+[<Struct>]
+type MagicSchool =
+  | Arcane
+  | Fire
+  | Frost
+  | Nature
+  | Shadow
+  | Holy
+
 /// What a "your next spell" talent changes about the spell it lands on. The
 /// 1.12 cooldowns of that shape — Nature's Swiftness, Divine Favor, Inner Focus —
 /// differ only in which of these three things they set, so they are one buff with
@@ -368,6 +388,12 @@ type ProcEvent =
   /// fire off the same mage's Frostbolt: a talent that names its spell needs the
   /// name, and the hit site is the only place that knows it.
   | OnSpellHitOf of ability: string
+  /// A damage spell of one *school* of this character's landed — the third reading
+  /// of the same hit, beside "any spell" and "this named spell". Arcane Instability
+  /// is priced on it: "your successful damaging **Arcane** spells have a 25% chance
+  /// to uncontrollably erupt", which is a fact about the tree the cast came from and
+  /// not about the spell, so neither of the two above can stand in for it.
+  | OnSpellSchoolHit of school: MagicSchool
   /// One tick of a damage-over-time this character applied. Fired on the
   /// *caster*, from the tick, which is why `Corrupted` records who applied it:
   /// the damage lands on the target and the talent belongs to the applier.
@@ -399,6 +425,13 @@ type ProcResult =
   /// Aspects is the first user and `Hastened` is the first attack-speed stat in
   /// the model.
   | Gain of aura: Aura
+  /// The *current* hit itself is bigger, which is the one thing the four above
+  /// cannot express: they all resolve through a `World`, and by the time a `World`
+  /// comes back `dealDamage` has already been told what to take off. Arcane
+  /// Instability's eruption is `AmplifyHit(12500, 200)` — this hit deals 25% more
+  /// and the holder pays 2% of its **base** mana (before Intellect, which is why
+  /// `Entity` carries `BaseResource`).
+  | AmplifyHit of damageBp: int * manaBp: int
 
 /// One talent's trigger: the chance, how soon it may fire again, and what it
 /// hands over. `Talent` is the name it is logged and cooled down under — the
@@ -1066,8 +1099,12 @@ type Effect =
   /// hostiles within 8 tiles of it. Vanilla's r1 fires at 3 targets for weapon
   /// damage each, no flat bonus (`.pi/research/level24/hunter.md`, Multi-Shot row).
   | MultiShot of maxTargets: int
-  /// Spell damage, mitigated by nothing (Q2a).
-  | SpellDamage of min: int * max: int
+  /// Spell damage, mitigated by nothing (Q2a). The school rides the effect rather
+  /// than the ability because the effect is what the hit site has in hand: the
+  /// `SpellDamage` branch resolves the roll, the crit and the procs off the same
+  /// value, and a talent that names a school (Arcane Instability) reads it there.
+  /// An ability whose school is not physical declares it once, on its damage.
+  | SpellDamage of min: int * max: int * school: MagicSchool
   | Heal of min: int * max: int
   /// Mana handed to a friendly target as a share of \emph{its own} pool (basis
   /// points, 10000 = the whole bar). Innervate: vanilla models it as +400%
@@ -1486,15 +1523,6 @@ type Talents =
     /// damage half of `HealDoneBp`: a talent that raises damage by ten percent
     /// is the same shape as one that raises healing.
     DamageDoneBp: int
-    /// Percent added to *spell* damage only, bp (Arcane Instability 3/3). Split
-    /// from `DamageDoneBp` because a caster still swings: a talent that reads
-    /// "your spell damage" must not raise the staff's auto-attack, and a class
-    /// whose whole kit is spells cannot tell the two apart from the outside.
-    SpellDoneBp: int
-    /// Percentage points of *spell* crit chance, bp (Arcane Instability's other
-    /// half, Force of Will). The crit twin of `SpellDoneBp`, and likewise not a
-    /// `CritChanceBp` bump on the caster.
-    SpellCritBp: int
     /// Percent off the mana cost of every healing spell (Tidal Focus), bp.
     HealCostBp: int
     /// Percent off the mana cost of every damaging spell (Frost Channeling,
@@ -1575,8 +1603,6 @@ module Talents =
   let none =
     { HealDoneBp = 0
       DamageDoneBp = 0
-      SpellDoneBp = 0
-      SpellCritBp = 0
       HealCostBp = 0
       SpellCostBp = 0
       CritDamageBp = 0
@@ -1619,16 +1645,16 @@ module Talents =
   /// covered is *per-source* identity: every damage-over-time shares one aura, so a
   /// talent that has to tell Corruption's burn from Curse of Agony's (Malediction)
   /// needs the aura split first, not a multiplier.
+  ///
+  /// Two tree-wide *spell-only* fields used to ride here for Arcane Instability's
+  /// +3%/+3%: `damageBp` reaches a staff swing as well as a spell, and the talent
+  /// says "spell damage". The recovered payload shows that talent is a proc rather
+  /// than a flat bonus, so both fields went with it (`MagicSchool` is what a
+  /// school-wide bonus would be built on if a talent that needs one is ported).
   let damageBp (name: string) (t: Talents) =
     10000
     + t.DamageDoneBp
     + (spell name t |> Option.map (fun s -> s.DamageBp) |> Option.defaultValue 0)
-
-  /// Percent this character adds to one spell's damage where the spell is *only* a
-  /// spell: `damageBp` plus the spell-only tree fields. A staff swing and a
-  /// `SpellDamage` both go through `damageBp`, and Arcane Instability's "your spell
-  /// damage" must reach the second without touching the first.
-  let spellBp (name: string) (t: Talents) = damageBp name t + t.SpellDoneBp
 
   /// Percent off one spell's mana cost, in basis points. `healing` picks up the
   /// tree-wide healing discount as well as the spell's own line, and everything
@@ -1712,6 +1738,12 @@ type Entity =
     /// starts, so an interrupted cast costs nothing.
     Resource: int
     MaxResource: int
+    /// The pool *before* Intellect. Vanilla prices percentage costs off base mana:
+    /// Arcane Instability's eruption "consumes 2% of your base mana", and 2% of the
+    /// max pool is a cost an order of magnitude larger at level 33 (the Intellect
+    /// term is `Intellect * 15`). Everything else that prices off a pool uses
+    /// `MaxResource`; this exists for the talents that say "base".
+    BaseResource: int
     ResourceRegenPerTick: int
     /// Mana, rage or energy. Rage is built by fighting and energy regenerates on
     /// its own clock, so the tick loop has to know which economy it is feeding.

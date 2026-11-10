@@ -89,7 +89,7 @@ module PartyAi =
       | Some victim ->
         c.Ability.Effects
         |> List.exists (function
-          | SpellDamage(damage, _) -> damage * 4 >= victim.MaxHealth
+          | SpellDamage(damage, _, _) -> damage * 4 >= victim.MaxHealth
           | _ -> false)
       | None -> false
 
@@ -142,7 +142,7 @@ module PartyAi =
       | WeaponDamage(multiplierBp, bonus) -> 30 * multiplierBp / 10000 + bonus
       | MultiShot _ -> 30
       | Damage(_, mx) -> mx
-      | SpellDamage(_, mx) -> mx
+      | SpellDamage(_, mx, _) -> mx
       | _ -> 0)
 
   /// The first ability in a kit whose effects satisfy `test`. Rules ask what an

@@ -263,25 +263,34 @@ module SimCombat =
       else
         amount * (10000 + slayingBp caster t) / 10000, w
 
-  /// Hand one proc's result to its holder. Reads the entity back out of the
-  /// world rather than trusting the caller's copy: a proc fired mid-swing must
-  /// land on the character that is standing there now.
-  let private applyProc (p: Proc) (id: EntityId) (w: World) =
+  /// Hand one proc's result to its holder, and report what it did to the *hit* that
+  /// fired it: `10000` for every result that leaves the hit alone, the multiplier for
+  /// the one that does not. Reads the entity back out of the world rather than
+  /// trusting the caller's copy: a proc fired mid-swing must land on the character
+  /// that is standing there now.
+  let private applyProc (p: Proc) (id: EntityId) (w: World) : int * World =
     match tryEntity id w with
-    | None -> w
+    | None -> 10000, w
     | Some e ->
+      let unchanged w = 10000, w
+
       match p.Then with
       // Flat, not `gainRage`: that function converts damage into a level-scaled
       // trickle, and a talent that says "generates 5 rage" is five rage.
       | GrantResource n when e.ResourceKind = Rage && n > 0 && e.MaxResource > 0 ->
-        w
-        |> mapEntity id (fun x -> { x with Resource = min x.MaxResource (x.Resource + n) })
-        |> logLine (sprintf "%s: %s generates %d rage" e.Name p.Talent n)
-      | GrantResource _ -> w
+        unchanged (
+          w
+          |> mapEntity id (fun x -> { x with Resource = min x.MaxResource (x.Resource + n) })
+          |> logLine (sprintf "%s: %s generates %d rage" e.Name p.Talent n)
+        )
+      | GrantResource _ -> unchanged w
       | EmpowerNext(duration, empower) ->
-        w
-        |> mapEntity id (fun x -> { x with Auras = Aura.refresh (Empowered(duration, empower)) x.Auras })
-        |> logLine (sprintf "%s: %s procs" e.Name p.Talent)
+        unchanged (
+          w
+          |> mapEntity id (fun x ->
+            { x with Auras = Aura.refresh (Empowered(duration, empower)) x.Auras })
+          |> logLine (sprintf "%s: %s procs" e.Name p.Talent)
+        )
       // The payload is a buff the holder carries, so it lands through the same
       // `Aura.refresh` every castable buff uses: a second proc refreshes the first
       // rather than stacking a second copy. A buff that moves the swing interval
@@ -290,38 +299,64 @@ module SimCombat =
       // first swing after a Swift Aspects proc is the un-hasted one and the talent
       // loses a fifth of its value.
       | Gain aura ->
-        w
-        |> mapEntity id (fun x ->
-          let auras = Aura.refresh aura x.Auras
+        unchanged (
+          w
+          |> mapEntity id (fun x ->
+            let auras = Aura.refresh aura x.Auras
 
-          let armed =
-            match x.AutoAttack with
-            | Some atk -> min x.SwingTicksLeft (AutoAttack.cadence atk auras)
-            | None -> x.SwingTicksLeft
+            let armed =
+              match x.AutoAttack with
+              | Some atk -> min x.SwingTicksLeft (AutoAttack.cadence atk auras)
+              | None -> x.SwingTicksLeft
 
-          { x with Auras = auras; SwingTicksLeft = armed })
-        |> logLine (sprintf "%s: %s procs" e.Name p.Talent)
+            { x with Auras = auras; SwingTicksLeft = armed })
+          |> logLine (sprintf "%s: %s procs" e.Name p.Talent)
+        )
       // `Map.remove` reads as "never cast", which is ready: the ability's own
       // cooldown entry is the only thing standing between it and its next cast.
       | ResetCooldown ability ->
-        w
-        |> mapEntity id (fun x -> { x with Cooldowns = Map.remove ability x.Cooldowns })
-        |> logLine (sprintf "%s: %s resets %s" e.Name p.Talent ability)
+        unchanged (
+          w
+          |> mapEntity id (fun x -> { x with Cooldowns = Map.remove ability x.Cooldowns })
+          |> logLine (sprintf "%s: %s resets %s" e.Name p.Talent ability)
+        )
+      // The hit itself, and the only result that is not "unchanged". The mana comes
+      // off `BaseResource` because that is the pool the payload prices ("2% of your
+      // base mana"), and it is spent rather than gated on: an eruption is not a
+      // cast, so a mage on an empty bar still erupts and simply pays what is left.
+      | AmplifyHit(damageBp, manaBp) ->
+        let paid = min e.Resource (e.BaseResource * manaBp / 10000)
 
-  /// Fire whatever this character's build hangs off `ev`. Called where the event
-  /// is already decided — a block of `meleeStrike`, a crit of `meleeStrike`, a
-  /// hit of `spellDamage` — so no talent needs a branch of its own.
-  let procOn (ev: ProcEvent) (id: EntityId) (w0: World) : World =
+        damageBp,
+        (w
+         |> mapEntity id (fun x -> { x with Resource = x.Resource - paid })
+         |> logLine (
+           sprintf
+             "%s: %s erupts, +%d%% damage for %d mana"
+             e.Name
+             p.Talent
+             (damageBp - 10000)
+             paid
+         ))
+
+  /// Fire whatever this character's build hangs off `ev`, and hand back both the
+  /// world and what the hit that fired it *gained*: a damage multiplier, `10000` when
+  /// no proc fired or whatever fired left the hit alone. Almost every proc is that
+  /// second case, which is why `procOn` below throws the multiplier away — but a proc
+  /// that makes the current hit bigger (Arcane Instability) cannot ride the world
+  /// alone, because `dealDamage` has already been told the number by the time a
+  /// `World` comes back.
+  let procDamage (ev: ProcEvent) (id: EntityId) (w0: World) : int * World =
     match tryEntity id w0 with
-    | None -> w0
+    | None -> 10000, w0
     | Some e ->
-      ((w0, e), Talents.procsOf ev e.Talents)
-      ||> List.fold (fun (w, e) p ->
+      (((10000, w0), e), Talents.procsOf ev e.Talents)
+      ||> List.fold (fun ((gain, w), e) p ->
         let cooling =
           (e.Cooldowns |> Map.tryFind p.Talent |> Option.defaultValue (ticks 0)) > ticks 0
 
         if cooling then
-          w, e
+          (gain, w), e
         else
           // A guaranteed proc draws nothing at all: the seed's stream stays
           // where a build carrying no procs left it. Zero is the roll that cannot
@@ -330,9 +365,9 @@ module SimCombat =
           let roll, w = if p.ChanceBp >= 10000 then 0, w else rollRange 0 9999 w
 
           if roll >= p.ChanceBp then
-            w, e
+            (gain, w), e
           else
-            let w = applyProc p id w
+            let procBp, w = applyProc p id w
 
             let w =
               if p.InternalCooldown > ticks 0 then
@@ -345,8 +380,15 @@ module SimCombat =
               else
                 w
 
-            w, (tryEntity id w |> Option.defaultValue e))
+            // Two eruptions on one hit multiply rather than the last one winning:
+            // each proc is an independent "this hit is 25% bigger".
+            (gain * procBp / 10000, w), (tryEntity id w |> Option.defaultValue e))
       |> fst
+
+  /// The same call for the sites that only care that the procs happened. Called
+  /// where the event is already decided — a block of `meleeStrike`, a crit of
+  /// `meleeStrike`, a hit of `spellHit` — so no talent needs a branch of its own.
+  let procOn (ev: ProcEvent) (id: EntityId) (w: World) : World = procDamage ev id w |> snd
 
   /// One physical hit from `attacker` on `targetId`: the attack table, then
   /// armour. A melee crit is 200% — the spell multiplier is 150% and applying it
@@ -743,11 +785,13 @@ module SimCombat =
             else
               w) w
 
-        | SpellDamage(lo, hi) ->
+        | SpellDamage(lo, hi, school) ->
           let rolled, w = rollRange lo hi w
-          // `spellBp`, not `damageBp`: Arcane Instability raises spell damage and
-          // must not raise the same caster's staff swing.
-          let rolled = rolled * Talents.spellBp ability.Name actor.Talents / 10000
+          // `damageBp`: one spell's own line plus the tree's tree-wide damage. It
+          // used to be a spell-only variant of this, so that Arcane Instability's
+          // +3% spell damage stayed off a staff swing; that talent is a proc now and
+          // the variant went with it.
+          let rolled = rolled * Talents.damageBp ability.Name actor.Talents / 10000
 
           // Arcane Rupture's share, on the same spell only: the aura names one spell
           // and the talent that grants it grants the ability, not the number.
@@ -760,10 +804,23 @@ module SimCombat =
 
           let amount, crit, w =
             rollCrit
-              (actor.CritChanceBp + actor.Talents.SpellCritBp)
+              (actor.CritChanceBp + Talents.critBp ability.Name actor.Talents)
               (actor.Talents.CritDamageBp + slayingAgainst actor targetId w)
               amount
               w
+
+          // Arcane Instability, and the reason this branch asks for a multiplier
+          // back: a proc that makes *this hit* bigger has to be resolved between the
+          // hit and the damage, because `dealDamage` takes the number. The event is
+          // the school, not the spell — the payload prices the talent on "damaging
+          // Arcane spells", so a mage's Frostbolt must not erupt.
+          let amplifyBp, w =
+            if amount > 0 then
+              procDamage (OnSpellSchoolHit school) actor.Id w
+            else
+              10000, w
+
+          let amount = amount * amplifyBp / 10000
 
           // A damage spell that landed is the event Clearcasting hangs off; a
           // resisted one is not. Rolled once per landed spell, not once per
@@ -777,10 +834,6 @@ module SimCombat =
           let w =
             if amount > 0 then procOn (OnSpellHitOf ability.Name) actor.Id w else w
 
-          // The named half of the same event: `OnSpellHitOf` is what a talent that
-          // resets one specific ability hangs off (Temporal Convergence on Arcane
-          // Missiles), resolved here while the ability name is in hand. A build with
-          // no named procs draws nothing, so the stream stays put.
           let w = dealDamage targetId amount w
 
           // A spell crit is a crit like any other for the named event: the ability
@@ -1347,6 +1400,8 @@ module SimCombat =
                 Cooldowns = Map.empty
                 Resource = 0
                 MaxResource = 0
+                // A pet holds no mana and no talent prices a share of it.
+                BaseResource = 0
                 ResourceRegenPerTick = 0
                 ResourceKind = Mana
                 ComboPoints = 0
