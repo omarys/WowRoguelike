@@ -5712,15 +5712,18 @@ let ``a bear tank taunts with its own Growl`` () =
   // The Near mob is on the Warrior, so it is a mob that has left the Bear.
   Assert.Contains("Growl", abilitiesFor (EntityId 3) (PartyAi.decide w))
 
-/// Shred and Claw are the Rogue's pair renamed, and Ferocious Bite its
-/// Eviscerate: the rotation finds them by what they do — the harder builder is
-/// the one that needs the mob's back — so a Cat fights without the script ever
-/// naming a Rogue ability.
+/// Shred and Claw are the cat's own pair, 225% weapon damage against Claw's 100%,
+/// and Ferocious Bite its finisher: the rotation finds them by what they do — the
+/// harder builder is the one that needs the mob's back — so a Cat fights without
+/// the script ever naming a Rogue ability.
+///
+/// Level 32 is Ferocious Bite's first rank, and the cat has no finisher below it;
+/// the row is the ranks table's ladder, not a gap in the kit.
 [<Fact>]
 let ``a cat druid shreds and ferocious bites`` () =
   let ordersAt (points: int) (onCat: bool) =
     let cat =
-      Content.partyOf [ "Druid (Cat)" ] 24
+      Content.partyOf [ "Druid (Cat)" ] 32
       |> List.head
       |> fun e ->
         { e with
@@ -5739,7 +5742,7 @@ let ``a cat druid shreds and ferocious bites`` () =
 
     abilitiesFor (EntityId 3) (PartyAi.decide w)
 
-  // The mob faces the Warrior, so its back is open and Shred — 150% weapon
+  // The mob faces the Warrior, so its back is open and Shred — 225% weapon
   // damage against Claw's 100% — is the builder the Cat reaches for.
   Assert.Contains("Shred", ordersAt 0 false)
   Assert.Contains("Ferocious Bite", ordersAt 5 false)
@@ -7422,12 +7425,283 @@ let ``Moonkin is a damage caster and carries no heal`` () =
     Assert.Contains(spell, names)
 
 [<Fact>]
-let ``a Feral Druid is the Rogue's economy under feral names`` () =
-  let cat = Content.partyOf [ "Druid (Cat)" ] 24 |> List.head
+let ``a Cat Druid's kit is the druid's rows, not the Rogue's`` () =
+  let cat = Content.partyOf [ "Druid (Cat)" ] 60 |> List.head
   let names = cat.Abilities |> List.map (fun a -> a.Name)
   Assert.Equal(0, cat.ComboPoints)
-  for spell in [ "Claw"; "Shred"; "Ferocious Bite"; "Cat Form" ] do
+
+  for spell in [ "Claw"; "Shred"; "Rake"; "Rip"; "Ferocious Bite"; "Cat Form" ] do
     Assert.Contains(spell, names)
+
+  // Costs are the druid's: Claw 45, Shred 60, Ferocious Bite 35. The Rogue's
+  // pair it used to borrow cost 40 and 60, and Eviscerate 35, so the first and
+  // the third are where a leak would show. Shred's 60 is read after the build has
+  // been folded in, and Improved Shred 2/2 takes 20% of it — 60 * 8000 / 10000.
+  let ability name = cat.Abilities |> List.find (fun a -> a.Name = name)
+  Assert.Equal(45, (ability "Claw").ResourceCost)
+  Assert.Equal(48, (ability "Shred").ResourceCost)
+  Assert.Equal(35, (ability "Ferocious Bite").ResourceCost)
+
+  // 225% weapon damage on Shred is the ranks table's multiplier, and it is the
+  // druid's number: the Rogue's Backstab row is 150%, so a copy would read 15000.
+  let weaponBp (name: string) =
+    (ability name).Effects
+    |> List.pick (function
+      | WeaponDamage(bp, _) -> Some bp
+      | _ -> None)
+
+  Assert.Equal(22500, weaponBp "Shred")
+  Assert.Equal(10000, weaponBp "Claw")
+
+/// The cat's build, read off the hero it was folded into. The tree is the operator's
+/// URL decode — Feral 36, Balance 11, Restoration 4 — and the five numbers below are
+/// the five picks of it that this model can express.
+[<Fact>]
+let ``the cat's build lands on the hero and the bear's does not move`` () =
+  let cat = Content.partyOf [ "Druid (Cat)" ] 60 |> List.exactlyOne
+  let bear = Content.partyOf [ "Druid (Bear)" ] 60 |> List.exactlyOne
+
+  // Natural Weapons 3/3: +10% physical in every form.
+  Assert.Equal(1000, cat.Talents.DamageDoneBp)
+
+  let spell name =
+    cat.Talents.Spells |> List.find (fun s -> s.Spell = name)
+
+  // Predatory Strikes 3/3 (+20% Claw), Feral Aggression 5/5 (+15% Ferocious Bite),
+  // Improved Shred 2/2 (+10% Shred and 20% off its 60 Energy, which is 12).
+  Assert.Equal(2000, (spell "Claw").DamageBp)
+  Assert.Equal(1500, (spell "Ferocious Bite").DamageBp)
+  Assert.Equal(1000, (spell "Shred").DamageBp)
+  Assert.Equal(2000, (spell "Shred").CostBp)
+  Assert.Equal(3, cat.Talents.Spells.Length)
+
+  // Sharpened Claws 3/3 (+6% crit) and Feral Swiftness 2/2 (+4% dodge) are traits,
+  // so they show up as crit and dodge over the bear, which is the one other feral
+  // sheet to compare against. The bear's stat line carries six more Agility than
+  // the cat's, and at ten crit and five dodge per point that is 60 and 30 of the
+  // gap: 600 - 60 = 540 and 400 - 30 = 370.
+  Assert.Equal(540, cat.CritChanceBp - bear.CritChanceBp)
+  Assert.Equal(370, cat.DodgeChanceBp - bear.DodgeChanceBp)
+
+  // And the bear is untouched: Primal Fury and nothing else, no damage line, no
+  // spell line. The two builds share a class and no points.
+  Assert.Empty(bear.Talents.Spells)
+  Assert.Equal(0, bear.Talents.DamageDoneBp)
+  Assert.Equal("Primal Fury", (bear.Talents.Procs |> List.exactlyOne).Talent)
+
+/// A Rake is a real bleed: 40 Energy, and a nine-second `Bleeding` at rank 4's
+/// stated 96 total, which is 10 a tick in whole points (90 of the 96 — the six
+/// points integer division costs, which the row's comment records).
+[<Fact>]
+let ``a Rake lands the bleed it states and lets it expire`` () =
+  let cat =
+    Content.partyOf [ "Druid (Cat)" ] 60
+    |> List.head
+    |> fun e ->
+      { e with
+          Id = EntityId 3
+          Pos = { X = 5; Y = 4 }
+          Resource = e.MaxResource }
+
+  let w =
+    arena 0 0 { X = 7; Y = 5 }
+    |> fun w -> { w with Entities = w.Entities @ [ cat ] }
+
+  let rake =
+    cat.Abilities |> List.find (fun a -> a.Name = "Rake")
+
+  let w = SimCombat.resolveAbility (EntityId 3) (EntityId 100) rake w
+  let bleed = (mobOf w).Auras |> List.exactlyOne
+  Assert.Equal(10, Aura.flatDamagePerTick bleed)
+  Assert.Equal(secTicks 9.0, Aura.remaining bleed)
+
+  // One tick pays ten, straight: a bleed is unmitigated by armour, and the tick
+  // path only lets Shield Wall's aura take a share.
+  let before = (mobOf w).Health
+  let ticked = SimTick.advanceAuraDamage w
+  Assert.Equal(before - 10, (mobOf ticked).Health)
+
+  // Nine seconds of decay and it is gone; nothing else refreshes it because no
+  // party AI ran.
+  let expired =
+    (w, [ 1 .. int (secTicks 9.0) ])
+    ||> List.fold (fun w _ -> SimTick.advanceAuras w)
+
+  Assert.Empty((mobOf expired).Auras |> List.filter (function Bleeding _ -> true | _ -> false))
+
+/// Rip is the finisher that pays in bleed instead of in a hit, and its total is
+/// linear in the points it spends: rank 5 is 270 at one point and 168 a point, so
+/// 942 over twelve seconds at five — 22 a tick against 78.
+[<Fact>]
+let ``a Rip's bleed scales with the combo points it spends`` () =
+  let ripAt (points: int) =
+    let cat =
+      Content.partyOf [ "Druid (Cat)" ] 60
+      |> List.head
+      |> fun e ->
+        { e with
+            Id = EntityId 3
+            Pos = { X = 5; Y = 4 }
+            ComboPoints = points
+            Resource = e.MaxResource }
+
+    let w =
+      arena 0 0 { X = 7; Y = 5 }
+      |> fun w -> { w with Entities = w.Entities @ [ cat ] }
+
+    let rip = cat.Abilities |> List.find (fun a -> a.Name = "Rip")
+    let w = SimCombat.resolveAbility (EntityId 3) (EntityId 100) rip w
+    Aura.flatDamagePerTick ((mobOf w).Auras |> List.exactlyOne), w
+
+  let one, _ = ripAt 1
+  let five, after = ripAt 5
+  Assert.Equal(22, one)
+  Assert.Equal(78, five)
+
+  // The points are spent, which is what makes it a finisher rather than a second
+  // builder: 78 is the fifth point's bleed and it is not still banked.
+  Assert.Equal(0, (after.Entities |> List.find (fun e -> e.Id = EntityId 3)).ComboPoints)
+
+/// Ferocious Bite is the druid's row, not the Rogue's Eviscerate under a feral
+/// name. Eviscerate bakes Improved Eviscerate 3/3 into every term (`lo * 115 /
+/// 100`), so a copy would read 228-297 with a step of 169 at rank 5; the ranks
+/// table's druid numbers are 199-259 with a step of 147.
+[<Fact>]
+let ``Ferocious Bite does not pay the Rogue's Improved Eviscerate`` () =
+  let cat = Content.partyOf [ "Druid (Cat)" ] 60 |> List.exactlyOne
+
+  let bite =
+    cat.Abilities |> List.find (fun a -> a.Name = "Ferocious Bite")
+
+  Assert.Equal(1, bite.Effects.Length)
+
+  let lo, hi, step =
+    match bite.Effects with
+    | [ Finisher(lo, hi, step) ] -> lo, hi, step
+    | _ -> 0, 0, 0
+
+  Assert.Equal((199, 259, 147), (lo, hi, step))
+
+  // Five points: 199 + 147 * 4 = 787. The Rogue's baked row would read 228 + 169 *
+  // 4 = 904, so the difference is the talent, and the single effect above is also
+  // why Ruthlessness is not here: Eviscerate appends a combo point after its
+  // finisher, and a finisher that builds a point is a different ability.
+  Assert.Equal(787, lo + step * 4)
+
+/// Berserk's cat half is Adrenaline Rush's shape: a 100% energy-regeneration
+/// increase for twenty seconds, on the payload's 6 min cooldown. A drained bar
+/// refills one point every two ticks, so it takes 200 ticks to reach 100 — and 100
+/// ticks while the buff is up, because the regen line pays `base + base * bp /
+/// 10000` and 10000 bp is exactly double.
+[<Fact>]
+let ``Berserk doubles the cat's energy regeneration for twenty seconds`` () =
+  let catWorld (berserk: bool) =
+    let cat =
+      Content.partyOf [ "Druid (Cat)" ] 60
+      |> List.head
+      |> fun e -> { e with Id = EntityId 3; Pos = { X = 5; Y = 4 } }
+
+    let w =
+      arena 0 0 { X = 7; Y = 5 }
+      |> fun w -> { w with Entities = w.Entities @ [ cat ] }
+
+    if not berserk then
+      w
+    else
+      let ability = cat.Abilities |> List.find (fun a -> a.Name = "Berserk")
+      SimCombat.resolveAbility (EntityId 3) (EntityId 3) ability w
+
+  let drained w =
+    w |> SimState.mapEntity (EntityId 3) (fun e -> { e with Resource = 0 })
+
+  let ticksToCap (w: World) =
+    let cap =
+      (w.Entities |> List.find (fun e -> e.Id = EntityId 3)).MaxResource
+
+    let rec go (n: int) (w: World) =
+      let w =
+        { w with Tick = w.Tick + ticks 1 } |> SimTick.advanceResource
+
+      if (w.Entities |> List.find (fun e -> e.Id = EntityId 3)).Resource >= cap then
+        n
+      else
+        go (n + 1) w
+
+    go 1 w
+
+  Assert.Equal(200, ticksToCap (drained (catWorld false)))
+  Assert.Equal(100, ticksToCap (drained (catWorld true)))
+
+  // And the rate is back to normal when the twenty seconds are up: the same
+  // drained bar takes 200 ticks again, which is the assertion that the buff is a
+  // duration and not a permanent doubling.
+  let lapsed =
+    (catWorld true, [ 1 .. int (secTicks 20.0) ])
+    ||> List.fold (fun w _ -> SimTick.advanceAuras w)
+
+  Assert.Equal(200, ticksToCap (drained lapsed))
+
+/// Berserk's bear half is Last Stand's shape: a fifth more maximum health for
+/// twenty seconds, and the health is lost when it lapses — the clamp to the
+/// shrunken maximum is the whole clause, and it is what stops the cooldown being
+/// a heal.
+[<Fact>]
+let ``Berserk's bear half raises the maximum health and takes it back`` () =
+  let bear =
+    Content.partyOf [ "Druid (Bear)" ] 60
+    |> List.head
+    |> fun e -> { e with Id = EntityId 3; Pos = { X = 5; Y = 4 } }
+
+  let w =
+    arena 0 0 { X = 7; Y = 5 }
+    |> fun w -> { w with Entities = w.Entities @ [ bear ] }
+
+  let berserk =
+    bear.Abilities |> List.find (fun a -> a.Name = "Berserk")
+
+  // Three minutes, DERIVED rather than read: the talent payload's tooltip carries
+  // no cooldown, and the two abilities the operator named as the model for each
+  // half — Adrenaline Rush and Last Stand — are both three-minute cooldowns.
+  Assert.Equal(secTicks 180.0, berserk.CooldownTicks)
+
+  let before = bear.MaxHealth
+  let up = SimCombat.resolveAbility (EntityId 3) (EntityId 3) berserk w
+
+  let buffed =
+    up.Entities |> List.find (fun e -> e.Id = EntityId 3)
+
+  Assert.Equal(before + before * 2000 / 10000, buffed.MaxHealth)
+  Assert.Equal(buffed.MaxHealth, buffed.Health)
+
+  // Twenty seconds later the maximum is the old one and the body is not left
+  // above it: a full-health bear reads full health again, not 120%.
+  let lapse (w: World) =
+    (w, [ 1 .. int (secTicks 20.0) ])
+    ||> List.fold (fun w _ -> SimTick.advanceAuras w)
+
+  let after =
+    (lapse up).Entities |> List.find (fun e -> e.Id = EntityId 3)
+
+  Assert.Equal(before, after.MaxHealth)
+  Assert.Equal(before, after.Health)
+
+  // A body wounded while buffed keeps the damage it took, and the two cases differ
+  // in which number the lapse lands on. A hundred off the buffed 4647 is 4547,
+  // still above the old 3873, so the clamp takes the whole 774 the buff granted;
+  // a hit of 874 lands at 3773, under the old maximum, and is carried across the
+  // lapse untouched. Either way the buff is not a heal that banked the difference.
+  let lapseHealth (amount: int) =
+    (lapse (up |> SimCombat.dealDamage (EntityId 3) amount)).Entities
+    |> List.find (fun e -> e.Id = EntityId 3)
+
+  let wounded =
+    (up |> SimCombat.dealDamage (EntityId 3) 100).Entities
+    |> List.find (fun e -> e.Id = EntityId 3)
+
+  Assert.Equal(buffed.MaxHealth - 100, wounded.Health)
+  Assert.Equal(before, (lapseHealth 100).Health)
+  Assert.Equal(before - 100, (lapseHealth 874).Health)
+  Assert.Equal(before, (lapseHealth 874).MaxHealth)
 
 [<Fact>]
 let ``a Druid's forms are gated by its spec`` () =

@@ -16,7 +16,33 @@ module SimTick =
   /// Auras age, and anything that runs out falls off. The ageing rule for each
   /// kind lives in `Aura.advance`, which is the one place that matches every case.
   let advanceAuras (w: World) =
-    mapAll (fun e -> { e with Auras = e.Auras |> List.choose Aura.advance }) w
+    mapAll
+      (fun e ->
+        let auras = e.Auras |> List.choose Aura.advance
+
+        // Berserk's health half is taken back here, and only here: the maximum is a
+        // field on the body, so the one place every aura's lifetime ends is the one
+        // place that can subtract what the aura granted. Health clamps to the
+        // shrunken maximum — that clamp is the whole "after the effect ends, the
+        // health is lost" clause, and it is what stops the cooldown being a heal.
+        let lapsed =
+          e.Auras
+          |> List.tryPick (function
+            | Invigorated(_, _, granted) -> Some granted
+            | _ -> None)
+
+        let holds =
+          auras
+          |> List.exists (function
+            | Invigorated _ -> true
+            | _ -> false)
+
+        match lapsed with
+        | Some granted when not holds ->
+          let maximum = e.MaxHealth - granted
+          { e with Auras = auras; MaxHealth = maximum; Health = min e.Health maximum }
+        | _ -> { e with Auras = auras })
+      w
 
   /// Summoned things live on their owner's clock: a totem runs out of time, and a
   /// pet dies when the Hunter that called it does. Neither can be modelled as an
@@ -155,8 +181,22 @@ module SimTick =
           e
         else
           let gain =
+            // The regen multiplier both clocks read: Innervate's five times and
+            // Berserk's doubling are one aura, because both are a statement about
+            // how fast the bar refills. Energy pays `base + base * bp / 10000` and
+            // not `base * (10000 + bp) / 10000`, which is the same arithmetic until
+            // the base is one point: a floored 1.5x of one rounds back to one and a
+            // cooldown would do nothing at all. +100% lands on a whole second point
+            // and so is the one bonus a one-point clock can carry.
+            let boon =
+              e.Auras
+              |> List.tryPick (function
+                | Innervated(_, bp) -> Some bp
+                | _ -> None)
+              |> Option.defaultValue 0
+
             match e.ResourceKind with
-            | Energy -> if energyTick then 1 else 0
+            | Energy -> if energyTick then 1 + 1 * boon / 10000 else 0
             | Mana ->
               // The rate comes from Spirit (see `Content.derive`). Inside the five
               // seconds after a cast it pays a Tick less rather than a fraction,
@@ -170,16 +210,6 @@ module SimTick =
                   | _ -> false)
 
               let rate = if fresh then max 0 (e.ResourceRegenPerTick - 1) else e.ResourceRegenPerTick
-
-              // Innervate multiplies what is actually there, so a target that has
-              // stopped casting gets the full five times and a target that keeps
-              // casting multiplies the trickle.
-              let boon =
-                e.Auras
-                |> List.tryPick (function
-                  | Innervated(_, bp) -> Some bp
-                  | _ -> None)
-                |> Option.defaultValue 0
 
               rate * (10000 + boon) / 10000
             | Rage -> 0

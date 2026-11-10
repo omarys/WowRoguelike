@@ -1271,6 +1271,72 @@ module SimCombat =
 
           w
 
+        | Bleed(duration, perTick) ->
+          // A bleed is `Bleeding`, the aura Piercing Shots already uses, so the
+          // ticks are paid by `SimTick.advanceAuraDamage` through `dealDamage` and
+          // never through `addThreat`: threat is charged where a spell is cast. A
+          // re-application stacks rather than refreshes, because `Aura.replaces`
+          // keeps every `Bleeding` distinct for Piercing Shots' sake — a cat that
+          // presses Rake twice holds two bleeds, which is the price of sharing the
+          // aura with a talent that has to stack.
+          w
+          |> mapEntity targetId (fun e ->
+            { e with
+                Auras = Aura.refresh (Bleeding(duration, perTick, Some actor.Id)) e.Auras })
+          |> logLine (sprintf "%s: %s bleeds %s, %d a tick" actor.Name ability.Name targetName perTick)
+
+        | BleedFinisher(duration, total, perPoint) ->
+          // The combo points are read off the actor as it stood when the ability
+          // was resolved, then spent — a finisher is a decision. The per-tick share
+          // is the table's total for that point count divided by the duration, in
+          // whole points, so a 12-second Rip at one point (42) ticks 3 and at five
+          // (138) ticks 11.
+          let points = actor.ComboPoints
+          let total = total + perPoint * max 0 (points - 1)
+          let ticksLeft = int duration / int (secTicks 1.0)
+          let perTick = total / max 1 ticksLeft
+
+          let w =
+            w
+            |> mapEntity targetId (fun e ->
+              { e with
+                  Auras = Aura.refresh (Bleeding(duration, perTick, Some actor.Id)) e.Auras })
+            |> mapEntity actorId (fun e -> { e with ComboPoints = 0 })
+
+          w
+          |> logLine (
+            sprintf "%s: %s bleeds %s, %d over %d ticks from %d points" actor.Name ability.Name targetName total ticksLeft points
+          )
+
+        | Fortified(duration, healthBp) ->
+          // Last Stand's shape: the maximum rises and the health with it, so the
+          // buff is worth a bar rather than a heal — and `SimTick.advanceAuras`
+          // takes the same points back off the maximum when the aura lapses.
+          let w =
+            w
+            |> mapEntity actorId (fun e ->
+              // The grant is computed off the *unbuffed* maximum: a second Berserk
+              // while the first still stands would otherwise raise a bar that is
+              // already raised and hand back only the last grant when it lapses.
+              // Unreachable in play — twenty seconds of aura against a three-minute
+              // cooldown — but the aura is refreshed rather than stacked, so the
+              // arithmetic has to be the one that survives a refresh.
+              let held =
+                e.Auras
+                |> List.tryPick (function
+                  | Invigorated(_, _, n) -> Some n
+                  | _ -> None)
+                |> Option.defaultValue 0
+
+              let granted = (e.MaxHealth - held) * healthBp / 10000
+
+              { e with
+                  MaxHealth = e.MaxHealth - held + granted
+                  Health = e.Health - held + granted
+                  Auras = Aura.refresh (Invigorated(duration, healthBp, granted)) e.Auras })
+
+          w |> logLine (sprintf "%s: %s raises %s's maximum health" actor.Name ability.Name actor.Name)
+
         | ComboPoint count ->
           w
           |> mapEntity actorId (fun e ->
@@ -1283,6 +1349,11 @@ module SimCombat =
           let points = actor.ComboPoints
           let extra = perPoint * max 0 (points - 1)
           let rolled, w = rollRange (lo + extra) (hi + extra) w
+          // A tree that names the finisher raises it, exactly as it raises a
+          // weapon strike: Ferocious Bite's Feral Aggression is 15% on this row and
+          // nothing else, and the Rogue's Eviscerate reads 10000 because its own
+          // build has no such line.
+          let rolled = rolled * Talents.damageBp ability.Name actor.Talents / 10000
           let amount, crit, w = meleeStrike actor targetId rolled 0 (Some ability.Name) w
           let w = dealDamage targetId amount w
           let w = if actor.Faction = Party then addThreat targetId actor amount w else w

@@ -424,6 +424,169 @@ module Content =
             Range = 1
             Effects = [ Lacerate(secTicks 15.0, 12, 5) ] } ] }
 
+  /// Claw ranks 1-5 (levels 20-58): 45 Energy, 100% weapon damage plus a flat step,
+  /// and one combo point. The cat's builder, and the reason a cat spends its energy
+  /// in 45s where a rogue spends the same bar in 40s. Rows from
+  /// `.pi/research/ranks/druid.md`; the 45 Energy is the client's, not OctoWoW's
+  /// flat-cost rewrite, which covers the Rogue's buttons and not the cat's.
+  let clawRanks: AbilityDef =
+    { Name = "Claw"
+      Resource = Energy
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ for level, bonus in [ 20, 27; 28, 39; 38, 57; 48, 88; 58, 115 ] do
+            { Level = level
+              Cost = 45
+              CastTicks = ticks 0
+              CooldownTicks = ticks 0
+              Range = 1
+              Effects = [ WeaponDamage(10000, bonus); ComboPoint 1 ] } ] }
+
+  /// Shred ranks 1-5 (levels 22-54): 60 Energy for 225% weapon damage plus a step,
+  /// and one combo point. It exists from behind, and `PartyAi` already treats the
+  /// Rogue's Backstab as the strike it opens a pull with, which is the same
+  /// positional rule under a feral name.
+  let shredRanks: AbilityDef =
+    { Name = "Shred"
+      Resource = Energy
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ for level, bonus in [ 22, 54; 30, 72; 38, 99; 46, 144; 54, 180 ] do
+            { Level = level
+              Cost = 60
+              CastTicks = ticks 0
+              CooldownTicks = ticks 0
+              Range = 1
+              Effects = [ WeaponDamage(22500, bonus); ComboPoint 1 ] } ] }
+
+  /// Rake ranks 1-4 (levels 24-54): 40 Energy, 100% weapon damage plus a step, one
+  /// combo point, and a nine-second bleed. Rank 1 lands exactly at 24, which is the
+  /// ladder this file is built around.
+  ///
+  /// DERIVED: the ranks table states the bleed as a **total** over nine seconds
+  /// (39/57/75/96), and `Aura.Bleeding` pays a whole number of points a tick, so the
+  /// per-tick figure here is that total divided by the nine ticks — 4, 6, 8, 10 —
+  /// which pays 36 of rank 1's 39 over its life. The three points lost to integer
+  /// division are the cost of a tick that cannot be a fraction; a per-tick aura with
+  /// a fractional accumulator would be a new field on `Aura` for 3 damage.
+  let rakeRanks: AbilityDef =
+    { Name = "Rake"
+      Resource = Energy
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ for level, bonus, bleed in [ 24, 19, 39; 34, 28, 57; 44, 43, 75; 54, 58, 96 ] do
+            { Level = level
+              Cost = 40
+              CastTicks = ticks 0
+              CooldownTicks = ticks 0
+              Range = 1
+              Effects =
+                [ WeaponDamage(10000, bonus)
+                  Bleed(secTicks 9.0, bleed / 9)
+                  ComboPoint 1 ] } ] }
+
+  /// Rip ranks 1-6 (levels 20-60): 30 Energy for a bleed whose total is linear in
+  /// combo points over twelve seconds, and the points are spent. The table gives all
+  /// five totals per rank (42/66/90/114/138 at rank 1), which is one point plus a
+  /// step of 24 — so a rank is its one-point total and its step, and the five
+  /// numbers are reproduced exactly.
+  let ripRanks: AbilityDef =
+    { Name = "Rip"
+      Resource = Energy
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ for level, total, step in
+            [ 20, 42, 24; 28, 66, 42; 36, 90, 54; 44, 138, 84; 52, 192, 120; 60, 270, 168 ] do
+            { Level = level
+              Cost = 30
+              CastTicks = ticks 0
+              CooldownTicks = ticks 0
+              Range = 1
+              Effects = [ BleedFinisher(secTicks 12.0, total, step) ] } ] }
+
+  /// Ferocious Bite ranks 1-5 (levels 32-60): 35 Energy, the cat's finisher, exactly
+  /// linear in combo points (rank 1 is 50-66 at one point, 194-210 at five, so the
+  /// step is 36).
+  ///
+  /// Two things it deliberately does **not** carry. The Rogue's Eviscerate has
+  /// Improved Eviscerate's +15% baked into every term and Ruthlessness' combo point
+  /// appended; this row is the druid's own number with neither, and the cat's 15%
+  /// (Feral Aggression) is a `Spells` line on the hero instead, so a reader can see
+  /// where it came from. And rank 1 is level 32: a cat below that has no finisher,
+  /// which is the ladder the table states rather than a gap in the kit.
+  let ferociousBiteRanks: AbilityDef =
+    { Name = "Ferocious Bite"
+      Resource = Energy
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ for level, lo, hi, step in
+            [ 32, 50, 66, 36; 40, 79, 103, 59; 48, 122, 162, 92; 56, 173, 223, 128; 60, 199, 259, 147 ] do
+            { Level = level
+              Cost = 35
+              CastTicks = ticks 0
+              CooldownTicks = ticks 0
+              Range = 1
+              Effects = [ Finisher(lo, hi, step) ] } ] }
+
+  /// Berserk, the feral tree's one-point talent, and the reason there are two rows
+  /// here for one talent. OctoWoW's payload (`.pi/research/octowow/druid-feral.md`
+  /// §2) gives it two disjoint halves — "increases your energy regeneration rate by
+  /// 100% while in Cat form, and increases your total health by 20% while in Bear
+  /// form" — so a single row could only carry one of them, or an effect resolver
+  /// would have to branch on the caster's form. The kit is already built per spec,
+  /// so the cat gets the energy half and the bear the health half, on one talent's
+  /// worth of points and one cooldown. The cooldown is **3 minutes, DERIVED**: the
+  /// talent payload's tooltip states no cooldown, and the two abilities the operator
+  /// named as the model for each half — a Rogue's Adrenaline Rush and a Warrior's
+  /// Last Stand — are both three-minute cooldowns, which is where the number comes
+  /// from rather than from a table nobody has checked.
+  ///
+  /// Not modelled, and named rather than guessed: the Fear removal, because there is
+  /// no Fear aura in this model for the party to shed. The cat's half rides
+  /// `Aura.Innervated` — the aura Innervate already uses — because both are a
+  /// statement about how fast a bar refills; `SimTick.advanceResource` pays it as
+  /// `base + base * bp / 10000`, so +100% is two energy a window rather than one.
+  let berserkCat: AbilityDef =
+    { Name = "Berserk"
+      Resource = Energy
+      Stance = Some CatForm
+      TargetKind = Self
+      Interruptible = false
+      Ranks =
+        [ { Level = 1
+            Cost = 0
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 180.0
+            Range = 0
+            Effects = [ Innervate(secTicks 20.0, 10000) ] } ] }
+
+  /// Berserk's bear half: Last Stand's shape, twenty seconds of a fifth more maximum
+  /// health, and the health is lost when it lapses (`Aura.Invigorated` owns the
+  /// undo). The 20% is the payload's number and the 6 min cooldown is the same line's.
+  let berserkBear: AbilityDef =
+    { Name = "Berserk"
+      Resource = Rage
+      Stance = Some BearForm
+      TargetKind = Self
+      Interruptible = false
+      Ranks =
+        [ { Level = 1
+            Cost = 0
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 180.0
+            Range = 0
+            Effects = [ Fortified(secTicks 20.0, 2000) ] } ] }
+
   /// Lesser Heal ranks 1-3 (levels 1, 4, 10): rank 3 is the last rank in the game.
   /// It keeps the file's 135-158 — the 1.12 pair, against the table's 1.15.9
   /// 143-165 — because it is the heal a level-24 Priest still carries.
@@ -4752,6 +4915,99 @@ module Content =
               InternalCooldown = ticks 0
               Then = GrantResource 5 } ] }
 
+  /// The feral **damage** build — Feral 36, Balance 11, Restoration 4 — which the
+  /// operator asked for by URL (`/talents/druid/?points=BSAaAI-AoYDQaDSQIFQB-Ag`,
+  /// 51 points, and the one-point difference from `…AFQB-Ao` is exactly Berserk
+  /// below). It is the cat's tree, and the cat no longer borrows the bear's or
+  /// the Rogue's: the two feral specs share a form, a resource kind and nothing
+  /// else, and `bearTalents` above stays the one Primal Fury proc it was.
+  ///
+  /// Expressible, pick by pick:
+  /// - Natural Weapons 3/3 — "[3/6/10]% damage with physical attacks in all forms":
+  ///   `DamageDoneBp = 1000`. `Talents.damageBp` reaches the weapon strike, the
+  ///   finisher and the white swing, which between them are the whole of a cat.
+  /// - Improved Shred 2/2 — 20% off Shred's 60 Energy, so `CostBp = 2000`, plus the
+  ///   +10% on Shred's damage this build's brief reads into the same talent
+  ///   (`DamageBp = 1000`). DERIVED: the payload states the talent as a percentage,
+  ///   and twelve energy is that 20% of this row's 60 — the arithmetic is written out
+  ///   so the two can be checked against each other rather than taken on trust.
+  /// - Predatory Strikes 3/3 — "[7/14/20]% damage caused by Claw, Rake, Maul, Swipe":
+  ///   the Claw line is `DamageBp = 2000`. The talent's other half, +10% melee attack
+  ///   power, is not modelled: a cat's attack power is `MeleeDamageBonus`, derived
+  ///   from Strength and the sheet, and no field on `Talents` multiplies it. Rake is
+  ///   named by the same clause and gets no line — most of Rake's damage is its
+  ///   bleed, and a percentage that must reach the aura as well as the strike is a
+  ///   change to the bleed path, not a line here.
+  /// - Feral Aggression 5/5 — "[3/6/9/12/15]% damage to Ferocious Bite": the
+  ///   `DamageBp = 1500` line.
+  /// - Sharpened Claws 3/3 (+6% crit) and Feral Swiftness 2/2 (+4% dodge) are
+  ///   `Traits`, not `Talents`, because that is where a passive's numbers live for a
+  ///   class whose build is a set of passives. Feral Swiftness' movement half is
+  ///   inert: nothing in this sim reads a speed bonus.
+  ///
+  /// Not modelled, each named with its reason:
+  /// - Primal Fury 2/2 — five energy on a critical, and `ProcResult.GrantResource`
+  ///   pays Rage and only Rage. The bear keeps this proc because a bear's resource is
+  ///   the one it pays; the cat's half has no subject.
+  /// - Open Wounds 3/3 — the payload's rewrite gives Rip more damage and Claw +30%
+  ///   per bleed on the target. Nothing in the damage path reads the target's aura
+  ///   list, so "per active bleed" has nothing to count.
+  /// - Carnage 2/2 — the payload's rewrite makes Ferocious Bite refresh Rake and Rip.
+  ///   A finisher has no handle on an aura another ability applied; the refresh would
+  ///   be a second lookup by name in the aura list.
+  /// - Blood Frenzy 2/2 — Tiger's Fury and Enrage are in no kit, and nothing modifies
+  ///   `AutoAttack.Ticks` after construction.
+  /// - Ancient Brutality 2/2 — the cat half pays 3-5 energy per tick of a bleed, and
+  ///   no bleed tick pays a resource. The bear half needs a dodge-triggered aura.
+  /// - Feral Instinct 3/3 — bear threat, and the cat has no threat row:
+  ///   `feralInstinctBp` belongs to the bear's multiplier and is not touched here.
+  /// - Leader of the Pack 1/1 — a party-wide +3% crit aura. `PartyBuffs` carries
+  ///   `PartyBuffKind` and has no crit entry; adding one is a new buff for the party
+  ///   layer, not a line in a build.
+  /// - Heart of the Wild 5/5 — +20% Strength in cat form. `Talents` has `IntellectBp`
+  ///   and `HealthBp` and no `StrengthBp`, so the cat's half has no field to land in.
+  /// - Furor 4/5 — a shift into cat form grants energy, and nothing in this model pays
+  ///   on a shift: `TakeStance` sets an aura and the resource clock is never consulted
+  ///   about it.
+  /// - Omen of Clarity 1/1 — a clearcasting proc, and there is no free-cast aura for
+  ///   energy: `Empower.FreeMana` waives a mana cost and a cat pays energy.
+  /// - Ferocity — not bought in this build (its five off Claw and Rake is what the cat
+  ///   spends on Improved Shred and Open Wounds instead), so there is no cost line to
+  ///   write and no risk of one leaking in from the bear's build.
+  /// - The Balance filler — Nature's Grasp 1, Improved Nature's Grasp 2, Sylvan
+  ///   Blessing 2, Natural Shapeshifter 2: a reactive root, an on-kill mana regen and a
+  ///   shapeshift cost cut, none of which has a subject in this model. They are the
+  ///   price of reaching Natural Weapons through the row gate.
+  ///
+  /// **Berserk is bought**, 1/1, and it is the pick that makes this build's Feral
+  /// tree 36 rather than 35. It is not a line here because its two halves are not
+  /// talents: see `berserkCat` and `berserkBear` above, which are buttons on the two
+  /// kits instead — one talent, two spec-specific abilities, because the halves share
+  /// nothing but a name and a cooldown, and a single row cannot carry both without a
+  /// form branch inside the effect resolver.
+  let private catTalents =
+    { Talents.none with
+        DamageDoneBp = 1000
+        Spells =
+          [ { Spell = "Shred"
+              CostBp = 2000
+              HealBp = 0
+              DamageBp = 1000
+              CritBp = 0
+              ElementShareBp = 0; CastTicksOff = ticks 0 }
+            { Spell = "Claw"
+              CostBp = 0
+              HealBp = 0
+              DamageBp = 2000
+              CritBp = 0
+              ElementShareBp = 0; CastTicksOff = ticks 0 }
+            { Spell = "Ferocious Bite"
+              CostBp = 0
+              HealBp = 0
+              DamageBp = 1500
+              CritBp = 0
+              ElementShareBp = 0; CastTicksOff = ticks 0 } ] }
+
   /// Which forms a Druid of this spec may stand in. The operator's rule: Tree of
   /// Life belongs to the healer and Moonkin to the caster damage spec, while Bear
   /// and Cat are open to every role, and every role may drop back to humanoid.
@@ -4778,14 +5034,17 @@ module Content =
       | BearDruid -> Tank
       | CatDruid | MoonkinDruid -> Dps
 
-    // Nature's Grace and Gift of Nature are healing talents and no balance or
-    // feral tree is modelled at all, so the healer's build is the only one there
-    // is: every other spec runs `Talents.none` rather than a copied healer's tree.
+    // Nature's Grace and Gift of Nature are healing talents, so the healer's build is
+    // `druidTalents`; Bear and Cat carry their own (the bear's rage proc, the cat's
+    // physical damage and its two feral traits), and the Moonkin runs `Talents.none`
+    // because no balance tree is modelled — it is a caster whose damage is the
+    // Wrath/Moonfire rows and nothing else.
     let talents =
       match spec with
       | TreeDruid -> druidTalents
       | BearDruid -> bearTalents
-      | CatDruid | MoonkinDruid -> Talents.none
+      | CatDruid -> catTalents
+      | MoonkinDruid -> Talents.none
 
     // Bear Form is +180% armour from items at level 10 (Dire Bear's 360% arrives at
     // at 40): 1.8 x the 444 the set carries at 24 is 799. `Traits.ArmorBonus` is the
@@ -4799,7 +5058,11 @@ module Content =
     let traits =
       match spec with
       | BearDruid -> { Traits.none with ArmorBonus = 799 }
-      | CatDruid -> Traits.none
+      // Sharpened Claws 3/3 is +6% crit and Feral Swiftness 2/2 +4% dodge — the two
+      // picks of the cat's own build that are a number on the hero rather than a
+      // line about a spell. Feral Swiftness' other half is a movement speed bonus,
+      // and nothing in this sim reads one, so the dodge is the whole of it.
+      | CatDruid -> { Traits.none with CritBonusBp = 600; DodgeBonusBp = 400 }
       // The two casters get the pushback resistance that makes a cast land through
       // a hit; only the damage spec gets the crit every other caster dps has, since
       // a healer's crit is already paid for by `druidTalents` and a moonkin without
@@ -4843,7 +5106,8 @@ module Content =
             savageBiteRanks
             faerieFireFeralRanks
             enrageRanks
-            lacerateRanks ]
+            lacerateRanks
+            berserkBear ]
         @ [ bearForm ]
       | TreeDruid ->
         // Today's Druid healer, unchanged, plus the form it stands in.
@@ -4860,13 +5124,17 @@ module Content =
           @ [ swiftmend; naturesSwiftness; rebirth; innervate; removeCurse; abolishPoison ])
         @ [ treeOfLife; humanForm ]
       | CatDruid ->
-        // The Rogue's energy economy with feral names on it: Claw is Sinister
-        // Strike, Shred is Backstab and Ferocious Bite is Eviscerate.
-        AbilityDef.kitAt
-          level
-          [ { sinisterStrike with Name = "Claw" }
-            { backstab with Name = "Shred" }
-            { eviscerate with Name = "Ferocious Bite" } ]
+        // The cat's own rows, not the Rogue's under feral names. Claw is 45 Energy
+        // for 100% weapon damage, Shred 60 for 225%, Rake an energy bleed, Rip a
+        // finisher whose bleed scales with the points it spends, and Ferocious Bite
+        // the 35-Energy finisher. `withTalents` folds the build into them once, at
+        // construction, so Improved Shred's twelve energy and the three damage lines
+        // are already in the `Ability` the tick loop reads.
+        withTalents
+          catTalents
+          (AbilityDef.kitAt
+            level
+            [ clawRanks; shredRanks; rakeRanks; ripRanks; ferociousBiteRanks; berserkCat ])
         @ [ catForm ]
       | MoonkinDruid ->
         // A caster dps: the three damage spells the healer already carries, plus

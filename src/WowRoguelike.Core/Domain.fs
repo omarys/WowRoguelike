@@ -349,6 +349,14 @@ type Aura =
   /// a target that keeps casting multiplies the five-second trickle and gets
   /// nearly nothing, which is what vanilla's +400% does to a casting priest.
   | Innervated of remaining: int<tick> * regenBp: int
+  /// Berserk's health half, which is Last Stand's shape: the holder's *maximum*
+  /// health is raised by `healthBp` for the aura's life and the points that bought
+  /// are taken back off the maximum when it lapses. It carries the absolute
+  /// `granted` because `MaxHealth` is a field on the body and not a function of its
+  /// auras — the raise happens once, when the ability resolves, so the undo has to
+  /// know the exact number to take away rather than recompute a percentage of a
+  /// maximum that already includes it.
+  | Invigorated of remaining: int<tick> * healthBp: int * granted: int
   /// Swift Aspects: ranged attack speed, held for its duration rather than paid in
   /// one lump. `speedBp` shortens the holder's *ranged* swing timer only, and the
   /// port's only ranged timer is a Hunter's bow — which is why this is the first
@@ -487,6 +495,7 @@ module Aura =
     | Empowered(r, e) when r > ticks 1 -> Some(Empowered(r - ticks 1, e))
     | RecentlyCast r when r > ticks 1 -> Some(RecentlyCast(r - ticks 1))
     | Innervated(r, bp) when r > ticks 1 -> Some(Innervated(r - ticks 1, bp))
+    | Invigorated(r, bp, n) when r > ticks 1 -> Some(Invigorated(r - ticks 1, bp, n))
     | Hastened(r, bp) when r > ticks 1 -> Some(Hastened(r - ticks 1, bp))
     | Casting(r, bp) when r > ticks 1 -> Some(Casting(r - ticks 1, bp))
     | Ruptured(r, bp) when r > ticks 1 -> Some(Ruptured(r - ticks 1, bp))
@@ -535,6 +544,7 @@ module Aura =
     | Casting(r, bp) -> sprintf "casting(%d,+%d)" r bp
     | Ruptured(r, bp) -> sprintf "ruptured(%d,+%d)" r bp
     | Innervated(r, bp) -> sprintf "innervated(%d,x%d)" r bp
+    | Invigorated(r, bp, n) -> sprintf "invigorated(%d,+%d,+%d)" r bp n
 
   /// The name a player sees, short enough to fit over a sprite.
   let label =
@@ -570,6 +580,7 @@ module Aura =
     | Empowered _ -> "EMPOWERED"
     | RecentlyCast _ -> "CASTING"
     | Innervated _ -> "INNERVATE"
+    | Invigorated _ -> "BERSERK"
 
   /// True when the aura helps its holder rather than hurting it.
   let isHelpful =
@@ -587,7 +598,8 @@ module Aura =
     // gully run logged no heal at all and two Regrowths for zero.
     | Hastened _
     | Casting _
-    | Ruptured _ -> true
+    | Ruptured _
+    | Invigorated _ -> true
     | _ -> false
 
   /// Which dispel takes this aura off. `Physical` answers "none of them" — see
@@ -615,7 +627,8 @@ module Aura =
     | Innervated _
     | Hastened _
     | Casting _
-    | Ruptured _ -> Magic
+    | Ruptured _
+    | Invigorated _ -> Magic
     | DeadlyPoisoned _
     | Wounded _
     | Numbed _
@@ -653,6 +666,7 @@ module Aura =
     | Empowered(r, _) -> r
     | RecentlyCast r
     | Innervated(r, _)
+    | Invigorated(r, _, _)
     | Hastened(r, _)
     | Casting(r, _)
     | Ruptured(r, _)
@@ -903,6 +917,7 @@ module Aura =
     | Hastened _ -> 24
     | Casting _ -> 25
     | Ruptured _ -> 26
+    | Invigorated _ -> 27
 
   /// Does casting `newer` overwrite `older`?
   let replaces (older: Aura) (newer: Aura) =
@@ -1214,6 +1229,19 @@ type Effect =
   /// refresh its clock. A second application is worth more than the first, which is
   /// the whole of the ability, so the effect carries the cap rather than the row.
   | Lacerate of duration: int<tick> * damagePerTick: int * maxStacks: int
+  /// A bleed on the target: `damagePerTick` every Tick for `duration`, unmitigated
+  /// and never missed. The one route into the sim that puts a `Bleeding` aura on a
+  /// body without a talent behind it (Rake), which is why it is here rather than a
+  /// `DamageOverTime`: the era's bleed and its magic damage-over-time are different
+  /// auras for a reason — a bleed is physical, a rogue can't dodge it, and nothing
+  /// dispels it but time.
+  | Bleed of duration: int<tick> * damagePerTick: int
+  /// A bleed paid for with combo points: `total` damage over `duration` at one
+  /// point, plus `perPoint` for every point after the first, and the pool is spent
+  /// (Rip). Totals rather than per-tick numbers because that is how the ranks table
+  /// states the row — 42/66/90/114/138 at rank 1, one number per combo point — and
+  /// the per-tick share is that total divided by the duration.
+  | BleedFinisher of duration: int<tick> * total: int * perPoint: int
   /// Viper Sting: drain `amountPerTick` of the target's resource every Tick for
   /// `duration`. A caster with an empty pool cannot pay for a cast, so on a
   /// mana-using mob this is a throughput cut, not a damage ability — which is
@@ -1232,6 +1260,10 @@ type Effect =
   | Blocks of duration: int<tick>
   /// Shield Wall: cut the damage the caster takes by `reductionBp`.
   | ReducesDamage of duration: int<tick> * reductionBp: int
+  /// Berserk's health half: raise the caster's maximum health by `healthBp` for
+  /// `duration`, and take the points back when it lapses (Last Stand's shape). The
+  /// aura, not this effect, owns the undo — see `Aura.Invigorated`.
+  | Fortified of duration: int<tick> * healthBp: int
   /// A Rogue's combo point on the actor, kept for the next finisher.
   | ComboPoint of count: int
   /// Spend the actor's combo points as physical damage: `min`-`max` at one
@@ -1304,7 +1336,8 @@ module Ability =
       AbilityGroup.Utility
     elif has (function
         | Blocks _
-        | ReducesDamage _ -> true
+        | ReducesDamage _
+        | Fortified _ -> true
         | _ -> false) then
       AbilityGroup.Defence
     elif has (function
@@ -1317,7 +1350,9 @@ module Ability =
         | _ -> false) then
       AbilityGroup.Heal
     elif has (function
-        | DamageOverTime _ -> true
+        | DamageOverTime _
+        | Bleed _
+        | BleedFinisher _ -> true
         | _ -> false) then
       AbilityGroup.DamageOverTime
     elif has (function
