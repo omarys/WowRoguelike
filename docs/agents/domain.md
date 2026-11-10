@@ -120,7 +120,7 @@ the BOM and adds the newline so its output is byte-identical to what is committe
 — check `git diff` after compiling, it should be empty. An edited `.ink` that is
 never recompiled commits a narrative the game does not play.
 
-**Two traps, both cost real time:**
+**Three traps, each of which cost real time:**
 
 - **`dotnet build` at the repo root does not refresh the test project's copy of
   the Core DLL.** After a Core change, `dotnet test` can run against a stale
@@ -132,6 +132,14 @@ never recompiled commits a narrative the game does not play.
   (`/home/omary/.local/share/mise/dotnet-root`), which `mise.toml` arranges.
   Unset, any invocation resolves against `/usr/lib64/dotnet` (.NET 8 only) and
   fails with "You must install or update .NET".
+- **An untrusted clone makes the `mise` shims fall back to the system SDK.**
+  `mise trust --show` in the repo root reports `untrusted`, mise then ignores
+  `mise.toml` (which pins `dotnet = "10"`), and `dotnet` degrades to
+  `/usr/lib64/dotnet` (8.0.132). SDK 8 cannot parse `WowRoguelike.slnx`, so the
+  pre-commit `dotnet build` hook fails with
+  `MSB4068: The element <Solution> is unrecognized`. The fix is `mise trust` once
+  per clone or machine; that same `MSB4068` from that hook means either the repo is
+  untrusted or the SDK is not 10.
 
 **`mise run runs` is a fingerprint.** Currently:
 `seeds=120 cleared=120 wiped=0 unresolved=0 median-ticks=809 min=685 max=992`
@@ -247,6 +255,24 @@ first — which surfaced as a *mob's* heal logged against a party member's name.
 **`Entity.Stats` is pre-buff.** `SimState` applies auras and party buffs on read;
 do not bake a buff into a kit's base stats or it applies twice.
 
+**A buff that moves a *maximum* cannot be a read, and its undo has to be exact.**
+`MaxHealth` is a stored field on the body, not a function of its auras, so a percentage
+raise cannot be recomputed on read the way `Entity.Stats` is. Berserk's bear half is
+`Aura.Invigorated of remaining: int<tick> * healthBp: int * granted: int`
+(`Domain.fs:359`): `Effect.Fortified` (`Domain.fs:1266`) raises the maximum and the
+current health by `healthBp` once, when the ability resolves, and the aura carries the
+**absolute** `granted` because the undo must subtract the number that was added rather
+than a percentage of a maximum that already includes it. `SimTick.advanceAuras`
+(`SimTick.fs:18-47`) is the one place every aura's lifetime ends, so it is the one place
+that can subtract — it sets `MaxHealth = MaxHealth - granted` and
+`Health = min Health MaxHealth`, and that clamp is the payload's "after the effect ends,
+the health is lost". It is also what keeps the cooldown from being a heal: a bear at
+full health reads full health again afterwards, and a bear wounded while buffed keeps
+exactly the damage it took. The grant is computed off the **unbuffed** maximum
+(`e.MaxHealth - held`), so a refresh re-grants the same points instead of compounding.
+This is the model's first health-boosting aura; every other buff moves a derived read,
+and none of them had an undo to write.
+
 **Headless runs need the AI driven by hand.** `SimTick.run`/`step` do not call
 `PartyAi.decide`; the harness and scripts do (`SimTick.step (PartyAi.decide w)`).
 A "headless run" that forgets this measures a party standing still.
@@ -336,6 +362,16 @@ less** rather than a fraction. That is the honest integer version of the rule an
 makes the class difference the rule exists for: a Spirit-heavy Priest regenerates
 through a cast, a thin-Spirit Mage does not. Out of combat nothing changed — that is
 still the pool-percentage drinking rate.
+
+**The Energy clock reads the same aura, and can only read it at 100%.** Berserk's cat
+half is `Aura.Innervated` at `+100%`, the aura Innervate already uses, because both are
+a statement about how fast a bar refills. `SimTick.advanceResource` (`SimTick.fs:175`)
+now pays Energy as `1 + 1 * boon / 10000` and **not** as
+`base * (10000 + boon) / 10000`, which is the same arithmetic until the base is one
+point: Energy is a one-point clock, a floored 1.5× of one point rounds back to one, and
+a smaller bonus would round away entirely. So `+100%` is the one bonus a one-point clock
+can carry, and it lands on a whole second point — 2 Energy a window instead of 1, which
+halves the time a drained bar takes to refill.
 
 **Innervate is a duration, not a lump, and the target stops casting for it.**
 Vanilla's "+400% regeneration for 20 s" multiplies *whatever the target has*, so it is
@@ -1009,7 +1045,7 @@ to ride them**. `channels` asks the mana-blind `paid` ordering instead: the miss
   be the best thing per cast *regardless of price*, which is the only condition under
   which a tick and the cooldown are worth spending.
 
-**The bug it uncovered is the reusable part, and it was already live.** `Aura.disposition`
+**The bug it uncovered is the reusable part, and it was already live.** `Aura.isHelpful`
 is where a `Magic` aura says whether it is a debuff, and `PartyAi`'s cleaner dispels what
 the answer calls hostile — so an unlisted party buff makes the party dispel its own Mage.
 Measured before the fix: a gully run logged **no heal at all and two Regrowths for zero**,
@@ -1923,7 +1959,7 @@ landed kits do not have:
 | Mage Resonance Cascade | a self-recursive chance to cast again | needs an extra-cast result *and* a recursion policy; not a data row |
 | ~~Mage Arcane Instability~~ | [16..25]% damage | **landed** — a school on the hit (`MagicSchool`) and `AmplifyHit`, 25% on `OnSpellSchoolHit Arcane` for +25% and 2% of base mana. See §"the two axes it needed" |
 | Mage Temporal Convergence | — | the note records "no coefficient"; nothing to port |
-| Druid Ancient Brutality | rage/energy from bleed ticks | **unblocked by the Nightfall increment** (a dot now knows its applier) and blocked on the rest: `GrantResource` pays rage only, so an energy tick needs Cat, which is parked; still needs a bleed that ticks
+| Druid Ancient Brutality | rage/energy from bleed ticks | **half-unblocked**: a bleed now ticks (`Effect.Bleed`/`Effect.BleedFinisher`, `Domain.fs:1249`/`:1258`, writing `Aura.Bleeding`) and the cat is a landed build, but `GrantResource` pays Rage only and the bear half needs a dodge-triggered aura |
 | Druid Omen of Clarity | a free-cast proc | the source gives no chance percentage |
 | Druid Sylvan Blessing, Owlkin Frenzy | auras on damage taken | Moonkin is one of the three **parked** specs (10 skipped tests); Owlkin Frenzy also needs `OnDamageTaken` |
 
@@ -2471,14 +2507,17 @@ destination needs to be given up, but not on every blocked tick.
    player will do better — this is the floor a composition sets). The rows this table
    carried before that work are retired: `a05ae24` gave **the four healers** their
    level-60 healing talents, so a level-24 hero is no longer the hero those rows
-   measured. It did not give them to every class, and **structurally cannot**:
-   `type Talents` (`Domain.fs:889-930`) models healing only — heal-done, heal-cost,
-   Intellect, regen, crit mana refund, crit armour, Healing Way, Spirit-to-healing
-   — so the five DPS classes are `Talents.none` by construction (`Content.fs:3321`
-   Warrior, `:3433` Rogue, `:3480` Mage, `:3646` Warlock, `:3806` Hunter). A DPS
-   class therefore grows from 24 to 60 by ability ranks and the gear curve alone,
-   while a healer grows by those *and* a talent tree. That asymmetry is a confound
-   in the level-60 comparison above, not a finding about the classes.
+   measured. At the time it did not give them to every class and **structurally could
+   not**: `type Talents` modelled healing only — heal-done, heal-cost, Intellect,
+   regen, crit mana refund, crit armour, Healing Way, Spirit-to-healing — so the five
+   DPS classes ran `Talents.none` by construction. **That premise is retired and the
+   rows below are a `Talents.none`-DPS measurement**: the port has since given Warrior,
+   Rogue, Mage, Warlock and Hunter their own trees (§8), and the Druid's bear and cat
+   theirs (`bearTalents`, `catTalents`), so the only spec still on `Talents.none` is the
+   Moonkin (`Content.fs:5047`). A DPS class now grows from 24 to 60 by ability ranks,
+   the gear curve *and* a tree, which is the same three levers a healer grows by. The
+   asymmetry the rows below were collected under is gone, so re-measure before citing
+   them as a class comparison.
 
    | round | gully cleared | gully alive | gully median | graveyard |
    |---|---|---|---|---|
@@ -2850,7 +2889,13 @@ delegate-runs/<runId>/activity.jsonl`) and verify the file on disk (a clean
   | `Druid (Bear)` | armour-and-Stamina leather, Slaghammer | `(2018, (71, 98, 184, 15, 7))` — Warden Staff |
 
   Cat reuses the Rogue's sheet and Moonkin the healer's: the two agree on what
-  those bodies wear at 24, so the outfit that differs is the raid one. Cat and
+  those bodies wear at 24, so the outfit that differs is the raid one. **The sheet
+  is where the borrowing stops.** Since `ed70d53` the cat's kit is the druid's own
+  five rows — Claw, Shred, Rake, Rip, Ferocious Bite — folded through `withTalents`;
+  it had been the Rogue's kit under feral names under `Talents.none`, which is what
+  made its finisher carry a Rogue's Improved Eviscerate ×1.15 that this build never
+  buys. The cat's build, its talent-to-model table and the Berserk split are in
+  `.pi/research/octowow/druid-feral.md` §10. Cat and
   Bear split their weapon ladders on the same reasoning — the cat swings
   Manual Crowd Pummeler at 60, the bear Warden Staff from 43, whose 260 armour no
   cat weapon carries. Attack power follows the body rather than the class: a

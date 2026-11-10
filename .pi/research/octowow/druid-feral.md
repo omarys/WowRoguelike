@@ -63,7 +63,7 @@ Defensive (armour, dodge, health, threat, Rage income):
 - **Primal Fury** (11, 2, requires Sharpened Claws 3/3) — "Gives you a [50/100]% chance to gain an additional **5 Rage** anytime you get a critical strike while in Bear and Dire Bear Form…" Page: "Row 4 → Row 3."
 - **Ancient Brutality** (16, 1 of 2) — "Dodging an attack while in Bear or Dire Bear Form imbues you with the spirit of the Ancients, generating **[2/4] Rage per second for 5 sec**. This effect can only occur once every 9 seconds. While in Cat Form, periodic ticks of your Bleed effects restore [3/5] Energy."
 - **Carnage** (22, 1 of 2) — "Your Maul, Swipe, and Savage Bite abilities return **[5/10]% of their damage as healing to you**."
-- **Berserk** (18, 1, 6 min cooldown) — "Removes all Fear effects and increases your energy regeneration rate by 100% while in Cat form, and increases your **total health by 20%** while in Bear form. After the effect ends, the health is lost. Effect lasts 20 seconds."
+- **Berserk** (18, 1; the tooltip states **no cooldown** — see §10.4) — "Removes all Fear effects and increases your energy regeneration rate by 100% while in Cat form, and increases your **total health by 20%** while in Bear form. After the effect ends, the health is lost. Effect lasts 20 seconds."
 
 Offensive (damage, crit, cost):
 - **Ferocity** (1, 5) — "Reduces the cost of your Maul, Swipe, Savage Bite, Claw, and Rake abilities by **[1/2/3/4/5] Rage or Energy**." Page: "Also reduces the cost of Savage Bite."
@@ -88,23 +88,24 @@ Three buckets, cheapest first. **All 21 talents the build spends in are listed, 
 | Feral Instinct 3/3 | `threatBp` for `BearDruid` (`Content.fs:3929`): `tankStanceBp` 50000 (`Content.fs:1650`) → **57500**. Lands on `Entity.ThreatMultiplierBp` (`Domain.fs:1277`, read at `SimState.fs:328`), so it multiplies *every* threat source the bear has — the only threat lever that also scales area threat. |
 | Sharpened Claws 3/3 | `Traits.CritBonusBp = 600` on the Bear **and** Cat traits (`Content.fs:3914-3915`), consumed at `Content.fs:3232`. |
 | Feral Swiftness 2/2 | `Traits.DodgeBonusBp = 400` (`Content.fs:3233`). The movement half is inert — the sim has no outdoor state. |
-| Ferocity 5/5 | A `Spells` line with `CostBp = 3333` on "Maul" and "Claw": Maul costs 15 Rage (`Content.fs:257`), 15 × 6667 / 10000 = 10, which is the -5 the talent promises. Needs `withTalents` (`Content.fs:3461`) wired onto the Bear and Cat kits, which today bypass it (`Content.fs:3901` gives them `Talents.none`). |
+| Ferocity 5/5 | A `Spells` line with `CostBp = 3333` on "Maul" and "Claw": Maul costs 15 Rage (`Content.fs:257`), 15 × 6667 / 10000 = 10, which is the -5 the talent promises. It needs `withTalents` (`Content.fs:4263`) on the kit that carries it, and the cat's kit is now folded there (`Content.fs:5133-5137`) — but **the pick is not bought**, so no row uses this line. The Bear kit is still a bare `AbilityDef.kitAt`. |
 | Feral Charge 1/1 | A new `AbilityDef` of `Effect.Charge` (`Domain.fs:869`) + `Interrupt` + `Root 4 sec`. Three existing effect cases. |
 | Brutal Impact 2/2 | `Effect.Stun (duration + 1 s)` — but it has **no subject**: Bash and Pounce do not exist in the kit. Both are `Effect.Stun` / `Effect.Root` rows, so this is content, not vocabulary. |
 
-**Needs a new model axis (15).**
+**Needs a new model axis (15), and four of these rows have since landed for the cat build
+(§10) — the table is kept as the bear build's planning record, not as a live gap list.**
 
 | Talent | Missing axis |
 |---|---|
 | Thick Hide 3/3 | An **armour multiplier on item armour**. `Armor = d.Armor + armorBp + Agility*2 + traits.ArmorBonus` (`Content.fs:3234`) is all flat; `armorBp` comes from party buffs, not a percent. This is exactly the gap the existing `shortcut:` already names (`Content.fs:3908-3911`: "a per-spec armour multiplier is a new field, and a separate decision"). |
-| Heart of the Wild 5/5 | **Per-form stat multipliers.** `IntellectBp` (`Domain.fs:1136`, folded at `Content.fs:3218`) covers the Intellect fifth. `MaxHealth = d.BaseHealth + pool s.Stamina 10` (`Content.fs:3228`) and `AttackPower = Strength*ApPerStrength + …` (`Content.fs:3237`) have no percent anywhere, so Bear Stamina +20% and Cat Strength +20% have no field. |
-| Predatory Strikes 3/3 | Two: an **attack-power multiplier** (same line as above) and an **ability damage multiplier** — `SpellTalent` (`Domain.fs:1109-1118`) carries `CostBp`/`HealBp`/`CritBp`/`CastTicksOff` and **no damage field**. |
-| Natural Weapons 3/3 | A **physical damage multiplier in all forms** (again no `SpellTalent` damage field) plus a **hit chance** — nothing in `Traits` or `Talents` feeds miss chance. |
-| Feral Aggression 5/5 | A **damage bonus on one ability** (Ferocious Bite +15%). The Demoralizing Roar half has no subject — the ability is not in any kit. |
+| Heart of the Wild 5/5 | **Per-form stat multipliers.** `IntellectBp` (`Domain.fs:1136`, folded at `Content.fs:3218`) covers the Intellect fifth. `MaxHealth = d.BaseHealth + pool s.Stamina 10` (`Content.fs:3228`) and `AttackPower = Strength*ApPerStrength + …` (`Content.fs:3237`) have no percent anywhere, so Bear Stamina +20% and Cat Strength +20% have no field. (Berserk's `Aura.Invigorated` now moves `MaxHealth` at runtime, but it is a temporary grant carried in the aura, not a Stamina multiplier.) |
+| Predatory Strikes 3/3 | Two, and **the damage half has since landed** (§10): `SpellTalent.DamageBp` exists and the cat's Claw line reads `2000` (`Content.fs:5001`). What is left is an **attack-power multiplier** — same line as above. |
+| Natural Weapons 3/3 | The damage half **has since landed** (§10): `Talents.DamageDoneBp = 1000` (`Content.fs:4990`). What is left is the **hit chance** — nothing in `Traits` or `Talents` feeds miss chance. |
+| Feral Aggression 5/5 | **Landed for the cat** (§10): `SpellTalent{Spell="Ferocious Bite"; DamageBp=1500}` (`Content.fs:5007`). The Demoralizing Roar half still has no subject — the ability is not in any kit. |
 | Primal Fury 2/2 | A **crit-triggered resource gain**. `SimCombat.gainRage` exists but is called from damage paths only; nothing hooks a crit. |
-| Ancient Brutality 1/2 | Two triggers: **on dodge → Rage over time** (needs a dodge-triggered aura; no aura is emitted by a dodge) and **on bleed tick → Energy** (no bleed aura exists — `Aura.Corrupted` is `Domain.fs:233`, unmitigated damage, and is not a bleed). |
+| Ancient Brutality 1/2 | Two triggers: **on dodge → Rage over time** (needs a dodge-triggered aura; no aura is emitted by a dodge) and **on bleed tick → Energy**. The bleed is on the target — `Aura.Bleeding` (`Domain.fs:293`) predates this commit, and `Effect.Bleed`/`Effect.BleedFinisher` (`Domain.fs:1249`, `:1258`) are the routes that now write it — but no bleed tick pays a resource: `ProcResult.GrantResource` pays Rage only. |
 | Carnage 1/2 | A **self-heal proportional to damage dealt**. `Effect.Heal` takes fixed min/max (`Domain.fs:810`); nothing reads back the damage just dealt. |
-| Berserk 1/1 | Three: a **health multiplier buff** (`MaxHealth` is computed once at construction, `Content.fs:3228`), an **energy-regen multiplier aura**, and a **Fear removal** — there is no Fear aura to remove (`Aura` has `Stunned`/`Silenced`/`Rooted`, `Domain.fs:217-224`). |
+| Berserk 1/1 | **Both halves landed** (§10.4): `berserkCat` is `Aura.Innervated` at +100% for 20 s (`Content.fs:559`) and `berserkBear` is `Aura.Invigorated` at +20% maximum health for 20 s (`Content.fs:576`), on one 3-minute cooldown. What is not modelled is the **Fear removal** — there is no Fear aura to remove (`Aura` has `Stunned`/`Silenced`/`Rooted`, `Domain.fs:217-224`). |
 | Leader of the Pack 1/1 | A **form-conditional party aura**. `PartyBuffKind` (`Domain.fs:1363-1378`) is a closed union applied at construction, has no crit member, and is not gated on the holder's form. |
 | Blood Frenzy 2/2 | Tiger's Fury and Enrage are not in the kit; the axis it needs is an **attack-speed buff aura** — nothing modifies `AutoAttack.Ticks` after construction. |
 | Omen of Clarity 1/1 | A **random proc on attack/spell**. `Empowers` + `Empower.FreeMana` (`Domain.fs:157-163`, `Domain.fs:839`) already carry the "next ability is free" half, but nothing rolls a chance on a swing. |
@@ -116,7 +117,7 @@ Three buckets, cheapest first. **All 21 talents the build spends in are listed, 
 
 **What is landed is the row, not the rotation.** The bear's AI presses Maul and never the sweep, and that is measured rather than pending: pressing Swipe on the body count alone left **2 of 12 level-60 seeds uncleared** (seeds 4 and 6, stopped at the 6000-tick cap with the pack alive and reset to full). The log of seed 4 names the mechanism — on one Tick the Mage polymorphs a Ravine Ravager and the bear's sweep lands on it, because both orders are decided from the same pre-Tick world, and `Aura.endsOnHostileAction` means the sweep wakes the sheep. A second rule (`no body in reach is held`) did not help, because the race is intra-Tick rather than in the visible state. With the press removed, the row's presence is inert: over the same twelve seeds the summaries are **byte-identical to the run with Swipe stripped**, tick for tick. It earns its press the day a Tank's decision can see the cast the party is about to make.
 
-## 6. The build decoded
+## 6. The build decoded (the bear build — the cat's is §10)
 
 Codec re-verified independently: 3 bits per slot, 28 slots per tree, base64, trees joined by `-`. **51 of 51.** Tree identities from the payload, as above.
 
@@ -167,10 +168,15 @@ So the OctoWoW port does **not** close the sim's area-threat gap. What it does g
 
 ## 8. Not done
 
-- Any change to `Content.fs`: this note is research.
-- The Bear's Swipe row, and the `shortcut:` at `Content.fs:3941-3943` that it makes obsolete.
+- Any change to `Content.fs` **from this note**: it is research. The cat build of §10 is
+the exception — it landed as `ed70d53` and was written from this file's §1-§4.
+- The Bear's Swipe row landed in `7a12e52`. What is still open is the AI that would
+press it (§5, and `docs/agents/domain.md` §8).
 - Every **UNVERIFIED** item in §7.
 - The Moonkin and Restoration halves of the Druid, which the sibling notes cover.
+- **The cat's rotation, and any measurement of it.** §10 is a kit and a talent record:
+nothing picks between Claw and Shred, nothing decides when to spend combo points on Rip
+or Ferocious Bite, and `PartyAi` has no cat branch at all. See `docs/agents/handoff.md`.
 
 ## 9. Threat, as the operator states it
 
@@ -201,3 +207,190 @@ duration or a per-application threat for any of them: those still come from
 `.pi/research/ranks/druid.md` where it has a row, and stay marked as derived
 where it does not. Feral Instinct's +15% is separate and cited at
 `Content.fs` from §4 of this note (`.pi/research/octowow/druid-feral.md:59`).
+
+## 10. The cat build — the feral damage build, and the kit that stopped being the Rogue's
+
+`ed70d53`. The cat spec had been the Rogue's kit under feral names — Claw was
+`sinisterStrikeRanks`, Shred `backstabRanks`, Ferocious Bite `eviscerateRanks` — under
+`Talents.none` and `Traits.none`. `eviscerateRanks` bakes a Rogue's Improved Eviscerate
+`×1.15` into every term, which this build never buys, so the copy was wrong by a talent
+as well as by a name. The operator's build replaces the kit, the talents and the traits.
+
+**The build:** <https://octowow.st/talents/druid/?points=BSAaAI-AoYDQaDSQIFQB-Ag> —
+**Feral 36 / Balance 11 / Restoration 4 = 51 points.** The operator's first link was a
+near-identical string, `…DSQAFQB-Ao`, and it is **superseded** by this one. The two
+differ in exactly two slots and nowhere else: **Feral slot 18 (Berserk) 0 → 1** and
+**Restoration slot 2 (Furor) 5 → 4**. Both strings total 51; the second buys the
+capstone and pays for it out of Furor.
+
+### 10.1 The decode
+
+Codec: base64 alphabet, **two talent slots per character, three bits each, high slot
+first**, one `-`-separated segment per tree in **Balance / Feral / Restoration** order.
+It is validated the only way that counts — run against the bear build in §6 it
+reproduces that decode slot for slot and totals its 51 points:
+
+```
+Balance   (tree 0)  11 points  {1:1, 2:2, 3:2, 6:3, 7:2, 10:1}
+   1 Nature's Grasp 1/1 · 2 Improved Nature's Grasp 2/2 · 3 Sylvan Blessing 2/2
+   6 Natural Weapons 3/3 · 7 Natural Shapeshifter 2/2 · 10 Omen of Clarity 1/1
+Feral     (tree 1)  36 points  {2:5, 4:3, 7:3, 8:2, 10:3, 11:2, 13:3, 14:2, 15:2,
+                                16:2, 18:1, 21:5, 22:2, 25:1}
+   2 Feral Aggression 5/5 · 4 Feral Instinct 3/3 · 7 Open Wounds 3/3
+   8 Feral Swiftness 2/2 · 10 Sharpened Claws 3/3 · 11 Primal Fury 2/2
+   13 Predatory Strikes 3/3 · 14 Blood Frenzy 2/2 · 15 Improved Shred 2/2
+   16 Ancient Brutality 2/2 · 18 Berserk 1/1 · 21 Heart of the Wild 5/5
+   22 Carnage 2/2 · 25 Leader of the Pack 1/1
+Restoration (tree 2)  4 points  {2:4}
+   2 Furor 4/5
+```
+
+Fifteen of the Feral slots carry the bear decode's own names. The two that do not are
+**7** and **15** — the only two Feral records the bear build never takes — and their
+rank counts settle which is which: 3 ranks is **Open Wounds 3/3**, 2 is **Improved
+Shred 2/2**, the two names the code's `catTalents` doc block uses.
+
+Prerequisites hold against the payload's `requires`/`reqRanks` edges: Omen of Clarity
+needs Natural Weapons 3/3, Primal Fury and Blood Frenzy need Sharpened Claws 3/3,
+Heart of the Wild needs Predatory Strikes 3/3.
+
+**The one partial spend is Furor at 4/5, and it is what the Berserk point cost.** The
+bear build spends no Restoration at all, so the cat build's Restoration 4 is entirely
+Furor, bought down from 5 to fund slot 18.
+
+### 10.2 What landed, talent by talent
+
+| Pick | Model | Where |
+|---|---|---|
+| Natural Weapons 3/3 | `Talents.DamageDoneBp = 1000` — "[3/6/10]% damage with physical attacks in all forms". `Talents.damageBp` reaches the weapon strike, the finisher and the white swing | `Content.fs:4990` |
+| Improved Shred 2/2 | `SpellTalent{Spell="Shred"; DamageBp=1000; CostBp=2000}` — **the `CostBp` is DERIVED**: 20% of the row's 60 Energy is 12, and `2000` bp of 60 is 12 | `Content.fs:4992-4996` |
+| Predatory Strikes 3/3 | Claw `DamageBp = 2000` — the payload's "[7/14/20]% damage caused by Claw, Rake, Maul, Swipe" at 3/3. **Rake is named by the same clause and gets no line**: most of Rake's damage is its bleed, and a percentage that has to reach the aura as well as the strike is a change to the bleed path, not a `Spells` line | `Content.fs:4998-5002` |
+| Feral Aggression 5/5 | Ferocious Bite `DamageBp = 1500` — "[3/6/9/12/15]% damage to Ferocious Bite" at 5/5 | `Content.fs:5004-5008` |
+| Sharpened Claws 3/3 | `Traits.CritBonusBp = 600` — "[2/4/6]% critical strike chance" | `Content.fs:5065` |
+| Feral Swiftness 2/2 | `Traits.DodgeBonusBp = 400` — the dodge half only; the movement half is inert, nothing reads a speed bonus | `Content.fs:5065` |
+| Berserk 1/1 | two abilities, not one line — §10.4 | `Content.fs:559`, `:576` |
+
+`catTalents` is selected at `Content.fs:5046` and the two traits at `Content.fs:5065`.
+**The kit is folded through `withTalents`** (`Content.fs:4263`), which the cat's kit
+never was: before this commit a `Spells` line on a cat was inert, because the ability
+the tick loop reads was built from the bare row. The fold happens once, at construction
+(`Content.fs:5133-5137`), so Improved Shred's twelve Energy and the three damage lines
+are already inside the `Ability`.
+
+### 10.3 The kit
+
+All five rows are the druid's own, out of `.pi/research/ranks/druid.md`, not renamed
+Rogue rows:
+
+| Row | Cost | Shape |
+|---|---|---|
+| Claw (`Content.fs:432`) | 45 Energy | 100% weapon plus a flat step per rank, one combo point. The builder, and the reason a cat spends its bar in 45s where a Rogue spends the same bar in 40s |
+| Shred (`Content.fs:451`) | 60 Energy | 225% weapon plus a step, one combo point |
+| Rake (`Content.fs:476`) | 40 Energy | 100% weapon plus a step, one combo point, and a nine-second bleed: totals 39/57/75/96 over four ranks, paid **4/6/8/10 a tick** |
+| Rip (`Content.fs:499`) | 30 Energy | a finisher bleed linear in the points it spends — rank 6 (level 60) is **270 + 168 a point** over twelve seconds, paid 22 a tick at one point and 78 at five. The points are spent |
+| Ferocious Bite (`Content.fs:525`) | 35 Energy | the finisher — rank 5 (level 60) is **199-259 with a step of 147** |
+
+**Two derived things in that table, both marked in the rows themselves.**
+
+Rake's bleed is a **DERIVED** per-tick figure: the ranks table states a *total* over
+nine seconds and `Aura.Bleeding` (`Domain.fs:293`) pays a whole number of points a
+tick, so the per-tick number is that total divided by nine — which pays **36, 54, 72 and
+90** of the stated 39, 57, 75 and 96. What is lost is integer division's, and a
+fractional accumulator would be a new field on `Aura` for three damage at rank 1.
+
+Ferocious Bite is **deliberately not derived from `eviscerate`**, and that is the one
+place the old copy was actively wrong: `eviscerateRanks` bakes Improved Eviscerate 3/3
+into every term (`lo * 115 / 100`), so a copy would read 228-297 with a step of 169 at
+rank 5 where the druid's table says 199-259 and 147. Feral Aggression's +15% is a
+`Spells` line on the hero instead, so a reader can see where it came from. Eviscerate
+also appends Ruthlessness' combo point after its finisher; Ferocious Bite does not,
+which is why it carries one `Finisher` effect and no `ComboPoint`.
+
+### 10.4 Berserk — one talent, two buttons
+
+The payload's tooltip for Berserk (IDs #51415/#51416; talent record `i=18`, tree index
+1), verbatim:
+
+> Removes all Fear effects and increases your energy regeneration rate by 100% while in
+> Cat form, and increases your total health by 20% while in Bear form. After the effect
+> ends, the health is lost. Effect lasts 20 seconds.
+
+The operator's own framing, and the one the implementation follows: **the cat half is a
+Rogue's Adrenaline Rush, the bear half is a Warrior's Last Stand.** The two halves share
+nothing but a name and a cooldown, so they are **two abilities** — `berserkCat`
+(`Content.fs:559`) and `berserkBear` (`Content.fs:576`), one on each kit — rather than
+one row with a form branch inside the effect resolver.
+
+**The cat half** rides `Aura.Innervated`, the aura Innervate already uses, because both
+are a statement about how fast a bar refills. `SimTick.advanceResource`
+(`SimTick.fs:175-199`) pays Energy as `1 + 1 * boon / 10000` and **not** as
+`base * (10000 + bp) / 10000`, and that is why the mechanism only works at exactly
+100%: Energy is a one-point clock, a floored 1.5× of one point rounds back to one, and
+a smaller bonus would round away entirely. `+100%` lands on a whole second point — two
+Energy a window instead of one, which halves the time a drained bar takes to refill
+(200 ticks to 100). The mana clock already honoured this aura; the energy clock did not.
+
+**The bear half** needed `Aura.Invigorated` (`Domain.fs:359`), **the model's first
+health-boosting aura**, and it is a field on the body rather than a derived function for
+one reason: `MaxHealth` is a stored field, not a function of the holder's auras, so a
+percentage cannot be recomputed on read. `Effect.Fortified` (`Domain.fs:1266`, resolved
+at `SimCombat.fs:1311`) raises the maximum by `healthBp` once, when the ability
+resolves, and **carries the absolute `granted` in the aura** because the undo has to
+know the exact number to take away rather than recompute a percentage of a maximum that
+already includes it. `SimTick.advanceAuras` (`SimTick.fs:19-47`) is the one place every
+aura's lifetime ends, so it is the one place that can subtract: when the `Invigorated`
+aura is gone it sets `MaxHealth = MaxHealth - granted` and `Health = min Health
+MaxHealth`. **That clamp is the payload's "after the effect ends, the health is lost",
+and it is what stops the cooldown being a heal** — a bear at full health reads full
+health again afterwards, not 120%, and a bear wounded while buffed keeps exactly the
+damage it took.
+
+**The cooldown is 3 minutes, DERIVED.** The talent's tooltip states none. Adrenaline
+Rush and Last Stand — the two abilities the operator named as the model for each half —
+are both three-minute cooldowns, and that is where the number comes from rather than
+from a table nobody has checked.
+
+**Not modelled:** the Fear removal, because there is no `Aura.Fear` for the party to
+shed — nothing in this model can be feared.
+
+### 10.5 Not modelled, pick by pick
+
+Each is named with its reason in the `catTalents` doc block (`Content.fs:4918-4986`);
+the table is the same list put against the tree, so a reader can see the mechanism
+rather than the prose:
+
+| Pick | Why it has no line |
+|---|---|
+| Leader of the Pack 1/1 | a party-wide +3% crit aura, and `PartyBuffKind` has no crit entry |
+| Heart of the Wild 5/5 | +20% Strength in cat form; `Talents` has `IntellectBp` and `HealthBp` and no `StrengthBp` |
+| Furor 4/5 | a shift into cat grants Energy, and nothing pays on a shift — `TakeStance` sets an aura and the resource clock is never consulted about it |
+| Open Wounds 3/3 | the payload's rewrite gives Rip more damage and Claw +30% per bleed on the target; nothing in the damage path reads the target's aura list, so "per active bleed" has nothing to count |
+| Carnage 2/2 | the payload's rewrite makes Ferocious Bite refresh Rake and Rip; a finisher has no handle on an aura another ability applied, and the refresh would be a second lookup by name in the aura list |
+| Blood Frenzy 2/2 | Tiger's Fury and Enrage are in no kit, and nothing modifies `AutoAttack.Ticks` after construction — `Aura.Hastened`'s cadence only ever touches a timer with `Range > 1` |
+| Ancient Brutality 2/2 | no bleed tick pays a resource, and the other half needs a dodge-triggered aura |
+| Feral Instinct 3/3 | bear threat; the cat has no threat row and `feralInstinctBp` is the bear's |
+| Omen of Clarity 1/1 | a clearcasting proc, and there is no free-cast aura for Energy — `Empower.FreeMana` waives a mana cost |
+| The Balance filler (1, 2, 3, 7) | a reactive root, an on-kill mana regen, a shapeshift cost cut: none has a subject. They are the price of reaching Natural Weapons through the row gate |
+| Ferocity 5/5 | **not bought** — its five off Claw and Rake is what the cat spends on Improved Shred and Open Wounds instead |
+| Primal Fury 2/2 | five Energy on a crit, and `ProcResult.GrantResource` pays Rage only. The bear keeps it |
+
+### 10.6 One caution the code embodies
+
+The cat and the bear share `nightElfDruidBase` (`Content.fs:2579`) and the same
+derivation, but **not** the same outfit: at 60 the bear's set carries **98 Agility**
+against the cat's **92** (`Content.fs:5209`, `:5211`). Crit and dodge are
+`500 + Agility * 10` and `500 + Agility * 5` (`Content.fs:3751-3752`), so six Agility is
+60 crit bp and 30 dodge bp — which is why the cat's advantage over the bear reads
+**540 / 370** and not the full **600 / 400** the two traits declare. The test asserts the
+difference (`the cat's build lands on the hero and the bear's does not move`), so the
+smaller number is the intended one and not a rounding slip.
+
+### 10.7 What this does not decide
+
+**The rotation.** Combo points are built by Claw and Shred and spent by Rip and
+Ferocious Bite, and nothing chooses between them: `PartyAi` has no cat branch, so the
+AI presses whatever its generic melee orders rank. **Nothing here is measured either** —
+`Content.defaultRoster` (`Content.fs:3554`) seats no cat, so no bench row and no tick
+measurement sees this build at all, and the ladder figures for `Druid (Cat)` in
+`docs/agents/handoff.md` were taken with the Rogue's kit. §10 is a kit and a talent
+record, not a build that has been shown to work.

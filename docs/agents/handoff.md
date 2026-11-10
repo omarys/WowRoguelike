@@ -4,8 +4,8 @@ Written at commit `aba0722`, with that session's work on top as one WIP commit
 `40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**278 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
-Release`, 288 total), Release build clean — re-verified on the tree that carries the
+**296 passed and 1 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
+Release`, 297 total), Release build clean — re-verified on the tree that carries the
 era pushback model (`SimCombat.fs:462`), the Hunter's last four increments (`a3f6d10`,
 the snare's null result), the Paladin's Blessing of Kings, the mob ability rotation
 fix (`2a65a63`), the stun-is-an-interrupt rule (`81e17b1`), the dispel axis, Grounding
@@ -21,9 +21,38 @@ hit's school and the first that makes the hit it rode in on bigger; the two flat
 `Talents` fields it first carried are gone, and `SimCombat.hitLine` — the log now marks a
 crit, which it never did) and Arcane Rupture (`Aura.Ruptured` + `Effect.Rupture` read at
 `SimCombat`'s cost and damage sites, the first payload that scales a *named* spell, plus
-the `Aura.disposition` fix that stopped the party dispelling its own Mage's windows and
-the second half of the `advanceMovement` race — see §8). The 10
-skips are the operator's parked Bear/Cat/Moonkin specs.
+the `Aura.isHelpful` fix that stopped the party dispelling its own Mage's windows and
+the second half of the `advanceMovement` race — see §8), the Druid's bear kit (`ef13ebd`,
+`7a12e52`) and **the cat's feral damage build** (`ed70d53` — six talent fields and one
+talent split into two Berserk abilities, on the druid's own five ability rows, and the
+model's first health-boosting aura, `Aura.Invigorated`). The one skip left is the
+Moonkin: Bear and Cat were unparked in `7a12e52` and are measured again.
+
+`mise trust` once per clone or machine, or the `dotnet` shim falls back to the system
+SDK 8 and the pre-commit build hook dies on `WowRoguelike.slnx` (`domain.md` §4).
+
+## The cat's build landed unmeasured (`ed70d53`)
+
+The cat had been the Rogue's kit under feral names under `Talents.none`. It now has the
+operator's own build — Feral 36 / Balance 11 / Restoration 4, 51 points — as six
+`Talents`/`Traits` fields plus Berserk, which is **two abilities** rather than one row
+(Adrenaline Rush's shape for the cat, Last Stand's for the bear). Seven of the twenty-one
+talent records it buys have a line; the other fourteen are named with their reasons in
+the `catTalents` doc block and in `.pi/research/octowow/druid-feral.md` §10, which also
+carries the build's decode and the pick-by-pick mapping. Two things it does not decide:
+
+- **Nothing measures it.** `Content.defaultRoster` is `Warrior/Priest/Rogue/Mage/Druid`,
+  so no bench row and no `sim runs`/`comps` cell seats a cat, and the `Druid (Cat)`
+  ladder figures elsewhere in this file were taken with the Rogue's kit. The six new
+  tests assert the build's *numbers* — the 540/370 crit and dodge, the four damage
+  lines, the two Berserk halves — not its behaviour in a fight.
+- **There is no rotation.** Combo points are built by Claw and Shred and spent by Rip and
+  Ferocious Bite, and `PartyAi` has no cat branch at all: it presses whatever its generic
+  melee ordering ranks, which is an ordering written for the Rogue. Until something
+  chooses between a builder and a finisher — and between Rake's bleed and Rip's — this is
+  a kit and not a spec, and no number above should be read as "the cat does X damage".
+  The decision needs the bench seat first: seat the cat, then measure the ordering
+  against a first-press-wins default before writing a branch.
 
 ## Where the work stands after the interrupt and dispel increment
 
@@ -942,7 +971,7 @@ it doubles the pet's damage (**2.2% → 4.4%** and **1.7% → 3.7%** of party da
 build), not on rules, and a fourth — Improved Concussive Shot — was closed by measurement
 rather than by a model: §12 of the note shows hostile movement speed is worth under the
 harness's floor, so a snare has nothing to ride on. |
-| Druid | — | 0 | notes written (feral + moonkin), three specs `Skip`ped by the operator's direction |
+| Druid | Feral 36/11/4 (cat) | **7 of 21** | the cat's feral damage build (`ed70d53`): six picks as fields, Berserk as two abilities, fourteen picks unmodelled and each named with its reason. The bear landed separately (`ef13ebd`, `7a12e52`). The Moonkin is still `Talents.none` and the one remaining `Skip` |
 
 The Warrior port is the template: each (a)-bucket talent lands as a field, each (b)-bucket
 talent is left out and named with the axis it needs. Two findings from it are recorded in
@@ -973,11 +1002,13 @@ same five cells wipe on exactly one seed in twelve, and a +10% white-damage buff
 make a party weaker, so those flips are the axis's resolution, not a regression. Nothing
 in the level-60 ladder, the bench or the tests moves.
 
-**Wave A is now one class from done: only the Druid is left**, and the operator has
-parked Bear, Cat and Moonkin, so it is the feral/moonkin specs that have to be measured
-before any Druid talents can be. Two axes recur there — per-form stat swaps (already
-modelled) and `ThreatMultiplierBp` (already a field) — so the Druid is likely a data port
-overlaid on a role question rather than a vocabulary one.
+**The Druid is no longer the class with nothing built, and the park is lifted.** Bear and
+Cat were unparked in `7a12e52` and both now carry their own trees (`bearTalents`,
+`catTalents`), so the Druid talents did land without waiting on the measurement the old
+note above demanded. What is still missing is exactly the measurement: neither feral spec
+is in `defaultRoster`, so neither is in the bench, and the cat has no AI rotation at all.
+That is the same order-of-operations question the rest of this port keeps running into —
+a kit can land without a rotation, but nothing can be said about its damage until one does.
 
 ## TODO — research the OctoWoW class changes, all nine classes
 
