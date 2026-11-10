@@ -824,7 +824,7 @@ level-scaled axis **36/36 for the first time**, including the library cell that 
 2 of 2. That cell is not "fixed by the Rogue" in any proven sense — the whole party's
 numbers moved, and this is a one-seed run — but there is no failing cell left to debug.
 
-### Mage: the OctoWoW build, four of nineteen, and the two-seed lie
+### Mage: the OctoWoW build, five of nineteen, and the first attack-speed stat
 
 The operator's build (`?points=TAFOLISYZKAoB--FADD`, Arcane 40 / Fire 0 / Frost 11, every
 taken talent at maximum) landed four of nineteen: Improved Frostbolt 5/5 (half a second
@@ -835,9 +835,40 @@ an `Effect`), and Presence of Mind as a kit row built from the same `nextSpell` 
 Nature's Swiftness: no talent record can hand over an ability the kit did not have.
 
 The remaining fifteen are exactly the ones that would change the class: Arcane Instability
-(+3% damage *and* crit to everything), Arcane Power (a casting-speed window), Arcane
-Potency, the Improved Arcane Missiles line. That is not a porting oversight, it is §5(b) —
-none of them has a field to land in.
+(+3% damage *and* crit to everything), Arcane Potency, the Improved Arcane Missiles line.
+That is not a porting oversight, it is §5(b) — none of them has a field to land in.
+**Arcane Power was on that list and came off it**: it is the fifth, and it needed the
+engine's first attack-speed stat rather than a talent field.
+
+#### Arcane Power, and why "30% faster" is three quarters
+
+The calculator says twenty seconds of speed on a three-minute cooldown and nothing else —
+the payload elides the per-second mana drain, so the drain and the halved mana gain are
+recorded as unported rather than guessed (a guess would be the Arcane Potency mistake
+below, in the opposite direction).
+
+`Casting(bp)` is the aura and `CastHaste` the effect. It is the mirror of `Numbed` and
+deliberately **not** its inverse: a numbed caster takes `+bp%` longer, a hasted one takes
+`10000/(10000+bp)` of the time, because 30% faster is 3.46 s of a 5 s cast and not 6.5 s.
+`SimCombat.castClock` is the one function where the two meet, applied when a cast begins:
+
+- at a 2.5 s Frostbolt the mage casts **88 instead of 66 in 400 s** (+32% casts, +35%
+  damage) inside the window;
+- per dungeon that is **+1.34% at L33** — one window per fight is 2.5% uptime, so a
+  cooldown that reads as huge per-window is nearly nothing per run;
+- the bench moves not at all, because the default roster has no Mage.
+
+The AI presses it **before** the rotation, not after: one tick buys twenty seconds, and a
+Mage with three spells has something to press on almost every tick, so a fallback rule
+spent it once per eight runs. Two tests had to learn that `decide` answers with one order
+per member — the mana/throughput test now sets the cooldown by hand before asking which
+school the mage picks.
+
+**The bug it uncovered is the reusable part.** `RecentlyCast` and the new `Casting` both
+labelled themselves `CASTING`, while `refresh` dedupes by `Aura.kind` and the FsCheck
+invariant over the whole world dedupes by `Aura.label`. A body could therefore hold one of
+each and read as "Mage has CASTING twice" — two definitions of the same concept, and only
+a new aura landing on the collision could expose it.
 
 **Baseline changes the note lists and this did not apply**, because the numbers are for
 ranks the level-24 anchor never reaches: Fireball cheaper at rank 11 (395 → 275) and 12

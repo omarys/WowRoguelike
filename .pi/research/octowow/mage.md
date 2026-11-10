@@ -237,3 +237,44 @@ because it has no snare.
   never mentions it while it does document a threat change for Fire (Ignite Threat). Reading 1: it is
   unchanged from vanilla and simply not listed. Reading 2: the page's Arcane section is incomplete.
   Unresolved.
+
+## 8. What landed: the casting-speed axis and Arcane Power
+
+The build's 31-point capstone is the one thing in it the engine could not express, and it is now the
+first attack-adjacent *stat* the model has: `Aura.Casting(remaining, speedBp)` in
+`src/WowRoguelike.Core/Domain.fs`, summed by `Aura.castSpeedBp`, and `Effect.CastHaste(duration, bp)`
+applied by `SimCombat`. `SimCombat.castClock` is the one place the two cast-time modifiers meet, and
+they are not the same arithmetic — Mind-numbing Poison's "+50% longer" multiplies the cast, while
+Arcane Power's "+30% faster" divides it (`10000/(10000+bp)`). Decided when the cast starts, so the bar
+is the length the spell will really take.
+
+`Content.mageKit` grew `arcanePower`: 20 s of 3000 bp, 3-minute cooldown, no cost, self.
+
+**What that measured.** Eight seeds a wing, the row armed vs stripped:
+
+| wing | clear | mage damage | presses |
+|---|---|---|---|
+| graveyard L24 | 5295 → 4423 (-16.5%) | 17 920 → 18 620 (+3.9%) | 15 |
+| library L36 | 8357 → 8122 (-2.8%) | 154 012 → 149 998 (-2.6%) | 23 |
+| armory L39 | 7762 → 7732 (-0.4%) | 190 549 → 203 151 (+6.6%) | 24 |
+| cathedral L42 | 9601 → 9054 (-5.7%) | 217 415 → 208 565 (-4.1%) | 23 |
+
+The totals disagree with themselves because the haste shifts the RNG stream: the same seed fights a
+different sequence, so a smaller number can come with a faster clear. The honest measure is the one
+that does not depend on alignment — Armory, eight seeds: **789 → 836 Frostbolt hits, +6.0%**, which is
+the ~11% uptime of a 23% shorter cast arriving where it should. Clear time moved 0.4% in the same
+direction, because a Mage is not what makes an Armory clear slow.
+
+**AI rule.** Pressed before the rotation, not after it: a 0-cost, 0-cast self buff costs one tick and
+buys twenty seconds of faster casting, and a Mage with three spells on a 2.5 s cast has something to
+press on nearly every tick — so a fallback press would never fire (measured: 1 press in 8 fights).
+Never re-pressed while the window is up. Two tests that assert on the mage's *school* now spend the
+cooldown by hand, because the first order of a fight is the buff and not the rotation.
+
+**Still not ported from this build:** Arcane Potency (crit damage of Arcane spells — magnitude is one
+visible "100%" in the payload with the per-rank array elided, so it is unportable without a guess),
+Accelerated Arcana, Arcane Rupture, Temporal Convergence, Resonance Cascade, Arcane Instability,
+Arcane Subtlety (threat), Magic Absorption, Magic Attunement, Improved Mana Shield, Improved
+Counterspell's silence duration, and the whole Frost 11 (Frostbite/Permafrost need a root and a snare —
+the engine has both now, but nothing in the build spends them on a Mage). Arcane Power's own mana
+drain — the era's price for the speed — is still UNVERIFIED and therefore absent; see §7.

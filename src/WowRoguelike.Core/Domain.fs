@@ -327,6 +327,13 @@ type Aura =
   /// attack-speed stat anywhere in the model and why it names no school: every
   /// future haste buff that is not a bow's would have to say so here.
   | Hastened of remaining: int<tick> * speedBp: int
+  /// Arcane Power: *casting* speed, held for its duration. A separate case from
+  /// `Hastened` on purpose — the era has two stats here, and Swift Aspects' "ranged
+  /// attack speed" must not speed an Aimed Shot's cast any more than Arcane Power's
+  /// "casting speed" may speed a bow. `speedBp` shortens every cast the holder
+  /// *starts* while it stands; a cast already in progress keeps its clock, because
+  /// a timer that is part-spent has already been paid for.
+  | Casting of remaining: int<tick> * speedBp: int
 
 /// Every case of `Aura` is matched in exactly one place — here. Everywhere else
 /// asks this module a question, so adding an aura breaks compilation in this
@@ -429,6 +436,7 @@ module Aura =
     | RecentlyCast r when r > ticks 1 -> Some(RecentlyCast(r - ticks 1))
     | Innervated(r, bp) when r > ticks 1 -> Some(Innervated(r - ticks 1, bp))
     | Hastened(r, bp) when r > ticks 1 -> Some(Hastened(r - ticks 1, bp))
+    | Casting(r, bp) when r > ticks 1 -> Some(Casting(r - ticks 1, bp))
     | _ -> None
 
   /// The name a form is drawn and labelled with. Declared before `describe`
@@ -470,6 +478,7 @@ module Aura =
          | None -> "")
     | RecentlyCast r -> sprintf "recent(%d)" r
     | Hastened(r, bp) -> sprintf "haste(%d,+%d)" r bp
+    | Casting(r, bp) -> sprintf "casting(%d,+%d)" r bp
     | Innervated(r, bp) -> sprintf "innervated(%d,x%d)" r bp
 
   /// The name a player sees, short enough to fit over a sprite.
@@ -484,6 +493,9 @@ module Aura =
     | Silenced _ -> "SILENCED"
     | Drained _ -> "DRAINED"
     | Hastened _ -> "HASTE"
+    // Not "CASTING": `RecentlyCast` already wears that label, and the aura
+    // invariant keys on it — a Mage holding both would read as one aura twice.
+    | Casting _ -> "QUICKENED"
     | Rejuvenation(_, _, source) -> source
     | Sundered _ -> "SUNDER"
     | Corrupted _ -> "CORRUPTION"
@@ -537,7 +549,8 @@ module Aura =
     | Inspired _
     | Empowered _
     | Innervated _
-    | Hastened _ -> Magic
+    | Hastened _
+    | Casting _ -> Magic
     | DeadlyPoisoned _
     | Wounded _
     | Numbed _
@@ -574,6 +587,7 @@ module Aura =
     | RecentlyCast r
     | Innervated(r, _)
     | Hastened(r, _)
+    | Casting(r, _)
     | DeadlyPoisoned(r, _, _)
     | Wounded(r, _, _)
     | Numbed(r, _)
@@ -616,6 +630,15 @@ module Aura =
   let castTimeIncreaseBp =
     function
     | Numbed(_, bp) -> bp
+    | _ -> 0
+
+  /// Casting speed the holder holds, in basis points. The two directions are kept
+  /// apart because they are not the same arithmetic: a numbed caster takes
+  /// `+bp%` longer, a hasted one takes `10000/(10000+bp)` of the time, and only the
+  /// second is what "30% faster" means (`SimCombat.castClock`).
+  let castSpeedBp =
+    function
+    | Casting(_, bp) -> bp
     | _ -> 0
 
   /// Crippling: how much slower the holder crosses a tile, in basis points.
@@ -807,6 +830,7 @@ module Aura =
     | Numbed _ -> 20
     | Crippled _ -> 21
     | Hastened _ -> 24
+    | Casting _ -> 25
 
   /// Does casting `newer` overwrite `older`?
   let replaces (older: Aura) (newer: Aura) =
@@ -1042,6 +1066,12 @@ type Effect =
   /// A buff on the caster that changes the next spell it lands: Nature's
   /// Swiftness, Inner Focus (`.pi/research/levelscale/healer-procs.md`).
   | Empowers of duration: int<tick> * empower: Empower
+  /// A casting-speed window on the caster: `speedBp` faster casts for `duration`.
+  /// Arcane Power is the first and only user. Kept out of `Empowers` because that
+  /// one waives the *next* spell and this one speeds every spell started while it
+  /// stands, and kept out of `Hastened` because the era's attack speed and casting
+  /// speed are different stats.
+  | CastHaste of duration: int<tick> * speedBp: int
   /// This ability's own crit chance, above the caster's (Improved Regrowth's +50%
   /// on Regrowth). A crit heal is worth half again as much, so this is a healing
   /// talent; it sits on the ability because the tree raises one spell, not the

@@ -2890,8 +2890,12 @@ let ``a damage talent raises a weapon strike and a nuke alike`` () =
     let mutable dealt = 0
 
     // Twenty seconds: the mage's first nuke lands well after the rogue's first
-    // Backstab, and the comparison is worthless if one of them never fires.
-    for _ in 1..400 do
+    // Backstab, and the comparison is worthless if one of them never fires. It is
+    // a minute now, not twenty seconds, because the sums are compared whole: one
+    // 50% spike inside the window once landed the plain and talented runs on the
+    // same total to the point (1540 against 1540, 280+280+420+280+280 against five
+    // 308s), which reads as "the talent did nothing". More rolls, less coincidence.
+    for _ in 1..1200 do
       w <- SimTick.step (Bench.autoPilot w) w
       dealt <- dealt + (w.Log |> List.sumBy damageIn)
 
@@ -5060,13 +5064,50 @@ let ``the mage spends mana for throughput and a low pool for efficiency`` () =
           Target = Some(EntityId 1)
           Pos = magePos })
 
+  // `decide` answers with one order per member, and the mage's first tick of a
+  // fight spends Arcane Power, so the school under test is what it picks once that
+  // cooldown is out of the way. The cooldown is set by hand rather than the world
+  // being advanced: the question here is the rotation, not the opening tick.
+  let schools (w: WowRoguelike.Core.World) =
+    w
+    |> SimState.mapEntity (EntityId 4) (fun e ->
+      { e with Cooldowns = e.Cooldowns |> Map.add "Arcane Power" (ticks 1800) })
+    |> PartyAi.decide
+    |> abilitiesFor (EntityId 4)
+
   // Arcane Missiles: 280 for 235 mana over 5 s. Fireball: 195 for 140 over 3.5 s.
-  Assert.Contains("Arcane Missiles", abilitiesFor (EntityId 4) (PartyAi.decide (mageWorld 100)))
+  Assert.Contains("Arcane Missiles", schools (mageWorld 100))
   // Nearly dry it plays for damage per mana instead, where Fireball (195 for 140,
   // 1.39 a point) beats Frostbolt (83 for 65, 1.28) and the 235-mana channel.
-  let dry = abilitiesFor (EntityId 4) (PartyAi.decide (mageWorld 15))
+  let dry = schools (mageWorld 15)
   Assert.Contains("Fireball", dry)
   Assert.DoesNotContain("Arcane Missiles", dry)
+
+/// Casting speed is a clock, and the two directions are not the same arithmetic: a
+/// numbed caster takes `+bp%` longer, while a hasted one takes `10000/(10000+bp)` of
+/// the time, because "30% faster" means two thirds and not 130%.
+[<Fact>]
+let ``haste shortens a cast and numbness lengthens it`` () =
+  let mage = (Content.partyOf [ "Mage" ] 60).[0]
+  let frostbolt = mage.Abilities |> List.find (fun a -> a.Name = "Frostbolt")
+  // The last rank's 2.5 s, then 10000/13000 of it, then +50% of it.
+  Assert.Equal(50, int (SimCombat.castClock frostbolt []))
+  Assert.Equal(38, int (SimCombat.castClock frostbolt [ Casting(secTicks 20.0, 3000) ]))
+  Assert.Equal(75, int (SimCombat.castClock frostbolt [ Numbed(secTicks 20.0, 5000) ]))
+
+/// Arcane Power is a 20 s window on a 3-minute cooldown, so it is pressed once and
+/// then left alone: a second press inside the window would buy nothing.
+[<Fact>]
+let ``Arcane Power is spent once per cooldown and then left alone`` () =
+  let mutable w = Content.gully 3UL
+
+  for _ in 1 .. 600 do
+    if SimState.continues w then
+      w <- SimTick.step (Bench.autoPilot w) w
+
+  let presses = w.Log |> List.filter (fun l -> l.Contains "casting quickens") |> List.length
+  Assert.True(presses >= 1, sprintf "the Mage should spend Arcane Power, log has %d presses" presses)
+  Assert.True(presses <= 2, sprintf "600 ticks is under one 3-minute cooldown, got %d presses" presses)
 
 // ===========================================================================
 // Ability ranks (Q: abilities scale with character level)

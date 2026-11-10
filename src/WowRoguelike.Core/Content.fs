@@ -3970,6 +3970,29 @@ module Content =
   let private presenceOfMind =
     nextSpell "Presence of Mind" (secTicks 180.0) 0 { Empower.none with Instant = true }
 
+  /// Arcane Power 1/1: "casting speed is increased by 30% … lasts 20 sec". Ported
+  /// for the speed half only, and the missing half is the era's cost for it —
+  /// "draining a percentage of your maximum mana every second, reducing all mana
+  /// gain by 50%, and falling below 10% maximum mana makes you violently combust".
+  /// That drain is UNVERIFIED (`mage.md` §7: the payload's per-second figure is
+  /// absent), and three mechanics invented from a guess would be worse than one
+  /// mechanic that is right. A mage ends every wing at 95-97% mana, so the drain
+  /// would have measured zero anyway — which is why the honest version of this row
+  /// is the half that does something.
+  ///
+  /// shortcut: a flat 3-minute cooldown, and no mana cost. Vanilla's Arcane Power
+  /// is a 3-minute cooldown and free; the era's rework is silent on both.
+  let private arcanePower =
+    { Name = "Arcane Power"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 180.0
+      ResourceCost = 0
+      Stance = None
+      Interruptible = false
+      Range = 0
+      TargetKind = Self
+      Effects = [ CastHaste(secTicks 20.0, 3000) ] }
+
   /// A Druid form. Entering one costs mana; leaving one costs nothing, which is why
   /// `humanForm` is built separately below rather than through this helper. A single
   /// `Ability` rather than an `AbilityDef`, because a form has no ranks — it does not
@@ -4387,7 +4410,7 @@ module Content =
             blizzardRanks
             polymorphRanks
             counterspellRanks ])
-      @ [ presenceOfMind ]
+      @ [ presenceOfMind; arcanePower ]
 
     heroStats
       buffs

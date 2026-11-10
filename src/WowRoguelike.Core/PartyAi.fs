@@ -1164,8 +1164,25 @@ module PartyAi =
         else
           None
 
+      // Presence of Mind already rides `scopedShot`'s lane above when a spell is
+      // named; Arcane Power names none, so it needs its own rule. Pressed before the
+      // rotation, not after it: it costs one tick and buys twenty seconds of a 23%
+      // shorter cast, so waiting for an idle tick means never spending it at all (a
+      // Mage with three spells on a 3 s cast has something to press almost every
+      // tick). Never re-pressed while the window is up — 20 s of a 3-minute cooldown
+      // is 11% uptime, so a second press inside it buys nothing.
+      let quicken =
+        e.Abilities
+        |> List.filter (fun a ->
+          a.Effects |> List.exists (function CastHaste _ -> true | _ -> false))
+        |> List.tryFind (fun a ->
+          canUse e a.Name
+          && e.Casting.IsNone
+          && not (e.Auras |> List.exists (function Casting _ -> true | _ -> false)))
+
       match counterspell, casting with
       | Some a, Some c when canUse e a.Name -> cmd at (UseAbility(e.Id, a.Name, c.Id))
+      | _ when quicken.IsSome -> cmd at (UseAbility(e.Id, quicken.Value.Name, e.Id))
       | _ when worthStinging -> cmd at (UseAbility(e.Id, sting.Value.Name, f.Id))
       | _ when scopedShot |> Option.exists (fun a -> SimState.canReach a.Range e f w) ->
         cmd at (UseAbility(e.Id, scopedShot.Value.Name, f.Id))

@@ -901,6 +901,15 @@ module SimCombat =
             { a with Auras = Aura.refresh (Empowered(duration, e)) a.Auras })
           |> logLine (sprintf "%s readies %s" actor.Name ability.Name)
 
+        // Arcane Power: a casting-speed window on the caster itself. Same shape as
+        // `Empowers` and deliberately a different aura — a *timed* speed stat rather
+        // than a single spell's waiver, and the attack-speed `Hastened` is not it.
+        | CastHaste(duration, speedBp) ->
+          w
+          |> mapEntity actorId (fun a ->
+            { a with Auras = Aura.refresh (Casting(duration, speedBp)) a.Auras })
+          |> logLine (sprintf "%s's casting quickens" actor.Name)
+
         // A per-ability crit chance was folded into the heal (or the strike) that
         // rolled it, so resolving it again would do nothing.
         | CritBonus _ -> w
@@ -1422,6 +1431,24 @@ module SimCombat =
     && (e.Abilities
         |> List.exists (fun a -> a.Name = abilityName && Ability.resurrects a))
 
+  /// How long one cast of `ability` takes for a caster holding `auras`. Two stats
+  /// meet here and they are not the same arithmetic: a numbed caster takes `+bp%`
+  /// longer, while a hasted one takes `10000/(10000+bp)` of the time, because
+  /// "30% faster" means two thirds and not 130%. Composed as time: a 3 s Frostbolt
+  /// numbed by 50% is 4.5 s, and the same one hasted by 30% of *that* is 3.46 s.
+  let castClock (ability: Ability) (auras: Aura list) : int<tick> =
+    let numbed =
+      ability.CastTicks
+      * (10000 + (auras |> List.sumBy Aura.castTimeIncreaseBp))
+      / 10000
+
+    let speedBp = auras |> List.sumBy Aura.castSpeedBp
+
+    if speedBp > 0 then
+      numbed * 10000 / (10000 + speedBp)
+    else
+      numbed
+
   let internal startOrResolve (actor: Entity) (targetId: EntityId) (ability: Ability) (w: World) : World =
     // Using an ability interrupts a move in progress: the character stops to
     // strike or cast rather than walking on through the order.
@@ -1459,13 +1486,11 @@ module SimCombat =
                 Some
                   { Ability = ability
                     Target = targetId
-                    // Mind-numbing Poison: a numbed caster's spells take longer.
-                    // Applied when the cast starts, not when it ends, so the bar
-                    // is the length the spell will really take.
-                    Remaining =
-                      ability.CastTicks
-                      * (10000 + (e.Auras |> List.sumBy Aura.castTimeIncreaseBp))
-                      / 10000
+                    // Mind-numbing Poison lengthens a cast and Arcane Power
+                    // shortens it; `castClock` is the one place those two meet and
+                    // it runs when the cast starts, so the bar a viewer sees is the
+                    // length the spell will really take.
+                    Remaining = castClock ability e.Auras
                     Pushes = 0 } })
         w
 
