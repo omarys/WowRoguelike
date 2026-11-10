@@ -1073,6 +1073,28 @@ let ``armor mitigates physical but not spell damage`` () =
   // Fireball is a spell: full 146..195, not reduced to 118..159.
   Assert.True(dealt >= 146, sprintf "dealt %d" dealt)
 
+/// A crit has to be *visible*, not just arithmetic. Nothing else in the log marks one,
+/// so a talent that raises only crit chance reads as doing nothing — the first
+/// measurement of Arcane Instability's crit half counted zero crits in four hundred
+/// spells for exactly that reason.
+[<Fact>]
+let ``a critical strike says so in the log`` () =
+  let w = arena 0 0 { X = 7; Y = 5 }
+
+  // Through `rollCrit` rather than `meleeStrike`: the attack table can answer Dodge
+  // or Miss first, and this test is about the wording, not the table.
+  let amount, crit, w = SimCombat.rollCrit 10000 0 100 w
+  Assert.True(crit, "a 100% crit chance must set the flag")
+  Assert.Equal(150, amount)
+
+  // `logLine` conses, so the newest line is the head, not the last.
+  let w = SimCombat.hitLine (mobOf w) "Swing" "Target" amount crit w
+  Assert.Contains("critically hits", w.Log |> List.head)
+
+  // And a non-crit keeps the plain wording, so the two are distinguishable.
+  let w = SimCombat.hitLine (mobOf w) "Swing" "Target" amount false w
+  Assert.DoesNotContain("critically", w.Log |> List.head)
+
 /// Dodge is full avoidance (Q4a), and its band sits above crit so a dodged
 /// swing was never a critical one.
 [<Fact>]
@@ -1092,7 +1114,7 @@ let ``dodge avoids a physical hit entirely`` () =
     arena 0 0 { X = 7; Y = 5 }
     |> SimState.mapEntity (EntityId 1) (fun e -> { e with DodgeChanceBp = 10000 })
 
-  let amount, _ = SimCombat.meleeStrike (mobOf w) (EntityId 1) 100 0 None w
+  let amount, _, _ = SimCombat.meleeStrike (mobOf w) (EntityId 1) 100 0 None w
   Assert.Equal(0, amount)
 
 /// Block subtracts a flat value (Q4a), after the avoidance bands.
@@ -1116,7 +1138,7 @@ let ``block reduces a hit by the block value`` () =
           BlockValue = 25
           Armor = 0 })
 
-  let amount, _ = SimCombat.meleeStrike (mobOf w) (EntityId 100) 100 0 None w
+  let amount, _, _ = SimCombat.meleeStrike (mobOf w) (EntityId 100) 100 0 None w
   // 100 - 25 = 75, less nothing for armour. Avoidance comes first on the table,
   // so a miss is a legitimate zero here.
   Assert.True(amount = 75 || amount = 0, sprintf "amount %d" amount)
@@ -2902,7 +2924,12 @@ let ``a damage talent raises a weapon strike and a nuke alike`` () =
     let damageIn (line: string) =
       let parts = line.Split ' '
 
-      if parts.[0] = hero.Name + "'s" && line.Contains(" " + ability + " hits ") then
+      // A crit says "critically hits", which is a different string: a helper that
+      // only knows the plain one silently drops every crit, and a crit talent then
+      // measures as zero.
+      let hit = line.Contains(" " + ability + " hits ") || line.Contains(" " + ability + " critically hits ")
+
+      if parts.[0] = hero.Name + "'s" && hit then
         match System.Int32.TryParse parts.[parts.Length - 1] with
         | true, n -> n
         | _ -> 0
@@ -3638,11 +3665,12 @@ let ``experimental ammunition burns a share of what aimed shot landed`` () =
       if SimState.continues x then x <- SimTick.step (Bench.autoPilot x) x
 
     // The log pairs a shot with its burn, in order, so the burn must be 5% of the
-    // shot immediately above it and nothing else.
+    // shot immediately above it and nothing else. Both spellings: a shot that crits
+    // says "critically hits" and is still the line the burn belongs to.
     let mutable landed = 0
 
     for line in x.Log do
-      if line.Contains "Aimed Shot hits" then
+      if line.Contains "Aimed Shot hits" || line.Contains "Aimed Shot critically hits" then
         landed <- amountOf line
       elif line.Contains "ammunition burns" then
         shares <- shares + 1
@@ -7332,7 +7360,10 @@ let ``a rostered warrior's shield pays him rage on a block`` () =
 
   // Big enough to survive the swing, small enough that armour does not matter.
   let (EntityId wid) = warrior.Id
-  let w = SimCombat.meleeStrike mob warrior.Id 5 0 None w |> snd
+  let w =
+    SimCombat.meleeStrike mob warrior.Id 5 0 None w
+    |> fun (amount, crit, w) -> (amount, crit, w)
+    |> fun (_, _, w) -> w
 
   Assert.Equal(5, poolOf wid w)
   Assert.True(

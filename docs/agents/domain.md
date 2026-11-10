@@ -856,6 +856,15 @@ whole world's random stream, so the same seeds fight a different fight. A chaoti
 A/B'd on aggregate damage, not on one wing's clear time; that is the same lesson as the
 two-seed lie above, one layer down.
 
+The measurement turned up a hole in the instrument rather than in the talent: **the log never
+marked a crit**, melee or spell, so the first pass counted zero crits in four hundred
+Frostbolts and the crit half looked inert. `SimCombat.hitLine` now says "critically hits",
+`meleeStrike` returns its crit flag (it had one and threw it away), and the swing, off-hand,
+weapon-ability and spell lines all go through the one formatter. Two test helpers that summed
+damage by matching `" <ability> hits "` were silently dropping every crit — a helper that
+only knows the plain wording makes a crit talent measure as zero damage, which is the same
+class of error as an unmarked log line.
+
 #### Arcane Power, and why "30% faster" is three quarters
 
 The calculator says twenty seconds of speed on a three-minute cooldown and nothing else —

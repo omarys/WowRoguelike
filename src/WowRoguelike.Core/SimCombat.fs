@@ -359,10 +359,10 @@ module SimCombat =
     (critBonusBp: int)
     (ability: string option)
     (w: World)
-    : int * World =
+    : int * bool * World =
     match tryEntity targetId w with
-    | None -> 0, w
-    | Some t when not (alive t) || amount <= 0 -> amount, w
+    | None -> 0, false, w
+    | Some t when not (alive t) || amount <= 0 -> amount, false, w
     | Some t ->
       // Before the attack table, so it reads as "3% more damage" and not "3% more
       // of what got through the armour".
@@ -385,14 +385,14 @@ module SimCombat =
         raw * (10000 - armorMitigationBp attacker.Level armor) / 10000
 
       match attackTable chances roll with
-      | Missed -> 0, logLine (sprintf "%s misses %s" attacker.Name t.Name) w
-      | Dodged -> 0, logLine (sprintf "%s dodges %s" t.Name attacker.Name) w
-      | Parried -> 0, logLine (sprintf "%s parries %s" t.Name attacker.Name) w
-      | Glanced -> mitigate (amount * glancingMultiplierBp attacker t / 10000), w
+      | Missed -> 0, false, logLine (sprintf "%s misses %s" attacker.Name t.Name) w
+      | Dodged -> 0, false, logLine (sprintf "%s dodges %s" t.Name attacker.Name) w
+      | Parried -> 0, false, logLine (sprintf "%s parries %s" t.Name attacker.Name) w
+      | Glanced -> mitigate (amount * glancingMultiplierBp attacker t / 10000), false, w
       | Blocked ->
         // A block is its own event: Shield Specialization pays on the block
         // whether or not the hit got through the shield.
-        mitigate (max 0 (amount - t.BlockValue)), (w |> procOn OnBlock t.Id)
+        mitigate (max 0 (amount - t.BlockValue)), false, (w |> procOn OnBlock t.Id)
       | Critical ->
         // And a crit is the attacker's event, whatever it landed on. A swing's
         // base is 200% where a spell's is 150%, and the tree's crit-damage
@@ -410,8 +410,20 @@ module SimCombat =
           | Some name -> procOn (OnCritOf name) attacker.Id w
           | None -> w
 
-        dealt, (w |> piercingBleed attacker targetId dealt)
-      | Hit -> mitigate amount, w
+        dealt, true, (w |> piercingBleed attacker targetId dealt)
+      | Hit -> mitigate amount, false, w
+
+  /// A hit's log line, with the crit said out loud. Nothing else in the log marks one,
+  /// and a talent that raises only crit chance looks like it does nothing without
+  /// this: the first measurement of Arcane Instability's crit half read zero crits in
+  /// four hundred spells for exactly that reason.
+  let hitLine (actor: Entity) (ability: string) (target: string) (amount: int) (crit: bool) (w: World) =
+    logLine
+      (if crit then
+         sprintf "%s's %s critically hits %s for %d" actor.Name ability target amount
+       else
+         sprintf "%s's %s hits %s for %d" actor.Name ability target amount)
+      w
 
   /// Damage wakes a sleeper, as does any other hostile action — see `wake`. A
   /// corpse stops moving and stops casting, so it interpolates nowhere.
@@ -630,7 +642,7 @@ module SimCombat =
         // multiplies by 10000.
         let swing = swing * Talents.damageBp ability.Name actor.Talents / 10000
         let critBonus = if ability.Name = "Backstab" then actor.BackstabCritBonusBp else 0
-        let amount, w = meleeStrike actor victim (swing * multiplierBp / 10000 + bonus) critBonus (Some ability.Name) w
+        let amount, crit, w = meleeStrike actor victim (swing * multiplierBp / 10000 + bonus) critBonus (Some ability.Name) w
         let w = dealDamage victim amount w
 
         // Experimental Ammunition: a share of what just landed lands again as
@@ -660,7 +672,7 @@ module SimCombat =
 
         // Only the Party builds threat on Mobs.
         let w = if actor.Faction = Party then addThreat victim actor amount w else w
-        amount, w
+        amount, crit, w
 
       (w0, ability.Effects)
       ||> List.fold (fun w effect ->
@@ -669,16 +681,12 @@ module SimCombat =
           let rolled, w = rollRange lo hi w
           let rolled = rolled * Talents.damageBp ability.Name actor.Talents / 10000
           let critBonus = if ability.Name = "Backstab" then actor.BackstabCritBonusBp else 0
-          let amount, w = meleeStrike actor targetId rolled critBonus (Some ability.Name) w
+          let amount, crit, w = meleeStrike actor targetId rolled critBonus (Some ability.Name) w
           let w = dealDamage targetId amount w
           // Only the Party builds threat on Mobs.
           let w = if actor.Faction = Party then addThreat targetId actor amount w else w
 
-          if amount > 0 then
-            w
-            |> logLine (sprintf "%s's %s hits %s for %d" actor.Name ability.Name targetName amount)
-          else
-            w
+          if amount > 0 then hitLine actor ability.Name targetName amount crit w else w
 
         | WeaponDamage(multiplierBp, bonus) ->
           // The same roll a swing would make, scaled, plus the ability's own
@@ -686,12 +694,10 @@ module SimCombat =
           // takes the multiplier: 150% of a Backstab is 150% of the whole swing,
           // not 150% of the weapon's own dice plus a flat bonus. Without this a
           // Backstab does less per point of energy than Sinister Strike.
-          let amount, w = weaponStrike multiplierBp bonus targetId w
+          let amount, crit, w = weaponStrike multiplierBp bonus targetId w
 
           if amount > 0 then
-            w
-            |> gainRage actor amount
-            |> logLine (sprintf "%s's %s hits %s for %d" actor.Name ability.Name targetName amount)
+            hitLine actor ability.Name targetName amount crit w |> gainRage actor amount
           else
             w
 
@@ -718,12 +724,12 @@ module SimCombat =
 
           targetId :: extra
           |> List.fold (fun (w: World) victim ->
-            let amount, w = weaponStrike 10000 0 victim w
+            let amount, crit, w = weaponStrike 10000 0 victim w
 
             if amount > 0 then
               w
+              |> hitLine actor ability.Name (nameOf victim w) amount crit
               |> gainRage actor amount
-              |> logLine (sprintf "%s's %s hits %s for %d" actor.Name ability.Name (nameOf victim w) amount)
             else
               w) w
 
@@ -754,7 +760,7 @@ module SimCombat =
           let w = if crit then piercingBleed actor targetId amount w else w
           let w = gainRage actor amount w
           let w = if actor.Faction = Party then addThreat targetId actor amount w else w
-          w |> logLine (sprintf "%s's %s hits %s for %d" actor.Name ability.Name targetName amount)
+          w |> hitLine actor ability.Name targetName amount crit
 
         | Innervate(duration, bp) ->
           // Innervate multiplies the target's regeneration rather than handing
@@ -1147,13 +1153,13 @@ module SimCombat =
           let points = actor.ComboPoints
           let extra = perPoint * max 0 (points - 1)
           let rolled, w = rollRange (lo + extra) (hi + extra) w
-          let amount, w = meleeStrike actor targetId rolled 0 (Some ability.Name) w
+          let amount, crit, w = meleeStrike actor targetId rolled 0 (Some ability.Name) w
           let w = dealDamage targetId amount w
           let w = if actor.Faction = Party then addThreat targetId actor amount w else w
 
           w
           |> mapEntity actorId (fun e -> { e with ComboPoints = 0 })
-          |> logLine (sprintf "%s's %s hits %s for %d" actor.Name ability.Name targetName amount)
+          |> hitLine actor ability.Name targetName amount crit
 
         | DamageOverTime(duration, perTick) ->
           // The tree's per-spell damage share is fixed at cast time, not read on every

@@ -4,8 +4,8 @@ Written at commit `aba0722`, with that session's work on top as one WIP commit
 `40cd7f4` and a second WIP commit `16a12b8` (the park fix — see Open bug 1).
 Repo: `/home/omary/Dev/WowRoguelike` (F#, .NET 10, MonoGame shell).
 
-**272 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
-Release`, 282 total), Release build clean — re-verified on the tree that carries the
+**273 passed and 10 skipped, 0 failed** (`dotnet test tests/WowRoguelike.Tests -c
+Release`, 283 total), Release build clean — re-verified on the tree that carries the
 era pushback model (`SimCombat.fs:462`), the Hunter's last four increments (`a3f6d10`,
 the snare's null result), the Paladin's Blessing of Kings, the mob ability rotation
 fix (`2a65a63`), the stun-is-an-interrupt rule (`81e17b1`), the dispel axis, Grounding
@@ -15,7 +15,8 @@ Totem (`33a8fb5`), the Hunter's second build's Beast Mastery points (`HealthBp`,
 `ProcResult.Gain`), ranged attack power + Coordinated Assault (`Talents.RangedApField`),
 the Mage's Arcane Power (`Effect.CastHaste` → `Aura.Casting` → `SimCombat.castClock`,
 the engine's first casting-speed stat) and Arcane Instability (`Talents.SpellDoneBp` /
-`SpellCritBp`, the first spell-scoped fields). The 10
+`SpellCritBp`, the first spell-scoped fields, and `SimCombat.hitLine` — the log now marks a
+crit, which it never did). The 10
 skips are the operator's parked Bear/Cat/Moonkin specs.
 
 ## Where the work stands after the interrupt and dispel increment

@@ -581,7 +581,7 @@ module SimTick =
 
               // The auto-attack runs the same attack table every physical special does,
               // so a mob dodges both identically.
-              let total, w = SimCombat.meleeStrike e t.Id total 0 None w
+              let total, crit, w = SimCombat.meleeStrike e t.Id total 0 None w
 
               w
               |> dealDamage t.Id total
@@ -589,7 +589,12 @@ module SimTick =
               |> fun w -> if e.Faction = Party then addThreat t.Id e total w else w
               |> fun w ->
                 if total > 0 then
-                  logLine (sprintf "%s swings at %s for %d" e.Name t.Name total) w
+                  logLine
+                    (if crit then
+                       sprintf "%s critically swings at %s for %d" e.Name t.Name total
+                     else
+                       sprintf "%s swings at %s for %d" e.Name t.Name total)
+                    w
                 else
                   w
               |> fun w ->
@@ -619,7 +624,7 @@ module SimTick =
             let offRoll =
               (rolled + e.MeleeDamageBonus) * Talents.damageBp swingName e.Talents / 10000 + bonus
 
-            let offHand, w = SimCombat.meleeStrike e t.Id (offRoll / 2) 0 None w
+            let offHand, offCrit, w = SimCombat.meleeStrike e t.Id (offRoll / 2) 0 None w
 
             w
             |> dealDamage t.Id offHand
@@ -627,7 +632,12 @@ module SimTick =
             |> fun w -> if e.Faction = Party then addThreat t.Id e offHand w else w
             |> fun w ->
               if offHand > 0 then
-                logLine (sprintf "%s's off hand hits %s for %d" e.Name t.Name offHand) w
+                logLine
+                  (if offCrit then
+                     sprintf "%s's off hand critically hits %s for %d" e.Name t.Name offHand
+                   else
+                     sprintf "%s's off hand hits %s for %d" e.Name t.Name offHand)
+                  w
               else
                 w
             |> fun w ->
