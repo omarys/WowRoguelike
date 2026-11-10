@@ -248,23 +248,34 @@ module SimTick =
   /// never freed and the route is dropped as stale every backoff. Only Party trades
   /// with Party — a hostile's tile is a target, not a place to stand — and the trade
   /// is atomic, so `separateStacked` never sees two bodies on one tile.
-  let private swapStep (w: World) =
-    let settledPartyAt (p: Pos) =
+  let private swapStep (justLanded: Set<EntityId>) (w: World) =
+    // `moverFrom` is the tile the mover is standing on, so a body coming the other
+    // way is a mutual crossing: both end where they meant to go. A body that landed
+    // in this same pass is still in motion, not settled, and is not a trade partner —
+    // that is what keeps the loser of a same-tile race (`yields`, above) waiting
+    // behind the winner instead of trading places with it.
+    // The Tank used to be excluded from trading outright, and the cost of that
+    // exclusion was a permanent deadlock: measured, seed 1 of `wailingCaverns` after
+    // the last kill in the first room — a Rogue's next step was the parked Tank's
+    // tile, the Tank had no order left to give, and nobody could step, so the Party
+    // stood still for the 3000 ticks the walk test allows. A trade is mutual, so a
+    // Tank that trades ends one tile sideways, still beside the body it let past.
+    let settledPartyAt (moverFrom: Pos) (p: Pos) =
       w.Entities
       |> List.tryFind (fun o ->
         alive o
         && o.Faction = Party
         && o.Totem.IsNone
-        && o.Role <> Some Tank
+        && not (Set.contains o.Id justLanded)
         && o.Pos = p
-        && o.Destination.IsNone)
+        && (o.Destination.IsNone || o.Destination = Some moverFrom))
 
     let trades =
       w.Entities
       |> List.choose (fun e ->
         match e.Destination with
         | Some d when alive e && e.Faction = Party && e.MoveTicksLeft <= ticks 1 ->
-          match settledPartyAt d with
+          match settledPartyAt e.Pos d with
           | Some b when b.Id <> e.Id -> Some(e.Id, e.Pos, b.Id, d)
           | _ -> None
         | _ -> None)
@@ -333,25 +344,33 @@ module SimTick =
     // `separateStacked` could only report it. The earlier body in the list lands and
     // the later one waits the Tick, exactly as it would for a body that had stopped
     // there; the list is the world's own order, so replay is unaffected.
-    let yields =
-      let landings =
-        w.Entities
-        |> List.choose (fun e ->
-          match e.Destination with
-          | Some d when
-            alive e
-            && e.Totem.IsNone
-            && canMove e
-            && e.MoveTicksLeft <= ticks 1
-            && not (Set.contains d held)
-            ->
-            Some(d, e.Id)
-          | _ -> None)
+    let landings =
+      w.Entities
+      |> List.choose (fun e ->
+        match e.Destination with
+        | Some d when
+          alive e
+          && e.Totem.IsNone
+          && canMove e
+          && e.MoveTicksLeft <= ticks 1
+          && not (Set.contains d held)
+          ->
+          Some(d, e.Id)
+        | _ -> None)
 
+    let yields =
       let firstToLand = landings |> List.distinctBy fst |> Map.ofList
 
       landings
       |> List.filter (fun (tile, id) -> Map.tryFind tile firstToLand <> Some id)
+      |> List.map snd
+      |> Set.ofList
+
+    // Who actually landed this pass, for `swapStep`: those bodies are mid-motion, not
+    // parked, however settled their new state looks.
+    let landedNow =
+      landings
+      |> List.filter (fun (_, id) -> not (Set.contains id yields))
       |> List.map snd
       |> Set.ofList
 
@@ -389,7 +408,7 @@ module SimTick =
                   MoveTicksTotal = ticks 0 })
       w
     |> separateStacked
-    |> swapStep
+    |> swapStep landedNow
 
 
   /// Begin stepping toward a goal. A* plans the route once and the entity walks

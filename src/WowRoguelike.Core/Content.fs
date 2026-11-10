@@ -261,6 +261,12 @@ module Content =
   /// 11 → 80. The cooldown is the weapon's own 2.70 s, because Heroic Strike
   /// replaces the next swing rather than adding one, and the table's extra threat
   /// (+20 → +118) is left to the damage alone, as it always has been.
+  /// Ranks and their flat threat are from the single 1.12 host that prints threat
+  /// at all: `+20/+39/+59/+78/+98/+118` (`.pi/research/levelscale/
+  /// ranks-warrior-paladin.md:33-38`), which also warns at `:197` that no other
+  /// reachable page prints these numbers. The strike's own damage threatens through
+  /// the actor's multiplier on top, so this row is where a Warrior's threat comes
+  /// from once the stance stops being a fudge.
   let heroicStrikeRanks: AbilityDef =
     { Name = "Heroic Strike"
       Resource = Rage
@@ -268,13 +274,14 @@ module Content =
       TargetKind = Foe
       Interruptible = false
       Ranks =
-        [ for level, bonus in [ 1, 11; 8, 21; 16, 32; 24, 44; 32, 58; 40, 80 ] do
+        [ for level, bonus, threat in
+            [ 1, 11, 20; 8, 21, 39; 16, 32, 59; 24, 44, 78; 32, 58, 98; 40, 80, 118 ] do
             { Level = level
               Cost = 15
               CastTicks = ticks 0
               CooldownTicks = secTicks 2.7
               Range = 1
-              Effects = [ WeaponDamage(10000, bonus) ] } ] }
+              Effects = [ WeaponDamage(10000, bonus); Threat(threat) ] } ] }
 
   let heroicStrike = rank24 heroicStrikeRanks
 
@@ -300,6 +307,122 @@ module Content =
             CooldownTicks = secTicks 1.5
             Range = 1
             Effects = [ MultiStrike 3 ] } ] }
+
+  /// Savage Bite rank 1 (level 58), the bear's threat strike: the payload's own row
+  /// is "Savagely bite the target, dealing 80% normal damage plus an additional 30
+  /// damage. Generates a high amount of threat" — 30 Rage, 6 sec cooldown, requires
+  /// Bear or Dire Bear Form (`.pi/research/octowow/druid-feral.md`, §1). The two
+  /// damage numbers are the payload's verbatim; the flat `Threat(200)` is this
+  /// file's, because "a high amount" carries no magnitude and the era's only
+  /// numbered threat in this file is Sunder Armor's 200 per application
+  /// (`sunderArmorRanks`). On top of it the strike's own damage threatens through
+  /// the bear form's multiplier, which is what makes the bite the button the AI
+  /// presses on cooldown while Maul waits for surplus Rage.
+  ///
+  /// Records, one rank: the payload gives level 58 and no rank table.
+  let savageBiteRanks: AbilityDef =
+    { Name = "Savage Bite"
+      Resource = Rage
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ { Level = 58
+            Cost = 30
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 6.0
+            Range = 1
+            Effects = [ WeaponDamage(8000, 30); Threat(153) ] } ] }
+
+  /// Faerie Fire (Feral) ranks 1-4 (levels 25, 30, 42, 54): the bear's ranged tag,
+  /// free of cost, on the 6 sec cooldown and 5 yard range of the feral row, holding
+  /// an armour debuff for 40 sec. The payload makes it **baseline at level 25 with
+  /// four ranks up to level 54 and a 6 sec cooldown** (`.pi/research/octowow/
+  /// druid-feral.md`, §3) — the one feral ability OctoWoW moved out of the talent
+  /// tree, and the reason the pull can start at range.
+  ///
+  /// The armour per rank is the **non-feral** Faerie Fire table's 175 / 285 / 395 /
+  /// 505 (`.pi/research/ranks/druid.md`, the four `Faerie Fire` rows), because the
+  /// feral row's magnitude is blank at source and flagged `U` there. The two spells
+  /// are the same debuff in the game; the borrow is named here so that a 1.12 db
+  /// read can correct one line rather than the shape. The ranks' levels follow the
+  /// payload's "learned at 25" against the table's 30 / 30 / 42 / 54 — a
+  /// contradiction recorded in `ranks/druid.md`'s notes; the payload's 25 wins
+  /// because it is the newer statement of the same spell.
+  ///
+  /// It threatens nothing of its own: this file adds threat on damage and on a
+  /// stated `Threat` amount, and a debuff application is neither. What it earns the
+  /// pull is the armour it takes off, and the tag itself.
+  let faerieFireFeralRanks: AbilityDef =
+    { Name = "Faerie Fire (Feral)"
+      Resource = Rage
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ for level, armor in [ 25, 175; 30, 285; 42, 395; 54, 505 ] do
+            { Level = level
+              Cost = 0
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 6.0
+              Range = 5
+              Effects = [ Sunder(secTicks 40.0, armor) ] } ] }
+
+  /// Enrage rank 1 (level 12): a free 20 Rage on a one-minute cooldown, which is
+  /// what lets a bear open a pull without waiting to be hit. The table's row is
+  /// `Energize 20`, "20 rage over 10s", `-27% base armor` (`.pi/research/ranks/
+  /// druid.md`), and the payload adds that the armour penalty "sits on its own
+  /// separate debuff" in Bear Form at -27% and in Dire Bear Form at -16%
+  /// (`.pi/research/octowow/druid-feral.md`, §3).
+  ///
+  /// Two deliberate gaps, both named rather than guessed: the Rage arrives at once
+  /// because this model has no rage-over-time aura to spread it over the table's
+  /// ten seconds, and the armour penalty is **not** modelled because it is a
+  /// percentage of the bearer's own armour at call time, while the only armour
+  /// debuff this file can express (`Sunder`) takes a flat amount fixed when the
+  /// ability is declared. An Enrage that cost nothing would be a pure buff, so it
+  /// is worth saying plainly: this row is the Rage half only, and it is the half the
+  /// rotation uses.
+  let enrageRanks: AbilityDef =
+    { Name = "Enrage"
+      Resource = Rage
+      Stance = None
+      TargetKind = Self
+      Interruptible = false
+      Ranks =
+        [ { Level = 12
+            Cost = 0
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 60.0
+            Range = 0
+            Effects = [ Energize 20 ] } ] }
+
+  /// Lacerate ranks 1 (level 54), the bear's bleed and the operator's "weave in
+  /// Lacerate stacks when major abilities are on cooldown" (`.pi/research/octowow/
+  /// druid-feral.md`, §9).
+  ///
+  /// **The magnitude is derived, not sourced, and this is the one row in the bear's
+  /// kit that says so.** Neither the payload page nor the 1.12 ranks table carries a
+  /// Lacerate line — `.pi/research/ranks/druid.md` has no row for it, and the
+  /// operator's rotation names the button without a number. What is modelled is the
+  /// shape: five stacks, fifteen seconds, one tick a second, twenty Rage. The tick
+  /// is 12, chosen so that one stack is worth about a twentieth of a Maul and the
+  /// capped bleed about four Mauls over its life — rage-efficient, which is what a
+  /// bleed is for, but not a replacement for the strike. `shortcut:` replace the 12,
+  /// the 15 seconds and the 20 Rage with the payload's numbers when they are known.
+  let lacerateRanks: AbilityDef =
+    { Name = "Lacerate"
+      Resource = Rage
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ { Level = 54
+            Cost = 20
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 1.5
+            Range = 1
+            Effects = [ Lacerate(secTicks 15.0, 12, 5) ] } ] }
 
   /// Lesser Heal ranks 1-3 (levels 1, 4, 10): rank 3 is the last rank in the game.
   /// It keeps the file's 135-158 — the 1.12 pair, against the table's 1.15.9
@@ -1000,13 +1123,13 @@ module Content =
       TargetKind = Foe
       Interruptible = false
       Ranks =
-        [ for level, armor in [ 10, 90; 22, 180; 34, 270 ] do
+        [ for level, armor, threat in [ 10, 90, 45; 22, 180, 99; 34, 270, 153 ] do
             { Level = level
               Cost = 15
               CastTicks = ticks 0
               CooldownTicks = secTicks 6.0
               Range = 1
-              Effects = [ Sunder(secTicks 30.0, armor); Threat(200) ] } ] }
+              Effects = [ Sunder(secTicks 30.0, armor); Threat(threat) ] } ] }
 
   let sunderArmor = rank24 sunderArmorRanks
 
@@ -1788,15 +1911,50 @@ module Content =
   // Builders
   // =========================================================================
 
-  /// Parties generate threat at 1.0x; the Tank's stance at 5.0x.
+  /// Threat is **composed from the game's own modifiers, and every factor is
+  /// cited**. There is no flat "tank is 5.0x" left: the previous engine multiplied
+  /// a Warrior's threat by 6.0 and a bear's by 5.0 on the bare assertion that "a
+  /// Tank stance is 5.0x in WoW" (`openwiki/concepts/combat-and-threat.md` cited
+  /// "Classic Era threat mechanics" and nothing measured it), which contradicts the
+  /// one file that does state the number by 3.8x.
+  ///
+  /// Parties are 1.0x: a dps stance in the game is the baseline, and its own
+  /// reductions (Battle Stance and Berserker Stance are both `ThreatDrop -20%`,
+  /// `.pi/research/ranks/warrior.md:55,57`) are not modelled because no class in
+  /// this roster fights in them.
   let private partyThreatBp = 10000
-  let private tankStanceBp = 50000
 
-  /// Defensive Stance's threat, plus Defiance 5/5's twenty percent. A separate
-  /// constant rather than an edit to `tankStanceBp`, because the Bear form uses
-  /// that one and has no Defiance: the stance and the stance-plus-a-tree are two
-  /// different numbers and only the Warrior's sheet gets this one.
-  let private warriorThreatBp = 60000
+  /// Defensive Stance: `Threat +30%` (`.pi/research/ranks/warrior.md:56`, restated
+  /// at `:165`).
+  let private defensiveStanceBp = 13000
+
+  /// Defiance 5/5: "Increases the threat generated while in Defensive Stance by an
+  /// additional [4,8,12,15,20]%" (`.pi/research/octowow/warrior.md:74`) — 20% at
+  /// five ranks, and the warrior sheet's build carries all five.
+  let private defianceBp = 12000
+
+  /// The Warrior's sheet: the stance times the tree, 1.30 x 1.20 = **1.56x**. It is
+  /// a product rather than a sum because Defiance multiplies the threat the stance
+  /// already generates — the talent's own wording, "while in Defensive Stance".
+  let private warriorThreatBp = defensiveStanceBp * defianceBp / 10000
+
+  /// Bear and Dire Bear Form: the form's own threat bonus, which OctoWoW raised to
+  /// **50%** (`.pi/research/octowow/druid-feral.md`, the threat section). The 1.12
+  /// ranks table carries no threat column for either form
+  /// (`.pi/research/ranks/druid.md:146-147` lists only `ApBuff` and `ArmorBuff`), so
+  /// this is the payload's number and not the era's.
+  let private bearFormBp = 15000
+
+  /// Feral Instinct 3/3: "Increases threat caused in Bear and Dire Bear Form by
+  /// [5/10/15]%" (`.pi/research/octowow/druid-feral.md:59`) — 15% at three ranks,
+  /// which the feral build carries.
+  let private feralInstinctBp = 11500
+
+  /// The bear's sheet: the form times the talent, 1.50 x 1.15 = **1.725x**. It is a
+  /// product for the same reason the Warrior's is — Feral Instinct raises threat
+  /// *caused in* the form, so it scales what the form already grants.
+  let private bearThreatBp = bearFormBp * feralInstinctBp / 10000
+
   let private mobThreatBp = 10000
 
   /// Resource regeneration per Tick. A Tick is 1/20 s, so this is 20 a second:
@@ -4655,7 +4813,7 @@ module Content =
 
     // A tank holds threat the way the Warrior tank does, and a damage spec holds
     // it the way every other damage class does.
-    let threatBp = if spec = BearDruid then tankStanceBp else partyThreatBp
+    let threatBp = if spec = BearDruid then bearThreatBp else partyThreatBp
 
     let resource =
       match spec with
@@ -4672,11 +4830,20 @@ module Content =
         // Whirlwind) are mob abilities in this file — so it takes the shape the
         // Hunter's Multi-Shot brought, `MultiStrike`, and applies the bear's own
         // weapon roll to three bodies.
+        //
+        // `Maul` is `heroicStrikeRanks` renamed, flat threat included: Maul is the
+        // bear's threat button in the game and the ranks table states no threat of
+        // its own for it, so the strike's ladder is closer to the game than a
+        // threatless Maul would be. The form's 1.725x multiplies both halves.
         AbilityDef.kitAt
           level
           [ { heroicStrikeRanks with Name = "Maul" }
             { tauntRanks with Name = "Growl" }
-            swipeRanks ]
+            swipeRanks
+            savageBiteRanks
+            faerieFireFeralRanks
+            enrageRanks
+            lacerateRanks ]
         @ [ bearForm ]
       | TreeDruid ->
         // Today's Druid healer, unchanged, plus the form it stands in.

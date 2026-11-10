@@ -457,6 +457,37 @@ module PartyAi =
         abilityWhere t (function WeaponDamage _ -> true | _ -> false)
         |> Option.filter (fun a -> a.ResourceCost > 0)
 
+      // The operator's tank rotation, read off **effects** rather than names, so the
+      // same five orders serve the Warrior and the bear (`.pi/research/octowow/
+      // druid-feral.md`, §9): a Rage opener is an `Energize`, an armour debuff is a
+      // `Sunder`, a threat strike is a `WeaponDamage` that also states a `Threat`,
+      // and the weave is a `Lacerate`. Reading names instead would mean a second
+      // copy of this function the day the second tank arrives.
+      let affordable pred =
+        abilityWhere t pred |> Option.filter (fun a -> canUse t a.Name)
+
+      let rageOpener = affordable (function Energize _ -> true | _ -> false)
+      let armorDebuff = affordable (function Sunder _ -> true | _ -> false)
+
+      let threatStrike =
+        t.Abilities
+        |> List.tryFind (fun a ->
+          canUse t a.Name
+          && a.Effects |> List.exists (function Threat _ -> true | _ -> false)
+          && a.Effects |> List.exists (function WeaponDamage _ -> true | _ -> false))
+
+      let weave = affordable (function Lacerate _ -> true | _ -> false)
+
+      // "Pop Enrage immediately on pulls to cover the initial low-rage window":
+      // the threshold is what the button grants, so it is pressed when it would
+      // refill an empty bar rather than at 90 Rage.
+      let lowRage = t.Resource < 20
+
+      let standingLacerates =
+        match target with
+        | Some body -> Aura.lacerateStacks body.Auras
+        | None -> 0
+
       match thief, taunt with
       | Some h, Some a when canUse t a.Name -> cmd at (UseAbility(t.Id, a.Name, h.Id))
       // Intercept is in the kit and stays out of the rotation: measured, it reads 7
@@ -480,11 +511,24 @@ module PartyAi =
           t.Abilities |> List.exists (fun a -> a.Name = name && a.TargetKind = Self)
 
         cmd at (UseAbility(t.Id, name, (if isSelf then t.Id else f.Id)))
-      | _ when has t "Sunder Armor" && not sundered && canUse t "Sunder Armor" ->
+      // The pull's first free Rage, then the armour tag, then the threat strike on
+      // cooldown — which is the operator's single-target order and the AoE one at
+      // once, since a pull is one body until the pack arrives.
+      | _ when rageOpener.IsSome && lowRage ->
+        cmd at (UseAbility(t.Id, rageOpener.Value.Name, t.Id))
+      | _ when armorDebuff.IsSome && not sundered ->
+        cmd at (UseAbility(t.Id, armorDebuff.Value.Name, f.Id))
+      | _ when threatStrike.IsSome ->
+        cmd at (UseAbility(t.Id, threatStrike.Value.Name, f.Id))
+      | _ when weave.IsSome && standingLacerates < 5 ->
+        cmd at (UseAbility(t.Id, weave.Value.Name, f.Id))
+      // Sunder Armor is a Warrior's only armour button and the bear's Faerie Fire is
+      // too, so a Tank that already applied it has nothing left but the dump. The
+      // armour debuff is re-applied above only when the target has lost it.
+      | _ when has t "Sunder Armor" && canUse t "Sunder Armor" ->
         cmd at (UseAbility(t.Id, "Sunder Armor", f.Id))
       | _ when dump.IsSome && canUse t dump.Value.Name ->
         cmd at (UseAbility(t.Id, dump.Value.Name, f.Id))
-      | _ when canUse t "Sunder Armor" -> cmd at (UseAbility(t.Id, "Sunder Armor", f.Id))
       | _ -> []
 
   /// Healer. A heal-over-time first: it is the cheapest health per point of mana

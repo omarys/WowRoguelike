@@ -171,3 +171,33 @@ So the OctoWoW port does **not** close the sim's area-threat gap. What it does g
 - The Bear's Swipe row, and the `shortcut:` at `Content.fs:3941-3943` that it makes obsolete.
 - Every **UNVERIFIED** item in §7.
 - The Moonkin and Restoration halves of the Druid, which the sibling notes cover.
+
+## 9. Threat, as the operator states it
+
+The payload page this note is built from does not print a threat section. The
+operator supplied the following on 2026-11-10 as the build's own numbers, and
+`Content.fs` now cites this section for every one of them. They are recorded
+here rather than in a tooltip the repo can fetch, so a later reader knows
+exactly which magnitudes are sourced and which are the operator's.
+
+- **Bear Form and Dire Bear Form threat bonuses are raised to 50%.** OctoWoW's
+  balance pass, per the operator. The 1.12 ranks table carries no threat column
+  for either form (`.pi/research/ranks/druid.md:146-147` lists `ApBuff` and
+  `ArmorBuff` only), so this is the payload's number and not the era's.
+- **Druid tanks can pull with Faerie Fire while in Dire Bear Form.** This is
+  what makes the feral row's 5 yard range a pull tool rather than a melee
+  button, and it is why `Content.fs` gives the feral Faerie Fire a 6 sec
+  cooldown and no cost.
+- **Demoralizing Roar generates threat on every enemy it hits**, and that is
+  what makes it the pack-opening button rather than only an attack-power debuff.
+- **The core threat abilities**, in the operator's words: Savage Bite (Primal
+  Bite) on cooldown, Demoralizing Roar for the pack opening, Faerie Fire on the
+  pull and refreshed, Swipe as the AoE builder, Maul only in surplus Rage, and
+  Enrage popped on the pull to cover the low-Rage window.
+
+**What this section does and does not license.** It licenses the two form
+multipliers and the *roles* of six buttons. It does not supply a damage, a
+duration or a per-application threat for any of them: those still come from
+`.pi/research/ranks/druid.md` where it has a row, and stay marked as derived
+where it does not. Feral Instinct's +15% is separate and cited at
+`Content.fs` from §4 of this note (`.pi/research/octowow/druid-feral.md:59`).

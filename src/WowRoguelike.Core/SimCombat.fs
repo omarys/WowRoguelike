@@ -1235,6 +1235,42 @@ module SimCombat =
 
           w |> logLine (sprintf "%s threatens %s for %d" actor.Name targetName amount)
 
+        | Energize amount ->
+          // Enrage's row is literally `Energize 20` (`.pi/research/ranks/druid.md`),
+          // and the Rage arrives at once: this model has no rage-over-time aura to
+          // spread it over the table's ten seconds. Capped like every other gain, and
+          // it lands on the *actor*, not the target, so an ability with a foe target
+          // would still pay the caster.
+          let w =
+            mapEntity
+              actorId
+              (fun e ->
+                if e.ResourceKind = Rage && e.MaxResource > 0 then
+                  { e with Resource = min e.MaxResource (e.Resource + amount) }
+                else
+                  e)
+              w
+
+          w |> logLine (sprintf "%s: %s grants %d rage" actor.Name ability.Name amount)
+
+        | Lacerate(duration, perTick, maxStacks) ->
+          // The stack count is read off the target's auras, so the fifth press is
+          // worth five times the first and the sixth only refreshes it. `Aura.replaces`
+          // makes a new Lacerate replace the old one, so `refresh` cannot leave two
+          // half-stacked bleeds behind.
+          let standing =
+            (tryEntity targetId w |> Option.map (fun t -> Aura.lacerateStacks t.Auras) |> Option.defaultValue 0)
+
+          let stacks = min maxStacks (standing + 1)
+
+          let w =
+            w
+            |> mapEntity targetId (fun e ->
+              { e with Auras = Aura.refresh (Lacerated(duration, perTick, stacks)) e.Auras })
+            |> logLine (sprintf "%s: %s lacerates %s, %d" actor.Name ability.Name targetName stacks)
+
+          w
+
         | ComboPoint count ->
           w
           |> mapEntity actorId (fun e ->

@@ -1552,8 +1552,11 @@ let ``the warrior's OctoWoW build lands on his kit`` () =
   // Improved Disarm 2/2: twenty seconds off Disarm's sixty, and the 1.5 s floor in
   // `withTalents` is the invariant that keeps a future talent from zeroing a row.
   Assert.Equal(secTicks 40.0, (ability "Disarm").CooldownTicks)
-  // Defiance 5/5, in the place threat actually lives.
-  Assert.Equal(60000, tank.ThreatMultiplierBp)
+  // Defiance 5/5, in the place threat actually lives: the stance's 1.30 times the
+  // talent's 1.20. The sheet carried a flat 6.0 here while Defiance was a placeholder
+  // for "+20% over the stance", which is neither the stance's own number nor the
+  // talent's.
+  Assert.Equal(15600, tank.ThreatMultiplierBp)
 
 [<Fact>]
 let ``shield block raises the block chance`` () =
@@ -7392,15 +7395,15 @@ let ``each Druid spec is paid for from its own resource`` () =
   Assert.Equal(100, (druid "Druid (Bear)").MaxResource)
   Assert.Equal(100, (druid "Druid (Cat)").MaxResource)
 
-  // A tank holds threat at the stance rate and a damage spec at the party rate.
-  // The Bear and the Warrior are *not* equal: the Warrior's extra fifth is
-  // Defiance, a Warrior talent, so the Bear sits at the bare stance
-  // (`tankStanceBp`) while the Warrior's sheet carries the stance plus Defiance
-  // (`warriorThreatBp`). Both constants document that split in `Content.fs`.
+  // A tank holds threat at its form or stance rate times its threat talent, and a
+  // damage spec at the party rate. The Bear and the Warrior are *not* equal: the
+  // Warrior's product is Defensive Stance 1.30 x Defiance 1.20 and the Bear's is
+  // the form's 1.50 x Feral Instinct 1.15. Both constants document that split in
+  // `Content.fs`; before them both tanks sat on a flat 5.0 placeholder.
   let warrior = Content.partyOf [ "Warrior" ] 24 |> List.head
   Assert.Equal(10000, (druid "Druid").ThreatMultiplierBp)
-  Assert.Equal(50000, (druid "Druid (Bear)").ThreatMultiplierBp)
-  Assert.Equal(60000, warrior.ThreatMultiplierBp)
+  Assert.Equal(17250, (druid "Druid (Bear)").ThreatMultiplierBp)
+  Assert.Equal(15600, warrior.ThreatMultiplierBp)
   Assert.Equal((druid "Druid").ThreatMultiplierBp, (druid "Druid (Moonkin)").ThreatMultiplierBp)
 
 [<Fact(Skip = "Moonkin (Balance) stays parked; Bear and Cat are measured again as of the feral unpark. Delete this Skip to re-enable Moonkin.")>]

@@ -291,6 +291,14 @@ type Aura =
   /// make a Hunter's bleed eat its own Serpent Sting — a sting and a bleed are two
   /// debuffs on the target in the game, and they have to be two auras here.
   | Bleeding of remaining: int<tick> * damagePerTick: int * caster: EntityId option
+  /// Lacerate: a bleed that stacks instead of refreshing, because the fifth dose is
+  /// worth five times the first. A case of its own for the same reason `Bleeding`
+  /// is separate from `Corrupted` — the Rogue's Deadly Poison and a bear's claw
+  /// wounds are two debuffs on the target, and one must not eat the other. It is
+  /// not `Bleeding` with a stack count for exactly that reason: a Hunter's Piercing
+  /// Shots bleed and a Lacerate are not the same kind, so they stack beside each
+  /// other rather than replacing each other.
+  | Lacerated of remaining: int<tick> * damagePerTick: int * stacks: int
   /// Deadly Poison: a damage-over-time that stacks instead of refreshing, because
   /// the fifth dose is worth five times the first. The duration is shared; the
   /// stacks are what the Tick multiplies by.
@@ -464,6 +472,7 @@ module Aura =
     | Sundered(r, reduction) when r > ticks 1 -> Some(Sundered(r - ticks 1, reduction))
     | Corrupted(r, n, c) when r > ticks 1 -> Some(Corrupted(r - ticks 1, n, c))
     | Bleeding(r, n, c) when r > ticks 1 -> Some(Bleeding(r - ticks 1, n, c))
+    | Lacerated(r, n, s) when r > ticks 1 -> Some(Lacerated(r - ticks 1, n, s))
     | DeadlyPoisoned(r, n, s) when r > ticks 1 -> Some(DeadlyPoisoned(r - ticks 1, n, s))
     | Wounded(r, bp, s) when r > ticks 1 -> Some(Wounded(r - ticks 1, bp, s))
     | Numbed(r, bp) when r > ticks 1 -> Some(Numbed(r - ticks 1, bp))
@@ -500,6 +509,7 @@ module Aura =
     | Sundered(r, reduction) -> sprintf "sunder(%d,-%d)" r reduction
     | Corrupted(r, n, _) -> sprintf "dot(%d,%d)" r n
     | Bleeding(r, n, _) -> sprintf "bleed(%d,%d)" r n
+    | Lacerated(r, n, s) -> sprintf "lacerate(%d,%dx%d)" r n s
     | DeadlyPoisoned(r, n, s) -> sprintf "deadly(%d,%d,x%d)" r n s
     | Wounded(r, bp, s) -> sprintf "wound(%d,-%d,x%d)" r bp s
     | Numbed(r, bp) -> sprintf "numb(%d,+%d)" r bp
@@ -546,6 +556,7 @@ module Aura =
     | Sundered _ -> "SUNDER"
     | Corrupted _ -> "CORRUPTION"
     | Bleeding _ -> "BLEED"
+    | Lacerated _ -> "LACERATE"
     | DeadlyPoisoned _ -> "DEADLY POISON"
     | Wounded _ -> "WOUND POISON"
     | Numbed _ -> "NUMBED"
@@ -614,6 +625,7 @@ module Aura =
     | Stunned _
     | Sundered _
     | Bleeding _
+    | Lacerated _
     | Disarmed _
     | RecentlyCast _ -> Physical
 
@@ -631,6 +643,7 @@ module Aura =
     | Sundered(r, _)
     | Corrupted(r, _, _)
     | Bleeding(r, _, _)
+    | Lacerated(r, _, _)
     | Drained(r, _)
     | Blocking r -> r
     | TotemBoon(r, _, _, _)
@@ -706,6 +719,7 @@ module Aura =
   let stacksOf =
     function
     | DeadlyPoisoned(_, _, n) -> n
+    | Lacerated(_, _, n) -> n
     | Wounded(_, _, n) -> n
     | HealingWay(_, n) -> n
     | _ -> 1
@@ -780,6 +794,7 @@ module Aura =
       | Rejuvenation(r, _, _) -> r
       | Corrupted(r, _, _) -> r
       | Bleeding(r, _, _) -> r
+      | Lacerated(r, _, _) -> r
       | DeadlyPoisoned(r, _, _) -> r
       | Drained(r, _) -> r
       | Polymorphed r -> r
@@ -869,6 +884,7 @@ module Aura =
     | Sundered _ -> 6
     | Corrupted _ -> 7
     | Bleeding _ -> 23
+    | Lacerated _ -> 29
     | Disarmed _ -> 8
     | Blocking _ -> 9
     | TotemBoon _ -> 10
@@ -898,6 +914,11 @@ module Aura =
     // talent was worth nothing at all — 74 procs a fight and not one of them
     // finishing, because every crit ate the previous bleed.
     | Bleeding _, Bleeding _ -> false
+    // Lacerate is the opposite case: its fifth application is the ability, so a
+    // re-application has to find its predecessor and replace it with a bigger one
+    // rather than sit beside it. Two Lacerates would double the bleed at one stack
+    // each, which is not what any of the five says.
+    | Lacerated _, Lacerated _ -> true
     | _ -> kind older = kind newer
 
   /// Prepend `a`, dropping the aura it replaces, so a re-application refreshes
@@ -911,6 +932,15 @@ module Aura =
     function
     | Sundered(_, reduction) -> reduction
     | _ -> 0
+
+  /// The Lacerate stacks already standing on a body, summed over auras. A helper
+  /// rather than `stacksOf` because that one answers 1 for every aura that does not
+  /// stack, and a Lacerate's next stack is only the count of *its* kind.
+  let lacerateStacks (auras: Aura list) =
+    auras
+    |> List.sumBy (function
+      | Lacerated(_, _, n) -> n
+      | _ -> 0)
 
   /// Who applied this damage-over-time, when the aura knows who did. Only a
   /// talent on the applier reads it, so nothing else in the engine asks.
@@ -937,6 +967,9 @@ module Aura =
     function
     | Corrupted(_, n, _) -> n
     | Bleeding(_, n, _) -> n
+    // A Lacerate tick is worth its stack count: five applications are five times
+    // the bleed, which is the whole of why the button is pressed again.
+    | Lacerated(_, n, s) -> n * s
     | _ -> 0
 
   /// Resource drained per firing Tick, summed over auras. Viper Sting is the only
@@ -1172,6 +1205,15 @@ type Effect =
   | Threat of amount: int
   /// Damage-over-time: deal `damagePerTick` every Tick for `duration`, unmitigated.
   | DamageOverTime of duration: int<tick> * damagePerTick: int
+  /// Energize: hand the caster `amount` of its own resource at once — the Druid's
+  /// Enrage, whose table row is literally `Energize 20` (`.pi/research/ranks/
+  /// druid.md`). A `ProcResult.GrantResource` when a talent fires it, an `Effect`
+  /// when the button does.
+  | Energize of amount: int
+  /// Lacerate: add a stack of a stacking bleed to the target, up to `maxStacks`, and
+  /// refresh its clock. A second application is worth more than the first, which is
+  /// the whole of the ability, so the effect carries the cap rather than the row.
+  | Lacerate of duration: int<tick> * damagePerTick: int * maxStacks: int
   /// Viper Sting: drain `amountPerTick` of the target's resource every Tick for
   /// `duration`. A caster with an empty pool cannot pay for a cast, so on a
   /// mana-using mob this is a throughput cut, not a damage ability — which is
