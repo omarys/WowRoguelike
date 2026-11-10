@@ -4427,7 +4427,35 @@ module Content =
               Event = OnSpellHit
               ChanceBp = 1000
               InternalCooldown = secTicks 8.0
-              Then = EmpowerNext(secTicks 15.0, { Empower.none with FreeMana = true }) } ] }
+              Then = EmpowerNext(secTicks 15.0, { Empower.none with FreeMana = true }) }
+
+            // Temporal Convergence 3/3, the talent behind Arcane Rupture in the
+            // same tree: "Your Arcane Missiles have a chance of [5/10/15]% to reset
+            // the cooldown of Arcane Rupture and cause it to return its base mana
+            // cost on its next cast.  This effect can occur once every 15 sec." —
+            // the payload's own words, including the internal cooldown, which is
+            // why the record needs no inference for it.
+            // (`.pi/research/octowow/mage-payload-gaps.md` §1; the row was unported
+            // before because the talent page's effect text was unrecovered, not
+            // because the numbers were unknown.)
+            //
+            // Two halves, and only one of them is state. The reset is
+            // `ResetCooldown`, which exists. The mana return is a refund of a cost
+            // of zero: Arcane Rupture's own page states no cost, so the row carries
+            // `ResourceCost = 0` and there is nothing to give back — see the
+            // `shortcut:` on that row. If the cost is ever sourced, the refund
+            // grows a `ProcResult` case the day it has an amount to work with.
+            //
+            // `OnSpellHitOf` rather than `OnSpellHit` is load-bearing: the same
+            // mage's Frostbolt must not reset the button. And because the sim has no
+            // channel, Arcane Missiles land as one hit per cast, so "per missile"
+            // and "per cast" are the same event here; the fifteen seconds is what
+            // really spaces the procs.
+            { Talent = "Temporal Convergence"
+              Event = OnSpellHitOf "Arcane Missiles"
+              ChanceBp = 1500
+              InternalCooldown = secTicks 15.0
+              Then = ResetCooldown "Arcane Rupture" } ] }
 
   let private mage (buffs: PartyBuffKind list) (level: int) (id: int) =
     let abilities =

@@ -362,6 +362,12 @@ type ProcEvent =
   | OnBlock
   /// A damage spell of this character's landed. A resisted spell is not a hit.
   | OnSpellHit
+  /// A damage spell of one *named* ability of this character's landed — the
+  /// mirror of `OnCritOf` for the hit instead of the crit. It exists because
+  /// Temporal Convergence resets Arcane Rupture off Arcane Missiles and must not
+  /// fire off the same mage's Frostbolt: a talent that names its spell needs the
+  /// name, and the hit site is the only place that knows it.
+  | OnSpellHitOf of ability: string
   /// One tick of a damage-over-time this character applied. Fired on the
   /// *caster*, from the tick, which is why `Corrupted` records who applied it:
   /// the damage lands on the target and the talent belongs to the applier.

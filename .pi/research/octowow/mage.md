@@ -202,6 +202,12 @@ because it has no snare.
 
 ## 7. Missing evidence / UNVERIFIED
 
+> **Filled since — see `mage-payload-gaps.md`.** The 29 gaps below were a *reading* artefact, not
+> missing data: the talent panel lives in the Next.js RSC flight payload and the chunk boundaries
+> fall mid-talent, so slice-by-slice reading cut nodes in half. The full document (`/talents/mage/`,
+> no `points` parameter, 134 KB, no JS challenge) yields all 53 talents. Read that file instead of
+> this section for anything below, including the corrected per-rank arrays.
+
 - **29 of 84 talent records were not recovered** — the payload was read in 5 slices and several
   blocks fell between them. Unresolved slots: Arcane 3, 7, 11, 20, 21, 23, 24, 26, 27; Fire 0, 3, 7,
   14, 19, 20, 21, 23, 24, 26, 27; Frost 3, 10, 15, 16, 21, 23, 24, 26, 27. **No talent the build

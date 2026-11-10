@@ -439,8 +439,10 @@ simpler corner rule, not clearances. 223/223 tests green, `bench-30` unchanged.
 `.pi/research/octowow/axis-inventory.md` ranked the trigger/proc hook first: eighteen
 talents across eight classes need an event the character did not choose — a block, a
 crit, a hit. It is now a subsystem rather than a per-port invention. `Domain.fs` carries
-`ProcEvent` (`OnCrit`, `OnBlock`, `OnSpellHit`), `ProcResult` (`GrantResource`,
-`EmpowerNext`), `Proc = { Talent; Event; ChanceBp; InternalCooldown; Then }` and
+`ProcEvent` (`OnCrit`, `OnBlock`, `OnSpellHit`, and the two *named* events `OnCritOf` and
+`OnSpellHitOf` for a talent that must fire off one ability and not off its neighbour),
+`ProcResult` (`GrantResource`, `EmpowerNext`, `ResetCooldown`, `Gain`),
+`Proc = { Talent; Event; ChanceBp; InternalCooldown; Then }` and
 `Talents.Procs`; `SimCombat.procOn` is called from the three places those events are
 already decided. Three talents landed as proof, one per event and covering both result
 kinds: **Warrior Shield Specialization 5/5** (block bp 500 → 1000 and 5 flat rage on a
@@ -925,7 +927,7 @@ not measured. No ladder or `comps` cell seats them either, so nothing else needs
 |---|---|---|---|
 | Warrior | Prot 3/0/48 | **6 of 18** | all six data-only; 12 need axes |
 | Rogue | 17/34/0 | **6 of 18** | six data-only, plus two flat energy costs from the baseline changes |
-| Mage | Arcane 40/Frost 11 | **8 of 19** | eight landed, incl. Presence of Mind as a kit row, **Arcane Concentration** (`Procs`, landed with the proc axis in `7fc0694` and uncounted here until now), **Arcane Power** (`CastHaste`, a 20 s window worth +1.34% at L33), **Arcane Instability** (`SpellDoneBp`/`SpellCritBp`, +4.3% mage damage) and **Arcane Rupture** (`Aura.Ruptured`/`Effect.Rupture`, the first effect that scales a *named* spell's hit and cost, worth ~7% of a bench clear); the other 11 need axes |
+| Mage | Arcane 40/Frost 11 | **9 of 19** | nine landed, incl. Presence of Mind as a kit row, **Arcane Concentration** (`Procs`, landed with the proc axis in `7fc0694` and uncounted here until now), **Arcane Power** (`CastHaste`, a 20 s window worth +1.34% at L33), **Arcane Instability** (`SpellDoneBp`/`SpellCritBp`, +4.3% mage damage), **Arcane Rupture** (`Aura.Ruptured`/`Effect.Rupture`, the first effect that scales a *named* spell's hit and cost, worth ~7% of a bench clear) and **Temporal Convergence** (`ProcEvent.OnSpellHitOf`, the first proc that names its spell, resetting Arcane Rupture off Arcane Missiles — measured inert on the bench, see below); the other 10 need axes |
 | Priest | Disc 11/Holy 40 | **8 of 16** | best hit rate of the port; two talents had to be *deleted* |
 | Shaman | 0/5/46 | 1 | `DamageDoneBp`-shaped talent only |
 | Paladin | 40/0/11 | **8 of 17** | six lines and one deletion; Illumination is a **nerf** (10000 → 6000) and Divine Favor's cooldown row is gone; `comps 6 --level 60` 36/36 clean, bench 30/30 with the snapshot unmoved. **Blessing of Kings 1/1** is the first talent in the port that hands the *party* a passive (`Talents.PartyBuffs`) and the first passive that multiplies instead of adding, so `buffed` grew a percentage column that lands after the flats — **−5.4% clear time (library), −2.5% (armory)** at 60 on a twelve-seed A/B, priced before it was built. Its eight remaining talents need eight separate axes (cast-time field, reactive heal, reset proc, armour→healing, silence resistance, either-target, blessing effectiveness, target armour), so the class is now expensive per point |

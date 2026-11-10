@@ -769,6 +769,18 @@ module SimCombat =
           // resisted one is not. Rolled once per landed spell, not once per
           // ability — a wave of Arcane Missiles is five chances, as it was.
           let w = if amount > 0 then procOn OnSpellHit actor.Id w else w
+
+          // The named half of the same event: `OnSpellHitOf` is what a talent that
+          // resets one specific ability hangs off (Temporal Convergence on Arcane
+          // Missiles), resolved here while the ability name is in hand. A build with
+          // no named procs draws nothing, so the stream stays put.
+          let w =
+            if amount > 0 then procOn (OnSpellHitOf ability.Name) actor.Id w else w
+
+          // The named half of the same event: `OnSpellHitOf` is what a talent that
+          // resets one specific ability hangs off (Temporal Convergence on Arcane
+          // Missiles), resolved here while the ability name is in hand. A build with
+          // no named procs draws nothing, so the stream stays put.
           let w = dealDamage targetId amount w
 
           // A spell crit is a crit like any other for the named event: the ability

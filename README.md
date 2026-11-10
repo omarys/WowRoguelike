@@ -147,12 +147,14 @@ The seed sweep is the one that matters most. The tests prove the *invariants* ho
 only the sweep proves the *game* still behaves. It currently prints:
 
 ```
-seeds=120 cleared=120 wiped=0 unresolved=0 median-ticks=950 min=794 max=1080
+seeds=120 cleared=120 wiped=0 unresolved=0 median-ticks=809 min=689 max=1012
 ```
 
-(Measured at `72e15f9`. Release build, 160/160 tests passing. Re-measure and
-update this line whenever a change moves it — a stale line makes every later
-comparison meaningless.)
+(Release build, 277 passed / 10 skipped, measured with the Mage's Temporal Convergence in
+place. Re-measure and update this line whenever a change moves it — a stale line makes every
+later comparison meaningless. This one was last written at `72e15f9`, when the suite had 160
+tests and the sweep printed 950; it prints 809 now, so the number in this block had been
+stale for a long time before anyone noticed.)
 
 Treat that line as a fingerprint. A refactor that moves it changed behaviour — which
 is how the `Sim` → `SimState`/`SimTick` split was *proven* to be a pure refactor

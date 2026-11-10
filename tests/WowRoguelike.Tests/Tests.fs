@@ -5888,6 +5888,77 @@ let ``two movers landing on one tile do not share it`` () =
 
   Assert.DoesNotContain(tiles, fun (_, n) -> n > 1)
 
+/// Temporal Convergence 3/3: "Your Arcane Missiles have a 5/10/15% chance to reset
+/// the cooldown of your Arcane Rupture". The record is checked against the text it
+/// was ported from, then the wiring: an Arcane Missiles hit clears the button, an
+/// Arcane Explosion hit — same school, different spell — does not, which is the
+/// whole difference between `OnSpellHitOf` and `OnSpellHit`.
+[<Fact>]
+let ``temporal convergence resets arcane rupture off arcane missiles alone`` () =
+  let mage = Content.partyOf [ "Mage" ] 60 |> List.exactlyOne
+
+  let converged =
+    mage.Talents.Procs |> List.find (fun p -> p.Talent = "Temporal Convergence")
+
+  Assert.Equal(1500, converged.ChanceBp)
+  Assert.Equal<int<tick>>(secTicks 15.0, converged.InternalCooldown)
+  Assert.Equal(OnSpellHitOf "Arcane Missiles", converged.Event)
+  Assert.Equal(ResetCooldown "Arcane Rupture", converged.Then)
+
+  // A hundred percent so the wiring is what is under test, not the roll.
+  let held =
+    { mage with
+        Talents =
+          { mage.Talents with
+              Procs = [ { converged with ChanceBp = 10000 } ] }
+        Cooldowns = Map.ofList [ "Arcane Rupture", secTicks 60.0 ] }
+
+  // Level 5, not 60: a resist is not a hit (`amount > 0` guards the proc), and a
+  // level-60 dummy resists a level-60 mage's Arcane Missiles outright.
+  let mob =
+    Content.mob
+      100
+      "Dummy"
+      CreatureType.Humanoid
+      5
+      1000000
+      1000
+      None
+      []
+      None
+      { X = 8; Y = 5 }
+
+  let world =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 20 10
+      Entities = [ { held with Pos = { X = 7; Y = 5 } }; mob ]
+      Pending = []
+      // Seed 2 because seed 1's first draw in this stream is below the mage's miss
+      // chance and the missiles resist — and a resist is not a hit, so the proc is
+      // correctly silent. The seed is part of the fixture, not noise.
+      Rng = Rng.streamsOf 2UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let cast name world =
+    let ability = mage.Abilities |> List.find (fun a -> a.Name = name)
+    SimCombat.resolveAbility (EntityId 1) (EntityId 100) ability world
+
+  let cooldown (w: World) = (entBy 1 w).Cooldowns |> Map.tryFind "Arcane Rupture"
+
+  let exploded = world |> cast "Arcane Explosion"
+
+  // The cast has to have landed, or "the cooldown survived" is a tautology.
+  Assert.Contains(exploded.Log, fun line -> line.Contains "hits")
+  Assert.True(cooldown exploded |> Option.isSome, "Arcane Explosion cleared Arcane Rupture")
+
+  let missed = world |> cast "Arcane Missiles"
+  Assert.True(
+    cooldown missed |> Option.isNone,
+    sprintf "Arcane Missiles did not clear Arcane Rupture; log: %A" missed.Log)
+
 /// A one-wide tube with the Tank at the sealed end and four allies stacked behind
 /// it. Only the ally at the very back has floor to step onto, and it is five tiles
 /// from the Tank — further than the aside used to look. Seed 1 graveyard level 60

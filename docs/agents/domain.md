@@ -990,6 +990,32 @@ worth roughly **7% of a party clear** on the bench, and the bench is the one ins
 that holds a fixed encounter — the 8 seeds that got slower are the usual chaos, a reordered
 damage stream fighting a different fight.
 
+**Temporal Convergence 3/3 is the talent that proved the proc axis has a blind spot, and
+the finding is about the instrument, not the talent.** "Your Arcane Missiles have a chance
+of [5/10/15]% to reset the cooldown of Arcane Rupture and cause it to return its base mana
+cost on its next cast. This effect can occur once every 15 sec." That is one new event —
+`ProcEvent.OnSpellHitOf of ability: string`, the mirror of `OnCritOf` — because a talent
+that resets one button must not fire off the same mage's Frostbolt, and the reset itself is
+the `ResetCooldown` case that already existed for Lock and Load. The mana half needs
+nothing: Arcane Rupture's cost is 0, so there is no cost to return.
+
+Measured, it does nothing at all, and the measurement is the lesson. Three arms on a
+`-t:Rebuild` A/B, 30 seeds each: baseline median **858.5**; shipped 15% **894.0** with 15
+seeds faster and 15 slower; the same record at a forced 100% (the `ChanceBp >= 10000`
+shortcut draws no random number, so this arm is uncontaminated) **872.5**, 15 faster and 14
+slower, delta median −0.5. A *guaranteed* reset is worth nothing here. The reason is the
+fight, not the port: the bench encounter is over in about 860 ticks (86 s) and Arcane
+Rupture's own cooldown is 60 s, so the button is pressed once or twice and a reset either
+lands while it is already ready or after the last press. `runs 120` median stayed at 809
+across all three arms.
+
+**The reusable part: a proc that adds a draw reshuffles the whole fight.** The shipped arm
+differs from the baseline on all 30 seeds — not because the talent did anything, but
+because every landed spell hit now draws one more random number, so every downstream roll
+moves. A proc can therefore never be measured by A/B at its shipped chance; the only clean
+arm is the one that fires without drawing. Any future "close to nothing" proc should be
+measured at 100% first, to find its ceiling before its chance is blamed.
+
 ### Priest: eight of sixteen, and the first port where deleting was the work
 
 Discipline 11 / Holy 40 / Shadow 0 — the operator's build — is the best hit rate of the
