@@ -278,3 +278,32 @@ Arcane Subtlety (threat), Magic Absorption, Magic Attunement, Improved Mana Shie
 Counterspell's silence duration, and the whole Frost 11 (Frostbite/Permafrost need a root and a snare —
 the engine has both now, but nothing in the build spends them on a Mage). Arcane Power's own mana
 drain — the era's price for the speed — is still UNVERIFIED and therefore absent; see §7.
+
+## 9. Arcane Instability 3/3 — the first spell-scoped fields
+
+"Increases your spell damage and critical strike chance by 1/2/3%." Two multipliers on the
+same body, and the reason `Talents` grew `SpellDoneBp` and `SpellCritBp` rather than reusing
+`DamageDoneBp`: **a caster still swings.** `DamageDoneBp` would have carried the damage half
+for free and quietly handed the mage's staff 3% of its own. The fields are read at exactly
+two places — `Talents.spellBp` (the `SpellDamage` branch) and the `rollCrit` call beside it —
+so a white swing, an auto-attack and a weapon strike answer to `damageBp` and never see them.
+
+Measured over 8 seeds a wing, Armed/unarmed on an otherwise identical world:
+
+| wing | L | clear | mage damage | crit rolls |
+|---|---|---|---|---|
+| graveyard | 33 | 74 925 → 82 276 (+9.8%) | +3.7% | 0 |
+| library | 36 | 64 977 → 64 860 (−0.2%) | +9.2% | 0 |
+| armory | 39 | 61 856 → 61 177 (−1.1%) | −0.2% | 0 |
+| cathedral | 42 | 72 437 → 71 750 (−0.9%) | +5.5% | 0 |
+
+**The arithmetic is right and the per-wing number is not measurable this way.** Aggregate mage
+damage went 657 604 → 686 030 (+4.3%), which is what +3% damage and +3 points of crit on a
+1.5× multiplier should be worth. The clear-time column is noise: three wings inside ±1.1%
+and graveyard reading +9.8%, because any change to the crit roll reorders the whole world's
+random stream — the same seeds then fight a different fight. A chaotic sim can be A/B'd on
+*aggregate damage*, not on individual clear times, and a single wing's delta is worth nothing.
+
+There is no "critically" marker in the combat log, so a crit count cannot be read off it
+either; verifying crit share needs the roll itself, not the log. The unit test asserts the
+arithmetic (`spellBp "Frostbolt" = 10300` while `damageBp "" = 10000`) instead.

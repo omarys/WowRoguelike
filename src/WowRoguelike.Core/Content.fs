@@ -4361,11 +4361,18 @@ module Content =
   ///   line per spell because the talent is written per spell, and this build takes no
   ///   Fire talents at all, so Fireball gets nothing.
   ///
-  /// What the build would want and cannot have yet: Arcane Instability (+3% damage and
-  /// crit to everything), Arcane Power (a casting-speed window), Arcane Potency, and the
-  /// whole Arcane Missiles line — all of §5(b).
+  /// What the build would want and cannot have yet: Arcane Potency, the whole Arcane
+  /// Missiles line (pushback resistance on a channel), and the mana-side talents —
+  /// all of §5(b).
+  ///
+  /// Arcane Instability 3/3 is the two tree-wide spell fields: `SpellDoneBp = 300` and
+  /// `SpellCritBp = 300`. They are spell-only on purpose. `DamageDoneBp` would have
+  /// carried the damage half for free, but a mage still swings a staff between casts and
+  /// the talent says "your spell damage".
   let private mageTalents =
     { Talents.none with
+        SpellDoneBp = 300
+        SpellCritBp = 300
         Spells =
           [ { Spell = "Frostbolt"
               CostBp = 0

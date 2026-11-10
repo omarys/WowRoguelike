@@ -729,12 +729,14 @@ module SimCombat =
 
         | SpellDamage(lo, hi) ->
           let rolled, w = rollRange lo hi w
-          let rolled = rolled * Talents.damageBp ability.Name actor.Talents / 10000
+          // `spellBp`, not `damageBp`: Arcane Instability raises spell damage and
+          // must not raise the same caster's staff swing.
+          let rolled = rolled * Talents.spellBp ability.Name actor.Talents / 10000
           let amount, w = spellHit ability.Name actor targetId rolled w
 
           let amount, crit, w =
             rollCrit
-              actor.CritChanceBp
+              (actor.CritChanceBp + actor.Talents.SpellCritBp)
               (actor.Talents.CritDamageBp + slayingAgainst actor targetId w)
               amount
               w

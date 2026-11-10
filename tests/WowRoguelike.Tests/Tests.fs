@@ -1311,6 +1311,28 @@ let ``the mage's OctoWoW build lands on his kit`` () =
   let pom = ability "Presence of Mind"
   Assert.Equal(secTicks 180.0, pom.CooldownTicks)
   Assert.Equal<Effect list>([ Empowers(secTicks 20.0, { Empower.none with Instant = true }) ], pom.Effects)
+  // Arcane Instability 3/3, the two tree-wide *spell* fields. Not `DamageDoneBp`:
+  // the mage's staff swing is not a spell.
+  Assert.Equal(300, mage.Talents.SpellDoneBp)
+  Assert.Equal(300, mage.Talents.SpellCritBp)
+  Assert.Equal(0, mage.Talents.DamageDoneBp)
+
+/// Arcane Instability raises *spell* damage and crit, and a caster still swings. The
+/// distinction is the whole reason `Talents` grew two fields instead of reusing
+/// `DamageDoneBp`: same body, two different numbers.
+[<Fact>]
+let ``spell damage and crit are separate from the staff's swing`` () =
+  let baseT = Talents.none
+  let instability = { Talents.none with SpellDoneBp = 300; SpellCritBp = 300 }
+  Assert.Equal(10300, Talents.spellBp "Frostbolt" instability)
+  Assert.Equal(10000, Talents.damageBp "Frostbolt" instability)
+  // The swing answers to `damageBp` and so is left alone...
+  Assert.Equal(10000, Talents.damageBp "" instability)
+  Assert.Equal(10000, Talents.damageBp "" baseT)
+  // ...and a tree-wide damage bonus still reaches both.
+  let forceOfWill = { Talents.none with DamageDoneBp = 1000 }
+  Assert.Equal(11000, Talents.spellBp "Frostbolt" forceOfWill)
+  Assert.Equal(11000, Talents.damageBp "" forceOfWill)
 
 /// The Priest's OctoWoW build (Discipline 11 / Holy 40 / Shadow 0). Eight of sixteen
 /// talents are data — the best hit rate of the port so far — and two of the sixteen are

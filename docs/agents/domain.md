@@ -824,7 +824,7 @@ level-scaled axis **36/36 for the first time**, including the library cell that 
 2 of 2. That cell is not "fixed by the Rogue" in any proven sense — the whole party's
 numbers moved, and this is a one-seed run — but there is no failing cell left to debug.
 
-### Mage: the OctoWoW build, five of nineteen, and the first attack-speed stat
+### Mage: the OctoWoW build, six of nineteen, and the first attack-speed stat
 
 The operator's build (`?points=TAFOLISYZKAoB--FADD`, Arcane 40 / Fire 0 / Frost 11, every
 taken talent at maximum) landed four of nineteen: Improved Frostbolt 5/5 (half a second
@@ -834,11 +834,27 @@ Explosion, and on nothing else — this build takes no Fire talents), Improved C
 an `Effect`), and Presence of Mind as a kit row built from the same `nextSpell` helper as
 Nature's Swiftness: no talent record can hand over an ability the kit did not have.
 
-The remaining fifteen are exactly the ones that would change the class: Arcane Instability
-(+3% damage *and* crit to everything), Arcane Potency, the Improved Arcane Missiles line.
-That is not a porting oversight, it is §5(b) — none of them has a field to land in.
-**Arcane Power was on that list and came off it**: it is the fifth, and it needed the
-engine's first attack-speed stat rather than a talent field.
+The remaining fifteen are exactly the ones that would change the class: Arcane Potency, the
+Improved Arcane Missiles line, the mana talents. That is not a porting oversight, it is §5(b) —
+none of them has a field to land in. **Arcane Power and Arcane Instability came off that
+list**: the fifth needed the engine's first attack-speed stat, the sixth needed two fields
+that are *spell*-scoped.
+
+#### Arcane Instability, and why a caster's swing is not a spell
+
+"Increases your spell damage and critical strike chance by 1/2/3%." `Talents` already had
+`DamageDoneBp`, documented as covering "melee or spell" and naming this talent — and reusing
+it would have been wrong: a mage swings a staff between casts, and 3% of that is not what the
+talent says. `SpellDoneBp` and `SpellCritBp` are read at exactly two sites (`Talents.spellBp`
+in the `SpellDamage` branch, and the `rollCrit` beside it), so a white swing still answers to
+`damageBp` alone.
+
+Measured over 8 seeds a wing: aggregate mage damage **+4.3%**, which is what +3% damage and
+three points of crit on a 1.5× multiplier are worth. The clear-time column was **noise** —
+three wings inside ±1.1% and one at +9.8% — because changing the crit roll reorders the
+whole world's random stream, so the same seeds fight a different fight. A chaotic sim can be
+A/B'd on aggregate damage, not on one wing's clear time; that is the same lesson as the
+two-seed lie above, one layer down.
 
 #### Arcane Power, and why "30% faster" is three quarters
 

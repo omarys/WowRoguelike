@@ -1445,10 +1445,19 @@ type Talents =
     /// Nature, Spiritual Healing), in basis points.
     HealDoneBp: int
     /// Percent added to every point of damage this character deals, melee or
-    /// spell (Arcane Instability, Piercing Howl's opposite, Force of Will). The
+    /// spell (Force of Will's damage half, Piercing Howl's opposite). The
     /// damage half of `HealDoneBp`: a talent that raises damage by ten percent
     /// is the same shape as one that raises healing.
     DamageDoneBp: int
+    /// Percent added to *spell* damage only, bp (Arcane Instability 3/3). Split
+    /// from `DamageDoneBp` because a caster still swings: a talent that reads
+    /// "your spell damage" must not raise the staff's auto-attack, and a class
+    /// whose whole kit is spells cannot tell the two apart from the outside.
+    SpellDoneBp: int
+    /// Percentage points of *spell* crit chance, bp (Arcane Instability's other
+    /// half, Force of Will). The crit twin of `SpellDoneBp`, and likewise not a
+    /// `CritChanceBp` bump on the caster.
+    SpellCritBp: int
     /// Percent off the mana cost of every healing spell (Tidal Focus), bp.
     HealCostBp: int
     /// Percent off the mana cost of every damaging spell (Frost Channeling,
@@ -1529,6 +1538,8 @@ module Talents =
   let none =
     { HealDoneBp = 0
       DamageDoneBp = 0
+      SpellDoneBp = 0
+      SpellCritBp = 0
       HealCostBp = 0
       SpellCostBp = 0
       CritDamageBp = 0
@@ -1575,6 +1586,12 @@ module Talents =
     10000
     + t.DamageDoneBp
     + (spell name t |> Option.map (fun s -> s.DamageBp) |> Option.defaultValue 0)
+
+  /// Percent this character adds to one spell's damage where the spell is *only* a
+  /// spell: `damageBp` plus the spell-only tree fields. A staff swing and a
+  /// `SpellDamage` both go through `damageBp`, and Arcane Instability's "your spell
+  /// damage" must reach the second without touching the first.
+  let spellBp (name: string) (t: Talents) = damageBp name t + t.SpellDoneBp
 
   /// Percent off one spell's mana cost, in basis points. `healing` picks up the
   /// tree-wide healing discount as well as the spell's own line, and everything
