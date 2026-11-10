@@ -1080,12 +1080,13 @@ decision.
    *damage* by 10% has no field to write to. This blocks Warlock, Mage, Hunter and Rogue
    alike, so it is one change that unblocks four classes — the highest-leverage edit in
    the whole port.
-3. **A melee area ability already exists, and a comment says it does not.**
-   `Content.fs:3941-3943` justifies leaving Swipe out of the bear kit: "the only Cleave and
-   Whirlwind in this file are mob abilities". That is now false — `Effect.MultiShot of
-   maxTargets` (`Domain.fs:807`) is implemented at `SimCombat.fs:406-427` and resolves
-   "weapon damage to the target and up to `maxTargets - 1` other hostiles within 8 tiles".
-   **This is the off-tank the operator asked for**, and it is data, not a new axis.
+3. **~~A melee area ability already exists, and a comment says it does not.~~ Landed.**
+   `Content.fs`'s old bear-kit comment justified leaving Swipe out ("the only Cleave and
+   Whirlwind in this file are mob abilities"); the shape it wanted is `Effect.MultiStrike of
+   maxTargets` (`Domain.fs:1104`, resolved at `SimCombat.fs:756` through `meleeStrike`)
+   and **the bear's Swipe is now a row** (`Content.fs`, `swipeRanks`: three bodies within
+   8 tiles, 20 Rage, the weapon roll per body, rank 2 at level 24). The blocker is gone;
+   what remains is the AI pressing it, below.
 4. **There is no proc or stacking axis.** Eclipse (the Moonkin capstone), Omen of
    Clarity, Shadow Weaving and several Hunter talents all assume one. Nothing today
    models a state that accumulates and is consumed.
@@ -1094,10 +1095,16 @@ decision.
 
 `druid-feral.md` §6 puts it in three parts, and the third is the interesting one:
 
-1. The bear needs a multi-target melee button — expressible **today** as `MultiShot`-shaped
-   data, per blocker 3 above.
-2. Swipe's threat must route through `Entity.ThreatMultiplierBp` so Feral Instinct's +15%
-   reaches it, rather than arriving as a fixed number.
+1. ~~The bear needs a multi-target melee button.~~ **Landed** as `Swipe` (see above), and
+   the AI does not press it: measured over twelve level-60 seeds, a bear that sweeps leaves
+   2 runs uncleared (seeds 4 and 6 at the 6000-tick cap) because the sweep lands on the
+   Tick the Mage's polymorph is cast and `Aura.endsOnHostileAction` wakes the sheep. With
+   the press removed, the row's presence is inert — summaries byte-identical to the same
+   seeds with Swipe stripped. **The pressing needs intra-Tick lookahead at the party's own
+   control, not another condition on the visible state.**
+2. Swipe's threat routes through `meleeStrike`, so it takes `Entity.ThreatMultiplierBp` like
+   any other swing and Feral Instinct's +15% reaches it. Verified in the tests
+   (`a bear's swipe hits three bodies, bills twenty rage, and marks every one`).
 3. The bear has two buttons and little Rage to spend on a third: `gainRage` gives
    `2.5 * damage / level` (`docs/agents/domain.md:584-586`), which is why Ferocity's −5
    Rage matters far more here than its single rank suggests. **An off-tank that cannot
@@ -1124,7 +1131,8 @@ mislead the next reader if left alone:
 - `Content.fs:3435` — `priestTalents` claims "Holy Specialization 5/5 (+5% crit)" for a
   bonus the record never carried. §4 of `priest.md` shows Holy Specialization is replaced
   by Divinity anyway.
-- `Content.fs:3941-3943` — the Swipe rationale, disproved above by `Effect.MultiShot`.
+- `Content.fs:3941-3943` — ~~the Swipe rationale, disproved above by `Effect.MultiShot`.~~
+  Done: the comment was replaced when the row landed, and the shape is `Effect.MultiStrike`.
 
 The project already has the right convention for the rest: `Domain.fs:1126` — *"A talent
 the vocabulary cannot express … is named in a comment beside its build and left out rather
@@ -1135,9 +1143,10 @@ than half-modelled."* Follow it. Do not build a general talent engine.
 1. **`Talents` gains a damage half** (blocker 2). One record change; unblocks four classes.
 2. **Shaman, then Priest.** Cheapest per talent, and both already have their mechanics
    (totems, heals). Shaman's totem talents write to `TotemBoon`-adjacent data that exists.
-3. **Druid feral as the off-tank** (blocker 3) — `MultiShot`-shaped Swipe, threat via
-   `ThreatMultiplierBp`, then measure whether the Rage economy can pay for it. This is the
-   operator's stated goal and it needs the least new vocabulary of any role change.
+3. **Druid feral as the off-tank** — Swipe is a row; the remaining work is the press (a
+   Tank decision that can see the cast the party is about to make) and then measuring
+   whether the Rage economy can pay for it. The third button exists and the bear does not
+   press it, so the off-tank question is now the AI's rather than the vocabulary's.
 4. **Rogue, Paladin, Warlock, Hunter.** Rogue's premise surprise (combo points already
    modelled) makes it cheaper than its 9-axis count suggests.
 5. **Resistance model** (blocker 1), then **Mage**: last, because it is the most blocked

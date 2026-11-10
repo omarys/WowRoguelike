@@ -135,12 +135,16 @@ module PartyAi =
     |> Set.ofList
 
   /// Roughly how hard an ability hits, for ordering a kit the way a player would
-  /// rather than by the order it happens to sit in the list.
+  /// rather than by the order it happens to sit in the list. A sweep is scored per
+  /// body, not per cast: every ranking that asks "how hard" here is asking about
+  /// the target in front of the actor, and a three-target row scored at its best
+  /// case would out-bid a real strike every time. What a sweep actually catches is
+  /// `tankOrders`'s question, and it is asked there.
   let private damageOf (a: Ability) =
     a.Effects
     |> List.sumBy (function
       | WeaponDamage(multiplierBp, bonus) -> 30 * multiplierBp / 10000 + bonus
-      | MultiShot _ -> 30
+      | MultiStrike _ -> 30
       | Damage(_, mx) -> mx
       | SpellDamage(_, mx, _) -> mx
       | _ -> 0)
@@ -434,6 +438,21 @@ module PartyAi =
       // exactly as the Warrior's are, and the rank tables are the same ones.
       let taunt = abilityWhere t (function Taunt -> true | _ -> false)
 
+      // A sweep is in the bear's kit and out of its rotation: measured, not
+      // assumed. Two conditions were tried on level 60 over twelve seeds, and both
+      // left 2 of 12 runs uncleared (seeds 4 and 6, stopped at the tick cap with
+      // the pack reset to full):
+      //
+      //  - press on the body count alone (`MultiStrike`'s three, all engaged); and
+      //  - press only when no body in reach is held by the party's own control
+      //    (`Aura.endsOnHostileAction`, so nothing sweeps into a polymorph).
+      //
+      // The second is the interesting failure, and the log of seed 4 names it: on
+      // one Tick the Mage polymorphs a Ravager and the bear's sweep lands on it,
+      // because both orders are decided from the same pre-Tick world — one Tick of
+      // lag is enough to undo the party's own control. A Tank that breaks its
+      // party's sheep is worse than a Tank that does not sweep, so the button waits
+      // for the day the decision has that lookahead.
       let dump =
         abilityWhere t (function WeaponDamage _ -> true | _ -> false)
         |> Option.filter (fun a -> a.ResourceCost > 0)
@@ -1101,8 +1120,11 @@ module PartyAi =
         |> List.length
         >= 2
 
-      let isMultiShot (a: Ability) =
-        a.Effects |> List.exists (function MultiShot _ -> true | _ -> false)
+      /// A row that sweeps: the shot the Hunter holds is the only one this
+      /// rotation presses, so the name stays the shot's even though the shape is
+      /// the engine's and the bear carries one too (`Effect.MultiStrike`).
+      let isSweep (a: Ability) =
+        a.Effects |> List.exists (function MultiStrike _ -> true | _ -> false)
 
       // A row that exists to open a window is not a damage spell, whatever hit it
       // carries. `perCast` divides by `max 1 castTicks`, so a zero-cast ability's
@@ -1126,7 +1148,7 @@ module PartyAi =
           && not (interrupts a)
           && not (isWindow a)
           && damageOf a > 0
-          && (crowded || not (isMultiShot a)))
+          && (crowded || not (isSweep a)))
         |> List.filter (fun a -> canUse e a.Name)
 
       // Mana is what a caster mob spends to be dangerous, so draining it is a

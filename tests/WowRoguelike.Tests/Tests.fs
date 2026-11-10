@@ -3730,7 +3730,7 @@ let ``the hunter's kit is the level-24 one`` () =
   Assert.Equal<Effect list>([ HealOverTime(secTicks 5.0, 38) ], effectsOf "Mend Pet")
 
   // Multi-Shot rank 1 (level 18): three targets, weapon damage each, no flat bonus.
-  Assert.Equal<Effect list>([ MultiShot 3 ], effectsOf "Multi-Shot")
+  Assert.Equal<Effect list>([ MultiStrike 3 ], effectsOf "Multi-Shot")
 
   // Viper Sting drains mana: 15 a second for 8 s. Vanilla trains it at 36, so this
   // is out of band and its amounts are this file's — see the Content comment.
@@ -4195,7 +4195,161 @@ let ``multi-shot hits the target and the two nearest bodies, and no more`` () =
 
   // Four bodies is all this test has, so assert the cap directly: a kit that
   // fired at everything would have hit `far` too.
-  Assert.Equal<Effect list>([ MultiShot 3 ], hunter.Abilities |> List.find (fun a -> a.Name = "Multi-Shot") |> fun a -> a.Effects)
+  Assert.Equal<Effect list>([ MultiStrike 3 ], hunter.Abilities |> List.find (fun a -> a.Name = "Multi-Shot") |> fun a -> a.Effects)
+
+/// Swipe is the bear's one area row and nobody else's: the feral table's "3
+/// nearby enemies" at rank 2 (level 24) for twenty Rage, on the bear's own weapon
+/// roll — the damage column is the swing, so the flat step is zero.
+[<Fact>]
+let ``swipe is the bear's level-24 sweep and no other druid carries it`` () =
+  let kitOf name = Content.partyOf [ name ] 24 |> List.head |> fun e -> e.Abilities
+  let swipeOf name = kitOf name |> List.tryFind (fun a -> a.Name = "Swipe")
+
+  match swipeOf "Druid (Bear)" with
+  | Some swipe ->
+    Assert.Equal<Effect list>([ MultiStrike 3 ], swipe.Effects)
+    Assert.Equal(20, swipe.ResourceCost)
+    // Melee: the aim is the body in front, and the room around it is the resolver's.
+    Assert.Equal(1, swipe.Range)
+    Assert.Equal(ticks 0, swipe.CastTicks)
+  | None -> failwith "a bear carries Swipe at 24"
+
+  for name in [ "Druid"; "Druid (Cat)"; "Druid (Moonkin)" ] do
+    Assert.True((swipeOf name).IsNone, $"{name} should not carry a bear's sweep")
+
+  // The row outlives the level it is trained at: the level-60 bear still carries
+  // the only rung there is.
+  Assert.True(
+    (Content.partyOf [ "Druid (Bear)" ] 60 |> List.head).Abilities
+    |> List.exists (fun a -> a.Name = "Swipe"),
+    "the sweep is the top rung, so it is still the row at 60"
+  )
+
+/// The sweep's whole point is the second and third body, and it pays for the cast
+/// out of Rage and for each body out of its health — threat included, because the
+/// swing that lands the damage is the Warrior's `weaponStrike` under a feral name.
+[<Fact>]
+let ``a bear's swipe hits three bodies, bills twenty rage, and marks every one`` () =
+  let bear =
+    match Content.partyOf [ "Druid (Bear)" ] 24 with
+    | [ b ] -> { b with Pos = { X = 1; Y = 5 } }
+    | other -> failwithf "expected one bear, got %d" (List.length other)
+
+  let rat (i: int) (x: int) =
+    Content.mob
+      (200 + i)
+      "Rat"
+      CreatureType.Beast
+      20
+      500
+      0
+      (Some { Min = 5; Max = 5; Ticks = secTicks 2.0; Range = 1 })
+      []
+      None
+      { X = x; Y = 5 }
+
+  let aimed, nearA, nearB, far = EntityId 200, EntityId 201, EntityId 203, EntityId 202
+
+  let w =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 20 12
+      Entities = [ bear; rat 0 2; rat 1 3; rat 2 14; rat 3 2 ]
+      Pending = []
+      Rng = Rng.streamsOf 5UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let healthOf (id: EntityId) (w: World) =
+    (w.Entities |> List.find (fun e -> e.Id = id)).Health
+
+  let swipeWith (rage: int) =
+    let w =
+      { w with
+          Entities =
+            w.Entities
+            |> List.map (fun e -> if e.Id = bear.Id then { e with Resource = rage } else e) }
+
+    SimCombat.applyCommand
+      { ApplyAt = ticks 0
+        Kind = UseAbility(bear.Id, "Swipe", aimed) }
+      w
+
+  let after = swipeWith 100
+
+  Assert.True(healthOf aimed after < 500, "the target should be hit")
+  Assert.True(healthOf nearA after < 500, "the first body beside it should be hit")
+  Assert.True(healthOf nearB after < 500, "the second body beside it should be hit")
+  Assert.Equal(500, healthOf far after)
+
+  // Rage is the bill, and a bar that cannot pay it is no cast at all. Asserted as a
+  // gate rather than as a subtraction: the swing *earns* rage on every body it
+  // lands on, so the delta after a three-body sweep is a subtraction this test
+  // would have to model rage generation to read.
+  let tooPoor = swipeWith 15
+  for id in [ aimed; nearA; nearB ] do
+    Assert.Equal(500, healthOf id tooPoor)
+
+  // Every body the sweep landed on is a body the bear now holds, at the stance's
+  // own rate: the threat is the swing's, not a separate roll.
+  for id in [ aimed; nearA; nearB ] do
+    Assert.True(SimState.threatOf bear.Id (after.Entities |> List.find (fun e -> e.Id = id)) > 0, $"{id} should carry the bear's threat")
+
+/// The bear's rotation presses Maul and never the sweep, and that is a measured
+/// decision rather than an unfinished one: adding a `MultiStrike` press — on the
+/// body count, and again on the body count with nothing held by the party's own
+/// control — left 2 of 12 level-60 seeds uncleared, because the sweep lands on
+/// the Tick the Mage's polymorph is cast and undoes it. The kit still carries the
+/// row, so a scenario can press it (the test above does); the AI does not.
+[<Fact>]
+let ``the bear's rotation presses Maul and never the sweep`` () =
+  let bear =
+    match Content.partyOf [ "Druid (Bear)" ] 24 with
+    | [ b ] -> b
+    | other -> failwithf "expected one bear, got %d" (List.length other)
+
+  // All three choose the bear, so no `thief` sends the tank to Growl instead.
+  let rat (i: int) (x: int) =
+    let mob =
+      Content.mob
+        (200 + i)
+        "Rat"
+        CreatureType.Beast
+        20
+        500
+        0
+        (Some { Min = 5; Max = 5; Ticks = secTicks 2.0; Range = 1 })
+        []
+        None
+        { X = x; Y = 6 }
+
+    { mob with Engaged = true; Target = Some bear.Id }
+
+  // Rage to spare, so nothing but the policy can be the reason: a bear that could
+  // not afford Maul would fall through to the weapon swing either way.
+  let world (mobs: Entity list) =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 20 12
+      Entities = { bear with Pos = { X = 1; Y = 5 }; Resource = 100; Target = Some (EntityId 200) } :: mobs
+      Pending = []
+      Rng = Rng.streamsOf 5UL
+      PartyBuffs = []
+      Quests = []
+      Log = [] }
+
+  let presses (w: World) =
+    PartyAi.decide w
+    |> List.choose (fun c ->
+      match c.Kind with
+      | UseAbility(actor, name, _) when actor = bear.Id -> Some name
+      | _ -> None)
+
+  for mobs in [ [ rat 0 2 ]; [ rat 0 2; rat 1 3 ]; [ rat 0 2; rat 1 3; rat 2 2 ] ] do
+    let w = world mobs
+    Assert.Contains("Maul", presses w)
+    Assert.DoesNotContain("Swipe", presses w)
 
 /// Viper Sting is paid out of the target's pool, once a second, and a pool that
 /// cannot pay for a cast is a caster the party stops hearing from.
@@ -5541,7 +5695,7 @@ let ``the rogue cashes in four combo points and strikes below that`` () =
 /// the Warrior's Taunt under a feral name, so the script may not look for
 /// "Taunt" to find it: the mob that has left the tank is taunted back by
 /// whatever the tank's own kit calls its taunt.
-[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
+[<Fact>]
 let ``a bear tank taunts with its own Growl`` () =
   let bear =
     Content.partyOf [ "Druid (Bear)" ] 24
@@ -5559,7 +5713,7 @@ let ``a bear tank taunts with its own Growl`` () =
 /// Eviscerate: the rotation finds them by what they do — the harder builder is
 /// the one that needs the mob's back — so a Cat fights without the script ever
 /// naming a Rogue ability.
-[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
+[<Fact>]
 let ``a cat druid shreds and ferocious bites`` () =
   let ordersAt (points: int) (onCat: bool) =
     let cat =
@@ -7196,7 +7350,7 @@ let ``shifting into Cat Form holds, and Bear Form locks the caster out`` () =
 /// so every existing roster and ladder cell keeps its meaning. All four specs are
 /// still `Name = "Druid"`, so art, logs and the tests that find the class keep
 /// working.
-[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
+[<Fact>]
 let ``a Druid's roster string picks its spec, role and opening form`` () =
   let druid name =
     match Content.partyOf [ name ] 24 with
@@ -7219,14 +7373,14 @@ let ``a Druid's roster string picks its spec, role and opening form`` () =
   for name in [ "Druid"; "Druid (Bear)"; "Druid (Cat)"; "Druid (Moonkin)" ] do
     Assert.Contains(MarkOfTheWild, Content.partyBuffsFor [ name ])
 
-[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
+[<Fact>]
 let ``a Bear Druid cannot cast and a Tree Druid can`` () =
   let bear = Content.partyOf [ "Druid (Bear)" ] 24 |> List.head
   let tree = Content.partyOf [ "Druid" ] 24 |> List.head
   Assert.False(SimState.canCast bear, "a bear is claws and hide, not a caster")
   Assert.True(SimState.canCast tree, "the healer's form is a caster form")
 
-[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
+[<Fact>]
 let ``each Druid spec is paid for from its own resource`` () =
   let druid name = Content.partyOf [ name ] 24 |> List.head
   Assert.Equal(Rage, (druid "Druid (Bear)").ResourceKind)
@@ -7238,13 +7392,18 @@ let ``each Druid spec is paid for from its own resource`` () =
   Assert.Equal(100, (druid "Druid (Bear)").MaxResource)
   Assert.Equal(100, (druid "Druid (Cat)").MaxResource)
 
-  // A tank holds threat the way the Warrior tank does, and a damage spec the way
-  // every other damage class does.
+  // A tank holds threat at the stance rate and a damage spec at the party rate.
+  // The Bear and the Warrior are *not* equal: the Warrior's extra fifth is
+  // Defiance, a Warrior talent, so the Bear sits at the bare stance
+  // (`tankStanceBp`) while the Warrior's sheet carries the stance plus Defiance
+  // (`warriorThreatBp`). Both constants document that split in `Content.fs`.
   let warrior = Content.partyOf [ "Warrior" ] 24 |> List.head
-  Assert.Equal(warrior.ThreatMultiplierBp, (druid "Druid (Bear)").ThreatMultiplierBp)
+  Assert.Equal(10000, (druid "Druid").ThreatMultiplierBp)
+  Assert.Equal(50000, (druid "Druid (Bear)").ThreatMultiplierBp)
+  Assert.Equal(60000, warrior.ThreatMultiplierBp)
   Assert.Equal((druid "Druid").ThreatMultiplierBp, (druid "Druid (Moonkin)").ThreatMultiplierBp)
 
-[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
+[<Fact(Skip = "Moonkin (Balance) stays parked; Bear and Cat are measured again as of the feral unpark. Delete this Skip to re-enable Moonkin.")>]
 let ``Moonkin is a damage caster and carries no heal`` () =
   let names =
     Content.partyOf [ "Druid (Moonkin)" ] 24
@@ -7259,7 +7418,7 @@ let ``Moonkin is a damage caster and carries no heal`` () =
   for spell in [ "Wrath"; "Moonfire"; "Entangling Roots"; "Moonkin Form" ] do
     Assert.Contains(spell, names)
 
-[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
+[<Fact>]
 let ``a Feral Druid is the Rogue's economy under feral names`` () =
   let cat = Content.partyOf [ "Druid (Cat)" ] 24 |> List.head
   let names = cat.Abilities |> List.map (fun a -> a.Name)
@@ -7267,7 +7426,7 @@ let ``a Feral Druid is the Rogue's economy under feral names`` () =
   for spell in [ "Claw"; "Shred"; "Ferocious Bite"; "Cat Form" ] do
     Assert.Contains(spell, names)
 
-[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
+[<Fact>]
 let ``a Druid's forms are gated by its spec`` () =
   let forms name = Content.druidForms name |> List.map Stances.name |> List.sort
 
@@ -7282,14 +7441,14 @@ let ``a Druid's forms are gated by its spec`` () =
   // silently given the healer's.
   Assert.Empty(Content.druidForms "Warrior")
 
-[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
+[<Fact>]
 let ``every Druid spawns in a form its spec may take`` () =
   for name in [ "Druid"; "Druid (Bear)"; "Druid (Cat)"; "Druid (Moonkin)" ] do
     let body = Content.partyOf [ name ] 60 |> List.head
     let spawn = body.Auras |> List.choose Aura.stanceOf |> List.exactlyOne
     Assert.Contains(spawn, Content.druidForms name)
 
-[<Fact(Skip = "Bear, Cat and Moonkin are parked: the classes are migrating to the OctoWoW rules. Delete this Skip to re-enable.")>]
+[<Fact>]
 let ``shifting to humanoid leaves no form behind`` () =
   let w =
     Content.scarletMonasteryAt "graveyard" Content.Median 1UL

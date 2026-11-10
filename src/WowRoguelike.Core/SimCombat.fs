@@ -753,11 +753,14 @@ module SimCombat =
           else
             w
 
-        | MultiShot maxTargets ->
-          // Weapon damage per target with no flat bonus, which is what Multi-Shot's
-          // tooltip carries. The extra targets are the hostiles nearest the one
-          // aimed at: the engine has no cone, and "standing next to the target" is
-          // the honest stand-in for "in front of the hunter".
+        | MultiStrike maxTargets ->
+          // Weapon damage per target with no flat bonus, which is what both rows
+          // carry: Multi-Shot's tooltip in the Hunter's table and Swipe's in the
+          // feral's, where the damage column is the weapon's own roll and the
+          // "three nearby enemies" is the whole of the shape. The extra targets
+          // are the hostiles nearest the one aimed at: the engine has no cone, and
+          // "standing next to the target" is the honest stand-in for "in front"
+          // — of the hunter or of the bear.
           let aim =
             match tryEntity targetId w with
             | Some t -> t.Pos

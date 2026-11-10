@@ -2522,12 +2522,14 @@ destination needs to be given up, but not on every blocked tick.
      `SummonSpec`: the pet is a real entity with an owner, so it can die and has to be
      healed. Mend Pet fires off the pull decision table, so a pet that lost health
      keeps being mended at the next pull rather than never.
-   - **Multi-Shot** (100 mana, 10 s cooldown, `MultiShot 3`), the only ability in the
+   - **Multi-Shot** (100 mana, 10 s cooldown, `MultiStrike 3`), the first ability in the
      roster whose damage is per target, and the reason `resolveAbility` takes the aim
      target: it picks the aimed body plus up to two more hostiles in range and rolls
      weapon damage for each. The AI will not spend it on a single body — one aim,
      one hit is a worse Arcane Shot for double the mana — so it only fires when a
-     second hostile is within 8 tiles of the target.
+     second hostile is within 8 tiles of the target. `MultiStrike` is the *shape*,
+     not the shot: the bear's Swipe is the second row that is one (see the feral
+     section), which is why the effect is named for what it does.
    - **Viper Sting** (`DrainResource(8 s, 15)` — 90 mana, 20 s cooldown), the first
      drain in the game and the first use of `Drained`: 15 mana a second for 8 s, its
      own aura, so re-stinging a stung target refreshes rather than stacks. The AI
@@ -2894,6 +2896,29 @@ delegate-runs/<runId>/activity.jsonl`) and verify the file on disk (a clean
   creature *is*, not what it stands in). Three tests hold this: the table above,
   that each spec spawns in a form on its own list, and that shifting to human
   leaves no form behind.
+
+  **The bear's kit has three buttons and the AI presses two.** Maul is
+  `heroicStrikeRanks` under a feral name and Growl is `tauntRanks`, so both are the
+  Warrior's own rows; Swipe (`Content.fs`, `swipeRanks`, rank 2 at level 24) is the
+  one row with no Warrior copy, and it takes the shape the Hunter's Multi-Shot
+  brought — `Effect.MultiStrike` — for twenty Rage across three bodies within 8
+  tiles, each for the bear's own weapon roll with no flat step, threat included
+  because the damage goes through `meleeStrike`.
+
+  The row is landed and the *pressing* is not, and the difference is measured rather
+  than pending. Over twelve level-60 seeds with the default party, a bear that sweeps
+  leaves 2 runs uncleared — seeds 4 and 6, pinned at the 6000-tick cap with the pack
+  alive and reset to full. Seed 4's log names the mechanism: on one Tick the Mage
+  polymorphs a Ravager and the bear's sweep lands on it, because both orders are
+  decided from the same pre-Tick world, and a `Polymorphed` body wakes on any hostile
+  action (`Aura.endsOnHostileAction`). A second rule — `no body in reach is held` —
+  did not help, because the race is intra-Tick and invisible to the state the
+  decision reads. With the press removed the row is inert: the same twelve seeds
+  produce summaries byte-identical to the same runs with Swipe stripped from the kit,
+  tick for tick. So the sweep waits for a Tank decision that can see the cast the
+  party is about to make; until then the bear presses Maul, and a bear's rage buys
+  the better row per point on one body anyway (4.9 damage per Rage against the
+  sweep's 4.5 at its full three).
 - **Maps for five further dungeons** (Ragefire Chasm, Razorfen Kraul, Shadowfang
   Keep, The Deadmines, The Stockade) are extracted into `images/Maps/`, and
   Blackfathom Deeps exists only as sliced tiles/sprites in `Assets/`. Per-map

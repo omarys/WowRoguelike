@@ -278,6 +278,29 @@ module Content =
 
   let heroicStrike = rank24 heroicStrikeRanks
 
+  /// Swipe rank 2 (level 24, the level's own rung), the Bear's only area row: the
+  /// bear's weapon roll to three bodies for twenty Rage. The feral table lists the
+  /// damage column as the weapon's own swing and the range as "3 nearby enemies",
+  /// which is `MultiStrike` exactly, so the flat step is zero and the ranks below
+  /// 24 would be this row dearer under a lower number — one rung, and it is the
+  /// one a level-24 heart of the wild carries (`.pi/research/octowow/
+  /// druid-feral.md`, Swipe row). The 1.5 s lockout is the era's global cooldown:
+  /// Swipe is instant and does not replace the swing, which is what separates it
+  /// from Maul's 2.70 s weapon timer.
+  let swipeRanks: AbilityDef =
+    { Name = "Swipe"
+      Resource = Rage
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ { Level = 24
+            Cost = 20
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 1.5
+            Range = 1
+            Effects = [ MultiStrike 3 ] } ] }
+
   /// Lesser Heal ranks 1-3 (levels 1, 4, 10): rank 3 is the last rank in the game.
   /// It keeps the file's 135-158 — the 1.12 pair, against the table's 1.15.9
   /// 143-165 — because it is the heal a level-24 Priest still carries.
@@ -822,7 +845,7 @@ module Content =
             CastTicks = ticks 0
             CooldownTicks = secTicks 10.0
             Range = 8
-            Effects = [ MultiShot 3 ] } ] }
+            Effects = [ MultiStrike 3 ] } ] }
 
   /// Viper Sting: the target's mana, not its health. Vanilla trains it at 36, so
   /// this is out of band like Scatter Shot, and no table in `.pi/research/` carries
@@ -4644,13 +4667,16 @@ module Content =
       match spec with
       | BearDruid ->
         // Maul is Heroic Strike and Growl is Taunt, so a bear is the Rage tank's
-        // own buttons under feral names rather than a second threat curve. Swipe
-        // is left out because the Warrior kit has no area ability to copy from:
-        // the only Cleave and Whirlwind in this file are mob abilities.
+        // own buttons under feral names rather than a second threat curve. Swipe is
+        // the one row with no Warrior copy — the Warrior's area attacks (Cleave,
+        // Whirlwind) are mob abilities in this file — so it takes the shape the
+        // Hunter's Multi-Shot brought, `MultiStrike`, and applies the bear's own
+        // weapon roll to three bodies.
         AbilityDef.kitAt
           level
           [ { heroicStrikeRanks with Name = "Maul" }
-            { tauntRanks with Name = "Growl" } ]
+            { tauntRanks with Name = "Growl" }
+            swipeRanks ]
         @ [ bearForm ]
       | TreeDruid ->
         // Today's Druid healer, unchanged, plus the form it stands in.

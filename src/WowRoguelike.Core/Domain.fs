@@ -1095,10 +1095,13 @@ type Effect =
   /// (10000 = 100%), plus its Strength bonus and a flat `bonus`. Physical, so
   /// it runs the same dodge/block/armour pipeline a swing does.
   | WeaponDamage of multiplierBp: int * bonus: int
-  /// Multi-Shot: weapon damage to the target and to up to `maxTargets - 1` other
-  /// hostiles within 8 tiles of it. Vanilla's r1 fires at 3 targets for weapon
-  /// damage each, no flat bonus (`.pi/research/level24/hunter.md`, Multi-Shot row).
-  | MultiShot of maxTargets: int
+  /// A sweep: weapon damage to the target and to up to `maxTargets - 1` other
+  /// hostiles within 8 tiles of it, no flat bonus. Two rows in the roster are this
+  /// shape, so the case is named for what it does rather than for the shot that
+  /// found it first: the Hunter's Multi-Shot fires it at three bodies
+  /// (`.pi/research/level24/hunter.md`, Multi-Shot row) and the Bear's Swipe sweeps
+  /// three in front (`.pi/research/octowow/druid-feral.md`, Swipe row).
+  | MultiStrike of maxTargets: int
   /// Spell damage, mitigated by nothing (Q2a). The school rides the effect rather
   /// than the ability because the effect is what the hit site has in hand: the
   /// `SpellDamage` branch resolves the roll, the crit and the procs off the same
