@@ -1016,6 +1016,23 @@ moves. A proc can therefore never be measured by A/B at its shipped chance; the 
 arm is the one that fires without drawing. Any future "close to nothing" proc should be
 measured at 100% first, to find its ceiling before its chance is blamed.
 
+### The one landed talent that is wrong: Arcane Instability
+
+Its row carries `SpellDoneBp = 300` and `SpellCritBp = 300`, and both are the *vanilla*
+talent's numbers. The server reworked it, and the recovered payload says so plainly: "Your
+successful damaging Arcane spells have an [8/16/25]% chance to uncontrollably erupt,
+consuming 2% of your base mana to deal 25% more damage." No spell damage, no crit, and it
+is a proc. It is marked `shortcut:` beside the row rather than quietly described as a
+defensive reading, because a wrong number that looks like a decision is worse than a wrong
+number that says it is wrong.
+
+It cannot be fixed by editing a field. Two additions are needed: a spell **school** on
+damaging abilities ("Arcane spells" is not expressible — nothing on `Ability` records which
+school a hit belongs to, which also blocks most of the panel's Fire and Frost rows), and a
+proc that changes the **current** hit's damage and spends mana (`procOn` returns a `World`,
+not an amount, so `ProcResult` can express a buff, a resource or a reset, but not "this hit
+is 25% bigger because of me").
+
 ### Priest: eight of sixteen, and the first port where deleting was the work
 
 Discipline 11 / Holy 40 / Shadow 0 — the operator's build — is the best hit rate of the

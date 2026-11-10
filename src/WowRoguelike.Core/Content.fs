@@ -4394,6 +4394,18 @@ module Content =
   /// `SpellCritBp = 300`. They are spell-only on purpose. `DamageDoneBp` would have
   /// carried the damage half for free, but a mage still swings a staff between casts and
   /// the talent says "your spell damage".
+  ///
+  /// shortcut: these two numbers are the *vanilla* talent and they are wrong for this
+  /// server. The recovered payload text (§5 of `.pi/research/octowow/mage-payload-gaps.md`,
+  /// spell IDs #15058-60, reused IDs on reworked effects) reads "Your successful damaging
+  /// Arcane spells have an [8/16/25]% chance to uncontrollably erupt, consuming 2% of your
+  /// base mana to deal 25% more damage" — no spell damage, no crit, and it is a proc. Two
+  /// things the model lacks block the faithful version: a spell *school* on damaging
+  /// abilities ("Arcane spells" is not expressible — nothing on `Ability` says which of
+  /// three schools a hit is), and a proc that changes the *current* hit's damage and
+  /// spends mana, which `ProcResult` cannot do because `procOn` returns a `World` and not
+  /// an amount. Both are additions, not edits. Until then +3%/+3% is the reading a reader
+  /// of the vanilla text would have reached, and it is still the wrong talent.
   let private mageTalents =
     { Talents.none with
         SpellDoneBp = 300
