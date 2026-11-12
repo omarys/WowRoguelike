@@ -134,7 +134,8 @@ never recompiled commits a narrative the game does not play.
   fails with "You must install or update .NET".
 - **An untrusted clone makes the `mise` shims fall back to the system SDK.**
   `mise trust --show` in the repo root reports `untrusted`, mise then ignores
-  `mise.toml` (which pins `dotnet = "10"`), and `dotnet` degrades to
+  `mise.toml` (which pins the SDK version the hooks build with — `dotnet = "11"`
+  today, and the pin moves), and `dotnet` degrades to
   `/usr/lib64/dotnet` (8.0.132). SDK 8 cannot parse `WowRoguelike.slnx`, so the
   pre-commit `dotnet build` hook fails with
   `MSB4068: The element <Solution> is unrecognized`. The fix is `mise trust` once

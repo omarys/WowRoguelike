@@ -29,7 +29,32 @@ model's first health-boosting aura, `Aura.Invigorated`). The one skip left is th
 Moonkin: Bear and Cat were unparked in `7a12e52` and are measured again.
 
 `mise trust` once per clone or machine, or the `dotnet` shim falls back to the system
-SDK 8 and the pre-commit build hook dies on `WowRoguelike.slnx` (`domain.md` §4).
+SDK 8 and the pre-commit build hook dies on `WowRoguelike.slnx` (`domain.md` §4). Every
+dotnet hook runs `mise exec -- dotnet …` for exactly that reason, so a hook never depends
+on which SDK the caller's PATH happens to resolve.
+
+## Remaining work
+
+Ordered by what unblocks what. Each row names the artifact that carries the detail instead
+of repeating it.
+
+| # | Item | State |
+|---|---|---|
+| 1 | **The feral park is unresolved, and it is the only thing blocking the cat.** An operator direction (`m01837`) says not to test Bear, Cat or Moonkin; `7a12e52` unparked Bear and Cat anyway, so the direction is only half in force. There is now exactly **one** `Skip` in the suite (`Tests.fs:7412`, Moonkin — the "ten skipped tests" the direction refers to are gone). | needs the operator: does the park apply again now that both feral specs have builds? |
+| 2 | **The cat has a build and no behaviour.** No roster seat, so no bench row and no `sim runs`/`comps` cell; `PartyAi` has no cat branch, so it presses a Rogue ordering at a spec that spends combo points. `druid-feral.md` §10 carries the build; § *The cat's build landed unmeasured* below carries the two gaps. | blocked by 1 |
+| 3 | **Moonkin is the last parked spec** - the one `Skip`, `Talents.none`, build `oCaYYKFYJLDAB--FAAoAC` (Balance 39 / Resto 12), note `druid-moonkin.md`. **14 of its 19 points need an axis**, the worst ratio in the port, so it is a *consequence* of the axis queue rather than an item beside it. | needs an axis (14 of 19) |
+| 4 | **The axis queue is the port.** 62 of 177 talent spends are data edits; 107 need a model change. Expressible today: Hunter **51/51** (done), Mage 9/19, Priest 8/16, Paladin 8/17, Warlock 8/17, Druid (cat) 7/21, Warrior 6/18, Rogue 6/18, Shaman 1 landed (7 of 16 expressible). The eight recurring axes - self-resource grants, dispels, chain heals, stacking self-buffs, damage-taken debuffs, temporary health, per-stance threat, `Blocks` with a magnitude - each unlock talents in three or four classes, which is why § *The four blockers that decide the order* orders the work by axis and not by class. | pick the next one by multiplicity |
+| 5 | **The Warlock ends every arm at 99-100% mana.** Not a bug report and not yet explained: something in the class's spend path does not consume what the bars report. | unexplained |
+
+What is *not* remaining: the three stale claims this file carried until `HEAD` are fixed in
+that commit - the "ten `Skip`ped tests" paragraph above, the "the Druid has two builds, not
+four … tank and dps share the same talent build" block, and the claim that the bear kit has
+no area ability because Swipe was left out (it landed in `7a12e52`, `Content.fs:5105`).
+
+The verification loop, in the order that catches things cheapest: `mise run hooks-run`
+(whole tree, 8 s warm), then `dotnet test tests/WowRoguelike.Tests -c Release`
+(**296 passed, 1 skipped** as of `ed70d53`), then `sim runs 120` / `comps` for anything
+that touches behaviour.
 
 ## The cat's build landed unmeasured (`ed70d53`)
 
@@ -948,12 +973,16 @@ shape without that regression.
 
 ## OctoWoW port — where it stands, and the parked Druid specs
 
-**The operator's direction (m01837, paraphrase with ref):** *do not include Bear, Cat or
+**The operator's direction (`m01837`, paraphrase with ref):** *do not include Bear, Cat or
 Moonkin in any tests for now; the focus is migrating the existing classes to the OctoWoW
-rules.* So the ten tests that seat those three specs are `Skip`ped with that reason in
-`tests/WowRoguelike.Tests/Tests.fs` — deleting the `Skip` argument re-enables each one.
-The specs stay in `Content.fs` (the four-spec work is landed and green); they are simply
-not measured. No ladder or `comps` cell seats them either, so nothing else needs gating.
+rules.* **That direction is now half in force and needs a decision, not a re-read:** it was
+written when ten tests seated those three specs and all ten were `Skip`ped. `7a12e52`
+unparked Bear and Cat and re-enabled their tests, so the suite carries exactly one `Skip`
+today - the Moonkin, `tests/WowRoguelike.Tests/Tests.fs:7412`, whose message says in as
+many words that Bear and Cat are measured again. What the direction still governs is the
+*bench and the ladder*: no `defaultRoster` entry and no `comps` cell seats a feral spec, so
+neither feral spec is measured in a fight, whatever its tests assert. See § *Remaining
+work* item 1.
 
 | class | built | landed | notes |
 |---|---|---|---|
@@ -1048,7 +1077,8 @@ that class — the note for each class confirms the names against the payload:
 | Warlock (caster dps) | `FoASaASABBFAB--FAVYAo` | Affliction 31 / Demonology 0 / Destruction 20 |
 | Shaman (healer + totems) | `-F-FoDoaLFYQKFAB` | Elemental 0 / Enhancement 5 / Restoration 46 |
 | Druid (caster dps) | `oCaYYKFYJLDAB--FAAoAC` | Balance 39 / Feral 0 / Restoration 12 |
-| Druid (tank **and** melee dps, one build) | `BiAYAI-FoaYRaDQIIFIB-` | Balance 11 / Feral 40 / Restoration 0 |
+| Druid (tank, one build) | `BiAYAI-FoaYRaDQIIFIB-` | Balance 11 / Feral 40 / Restoration 0 — **superseded for the cat** (`BSAaAI-AoYDQaDSQIFQB-Ag`, Feral 36 / Balance 11 / Restoration 4, `ed70d53`) |
+| Druid (melee dps, cat), operator's later build | `BSAaAI-AoYDQaDSQIFQB-Ag` | Balance 11 / Feral 36 / Restoration 4 |
 
 Notes the builds imply, before any research is read:
 
@@ -1058,17 +1088,23 @@ Notes the builds imply, before any research is read:
 - **The Warrior build is a full tank** (Protection 48, with only 3 points in Arms),
   which matches the ladder's Warrior tank — and the sim currently spends no points at
   all.
-- **The Druid has two builds, not four.** Balance 39 for the caster, and Feral 40 for
-  both the tank and the melee dps. The operator's stated intent:
+- **The Druid had two builds, and now has three.** Balance 39 for the caster (still the
+  Moonkin's, `Talents.none`), Feral 40 for the tank — and the cat, which briefly shared the
+  tank's build and was given its own in `ed70d53` (`BSAaAI-AoYDQaDSQIFQB-Ag`, Feral 36 /
+  Balance 11 / Restoration 4). The operator's earlier stated intent, kept here as the
+  history it is:
 
   > "Druid tank and dps can share the same talent build … This will allow the Druid
   > to act as off-tank if too many enemies are engagad and pressuring the Warrior."
 
-  That is a **role-switch requirement**, and it is the one thing the current bear kit
-  cannot do: it holds Maul + Growl and has no area ability (a `shortcut:` in
-  `Content.fs` says Swipe was left out because the Warrior kit had nothing to copy).
-  An off-tank that cannot pick up several enemies cannot relieve a pressured Warrior,
-  so the feral note is asked explicitly whether OctoWoW changes Swipe or threat.
+  **That intent was superseded, and the role-switch requirement behind it was met
+  another way.** Sharing one build is what made the cat a copy of the Rogue's kit under
+  feral names; the operator's later instruction ("for feral Druid dps builds, using cat
+  form, use this build instead of duplicating the feral tank build") split the two. The
+  off-tank worry that motivated the sharing was answered in `7a12e52` instead: the bear
+  kit now holds Swipe (`Content.fs:5105`), so it *can* pick up several enemies - what it
+  lacks is a measurement, not an area ability. The paragraph that used to sit here said
+  the reverse and cited a `shortcut:` for the missing Swipe; both are gone.
 
 ### What the ten notes found
 
