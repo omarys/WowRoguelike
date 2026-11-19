@@ -13,3 +13,4 @@ __pycache__/
 
 # unipi tooling scratch
 .unipi/
+.github/workflows
