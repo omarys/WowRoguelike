@@ -73,30 +73,45 @@ module SimTick =
       let party = aliveParty w
 
       let apply (w: World) (t: Entity) (e: Entity) =
+        // A pulse is silent in the log — aura ticks write no line — so the run's
+        // ledger is accumulated right here, where the pulse lands. Delivered is
+        // capped at the member's own deficit: overheal and overfill are not
+        // delivery, and the question the ledger answers is what the totem saved
+        // the healer in spells and the casters in drinking. `e` is the member as
+        // the Tick began, which is exact for a pulse: one totem per slot, so no
+        // other totem has moved the member's bars since the snapshot was taken.
+        let book h m (w: World) =
+          { w with TotemLedger = TotemLedger.pulse t.Name e.Id (max 0 h) (max 0 m) w.TotemLedger }
+
         match t.Totem.Value.Pulse with
         | Heals amount when amount > 0 ->
-          mapEntity e.Id (fun m -> { m with Health = min m.MaxHealth (m.Health + amount) }) w
+          book (min (e.MaxHealth - e.Health) amount) 0
+            (mapEntity e.Id (fun m -> { m with Health = min m.MaxHealth (m.Health + amount) }) w)
         | RestoresMana amount ->
-          mapEntity e.Id (fun m -> { m with Resource = min m.MaxResource (m.Resource + amount) }) w
+          book 0 (min (e.MaxResource - e.Resource) amount)
+            (mapEntity e.Id (fun m -> { m with Resource = min m.MaxResource (m.Resource + amount) }) w)
         | ManaFraction bp ->
           let amount = e.MaxResource * bp / 10000
-          mapEntity e.Id (fun m -> { m with Resource = min m.MaxResource (m.Resource + amount) }) w
+          book 0 (min (e.MaxResource - e.Resource) amount)
+            (mapEntity e.Id (fun m -> { m with Resource = min m.MaxResource (m.Resource + amount) }) w)
         | ArmorBoon armor ->
-          mapEntity e.Id (fun m -> { m with Auras = Aura.refresh (TotemBoon(ticks 2, armor, 0, 0)) m.Auras }) w
+          book 0 0
+            (mapEntity e.Id (fun m -> { m with Auras = Aura.refresh (TotemBoon(ticks 2, armor, 0, 0)) m.Auras }) w)
         | AgilityBoon agility ->
           // Agility is ten crit and five dodge per point, the rates `derive` turns a
           // hero's own Agility into.
           let boon = TotemBoon(ticks 2, 0, agility * 10, agility * 5)
-          mapEntity e.Id (fun m -> { m with Auras = Aura.refresh boon m.Auras }) w
+          book 0 0 (mapEntity e.Id (fun m -> { m with Auras = Aura.refresh boon m.Auras }) w)
         | Cleanses school ->
-          mapEntity
-            e.Id
-            (fun m ->
-              { m with
-                  Auras =
-                    m.Auras
-                    |> List.filter (fun a -> Aura.isHelpful a || Aura.dispelType a <> school) })
-            w
+          book 0 0
+            (mapEntity
+              e.Id
+              (fun m ->
+                { m with
+                    Auras =
+                      m.Auras
+                      |> List.filter (fun a -> Aura.isHelpful a || Aura.dispelType a <> school) })
+              w)
         | Heals _ -> w
         | Redirects -> w (* read at spell resolution, not on a clock *)
 
@@ -104,34 +119,108 @@ module SimTick =
       ||> List.fold (fun w t ->
         let spec = t.Totem.Value
 
-        if spec.Period <= ticks 0 || w.Tick % spec.Period <> ticks 0 then
+        // A totem with no period is a boon that is simply on; the fold must reach
+        // it every Tick or the aura never lands at all. A totem with a period
+        // pulses only on its own beat.
+        if spec.Period > ticks 0 && w.Tick % spec.Period <> ticks 0 then
           w
         else
           party
           |> List.filter (fun e -> Pos.chebyshev t.Pos e.Pos <= spec.Radius)
           |> List.fold (fun w e -> apply w t e) w)
 
+  /// The party members that could have laid a tick of `spell`.
+  ///
+  /// A heal-over-time carries the *spell* that made it and not the caster: two
+  /// Druid heals are one kind of aura and the source is what tells them apart
+  /// (`Aura.Rejuvenation`), so unlike a dot — which carries an `EntityId` because
+  /// Nightfall and Ancient Brutality read their own ticks — a tick has to be
+  /// traced back by the kit. One Restoration Druid, which is every party this
+  /// repo measures, resolves exactly. Two of them and the aura genuinely cannot
+  /// say which one it was.
+  let private hotCasters (w: World) (spell: string) =
+    w.Entities
+    |> List.filter (fun e ->
+      e.Faction = Party
+      && (e.Abilities |> List.exists (fun a -> a.Name = spell)))
+
+  /// The log lines one heal-over-time tick is worth, one per caster it belongs to:
+  /// the direct heal's line character for character (`<caster>'s <spell> heals
+  /// <target> for N`), because the log is the only event record `Attribution` reads
+  /// and a tick booked any other way is invisible to `sim attrib` and `sim healers`
+  /// alike. Two casters of the class split the tick evenly rather than each being
+  /// credited the whole of it — the total stays honest, which is what the healing
+  /// column is asking for.
+  let private hotLines (w: World) (target: Entity) (spell: string) (amount: int) =
+    let line (caster: Entity) (share: int) =
+      sprintf "%s's %s heals %s for %d" caster.Name spell target.Name share
+
+    match hotCasters w spell with
+    | [] -> []
+    | [ caster ] -> [ line caster amount ]
+    | casters ->
+      let n = List.length casters
+
+      casters
+      |> List.mapi (fun i c ->
+        let share = if i = n - 1 then amount - (amount / n) * (n - 1) else amount / n
+        if share > 0 then Some(line c share) else None)
+      |> List.choose id
+
+  /// One Tick's worth of heal-over-time written down as healing done: split across
+  /// the auras that fired, by the per-second heal each one carries, and cut to the
+  /// health that actually moved — overheal is not healing done, which is the rule
+  /// the direct path already enforces with its `effective`.
+  ///
+  /// Written per firing aura, not per Tick: a tick is once a second, so this is a
+  /// handful of lines a second beside the swing and hit lines, not the flood a
+  /// refusal-per-Tick would be. Polymorph's regen rides in the same total and is
+  /// nobody's spell, so the heal-over-times take only their share of what landed.
+  let private bookHotTick (w: World) (target: Entity) (firing: Aura list) (heal: int) (effective: int) =
+    let ticking =
+      firing
+      |> List.choose (fun a ->
+        match a with
+        | Rejuvenation(_, perTick, spell) when perTick > 0 -> Some(spell, perTick)
+        | _ -> None)
+
+    let flat = ticking |> List.sumBy snd
+    let landing = if heal > 0 then effective * flat / heal else 0
+    let mutable left = landing
+
+    (w, List.indexed ticking)
+    ||> List.fold (fun w (i, (spell, perTick)) ->
+      let last = i = List.length ticking - 1
+      let share = if last then left else min left (landing * perTick / flat)
+      left <- left - share
+
+      if share <= 0 then
+        w
+      else
+        (w, hotLines w target spell share) ||> List.fold (fun w l -> logLine l w))
+
   /// Heal-over-time and Polymorph's regen tick down once a second.
   let advanceAuraHealing (w: World) =
-    mapAll
-      (fun e ->
-        if not (alive e) then
-          e
-        else
-          let firing = e.Auras |> List.filter Aura.firesThisTick
-          let flat = firing |> List.sumBy Aura.flatHealPerTick
-          let pctBp = firing |> List.sumBy Aura.maxHealthHealBpPerTick
-          let heal = flat + (e.MaxHealth * pctBp / 10000)
-          // Wound Poison cuts heals over time as well as casts; they are paid for
-          // by the same healer, so they meet the same reduction.
-          let cut = e.Auras |> List.sumBy Aura.healingReceivedReductionBp
-          let heal = heal * max 0 (10000 - cut) / 10000
+    (w, w.Entities)
+    ||> List.fold (fun w e ->
+      if not (alive e) then
+        w
+      else
+        let firing = e.Auras |> List.filter Aura.firesThisTick
+        let flat = firing |> List.sumBy Aura.flatHealPerTick
+        let pctBp = firing |> List.sumBy Aura.maxHealthHealBpPerTick
+        let heal = flat + (e.MaxHealth * pctBp / 10000)
+        // Wound Poison cuts heals over time as well as casts; they are paid for
+        // by the same healer, so they meet the same reduction.
+        let cut = e.Auras |> List.sumBy Aura.healingReceivedReductionBp
+        let heal = heal * max 0 (10000 - cut) / 10000
 
-          if heal <= 0 then
-            e
-          else
-            { e with Health = min e.MaxHealth (e.Health + heal) })
-      w
+        if heal <= 0 then
+          w
+        else
+          let health = min e.MaxHealth (e.Health + heal)
+          let w = mapEntity e.Id (fun x -> { x with Health = health }) w
+          bookHotTick w e firing heal (health - e.Health))
 
   /// Damage-over-time ticks down once a second, applied unmitigated. It routes
   /// through dealDamage so the target wakes and, if it dies, drops its orders.
@@ -198,20 +287,47 @@ module SimTick =
             match e.ResourceKind with
             | Energy -> if energyTick then 1 + 1 * boon / 10000 else 0
             | Mana ->
-              // The rate comes from Spirit (see `Content.derive`). Inside the five
-              // seconds after a cast it pays a Tick less rather than a fraction,
-              // because the rate is a whole number of points — so a priest's Spirit
-              // still carries regeneration through a cast and a mage's thin Spirit
-              // does not, which is the class difference the rule exists to make.
+              // Vanilla regenerates mana on a two-second server tick, and the
+              // five-second rule suspends the Spirit part of it *entirely*: spending
+              // mana costs a caster its whole Spirit rate, not a fraction of it. What
+              // keeps flowing is the share `CombatRegenBp` names — Meditation and
+              // Reflection, which exist precisely because the default is nothing.
+              // `.pi/research/ranks/mage.md`: "spending mana suspends regeneration for
+              // 5 s; only MP5-from-gear and the Mage Armor combat-regen percentage …
+              // keep flowing".
+              //
+              // This used to be `rate - 1` on a flat per-Tick rate, which made the
+              // rule cost a fifth of the pool flow and left those talents with
+              // nothing to buy — they multiplied the rate at all times instead.
               let fresh =
                 e.Auras
                 |> List.exists (function
                   | RecentlyCast _ -> true
                   | _ -> false)
 
-              let rate = if fresh then max 0 (e.ResourceRegenPerTick - 1) else e.ResourceRegenPerTick
+              let rate =
+                if w.Tick % Content.manaRegenTicks <> ticks 0 then 0
+                elif fresh then e.ResourceRegenPerTick * e.CombatRegenBp / 10000
+                else e.ResourceRegenPerTick
 
-              rate * (10000 + boon) / 10000
+              // Improved Water Shield: every globe still standing is another two per
+              // cent of the Shaman's regeneration, and nine globes is +18%. The count
+              // is read off the aura rather than off the talent, which is the whole
+              // point of the talent — a shield three hits from empty is worth a sixth
+              // of what a full one is, and a talented Shaman with no shield at all
+              // gets nothing.
+              let globes, shieldMp5 =
+                match Aura.waterShield e.Auras with
+                | Some(WaterShield(charges, _, _, bp, mp5)) -> charges * bp, mp5
+                | _ -> 0, 0
+
+              // The flat half is MP5 in the era's sense: it flows whether or not the
+              // Shaman just cast, so it is added on its own five-second clock rather
+              // than through the two-second regeneration tick it would otherwise be
+              // truncated by (nine fifths of a tick is three and a bit).
+              let steady = if w.Tick % secTicks 5.0 = ticks 0 then shieldMp5 else 0
+
+              rate * (10000 + boon + globes) / 10000 + steady
             | Rage -> 0
 
           // Viper Sting is paid out of the pool, once a second like every other
@@ -312,14 +428,33 @@ module SimTick =
 
     (w, trades)
     ||> List.fold (fun acc (mover, from, blocker, toward) ->
-      acc
-      |> mapEntity mover (fun m ->
-        { m with
-            Pos = toward
-            Destination = None
-            MoveTicksLeft = ticks 0
-            MoveTicksTotal = ticks 0 })
-      |> mapEntity blocker (fun b -> { b with Pos = from }))
+      // Both squares must be empty of everyone but the pair. Two movers queued behind
+      // the same settled body pick the same tile to trade for, and applying both put
+      // them on it together — the second trade's `toward` is the first mover's new
+      // `Pos`. A trade refused here is one body waiting the Tick, which is what
+      // `held` already does to every other contested step, so nothing is lost: the
+      // losing mover keeps its destination and lands next Tick if the tile clears.
+      let thirdParty =
+        acc.Entities
+        |> List.exists (fun o ->
+          o.Id <> mover
+          && o.Id <> blocker
+          && alive o
+          && o.Totem.IsNone
+          && (o.Pos = toward || o.Pos = from))
+
+      if thirdParty then
+        acc
+      else
+        acc
+        |> mapEntity mover (fun m ->
+          { m with
+              Pos = toward
+              Destination = None
+              MoveTicksLeft = ticks 0
+              MoveTicksTotal = ticks 0
+              StallTicks = ticks 0 })
+        |> mapEntity blocker (fun b -> { b with Pos = from }))
 
   let private separateStacked (w: World) =
     let _, entities =
@@ -343,7 +478,41 @@ module SimTick =
 
     { w with Entities = List.rev entities }
 
+  /// A step that ends where the body already stands is not a step: it is the
+  /// residue of a push (`separateStacked`, a trade) that moved a body onto the
+  /// very tile it had claimed. Left pending it never completes — the body is
+  /// "arriving" at a tile it occupies — and while it waits it out-races anyone
+  /// else who asks for that tile. Measured: `armory` seed 1, tick 12500 — the
+  /// Warrior pushed onto its own destination at (165,101) while the Imp claimed
+  /// the same tile from (164,101); each held the other's tile through
+  /// `stoodStill`, and the pair stood still for the rest of the run. The claim
+  /// is dropped and the body settles, which frees the tile for exactly one
+  /// claimant; a standing Goal re-plans from the tile the body is on.
+  let private settleArrived (w: World) =
+    mapAll
+      (fun e ->
+        if
+          alive e
+          && e.Totem.IsNone
+          && e.Destination = Some e.Pos
+        then
+          { e with
+              Destination = None
+              MoveTicksLeft = ticks 0
+              MoveTicksTotal = ticks 0
+              StallTicks = ticks 0 }
+        else
+          e)
+      w
+
   let advanceMovement (w: World) =
+    // Movement ruling: a tile may be one body's destination, never two, and a
+    // body in motion may be passed through. Every contention is resolved the
+    // moment it happens — the lower EntityId lands, the loser re-plans — so no
+    // two bodies can end up waiting on each other's tiles.
+    let stepRefusalLimit = ticks 3
+    let w = settleArrived w
+
     // A body that is going nowhere holds its tile; a body that is itself stepping
     // through does not. Two members may share a tile in passing, which is what lets
     // a corridor carry traffic in both directions, but nobody settles onto someone
@@ -358,7 +527,7 @@ module SimTick =
     // a body that was mid-step and still three ticks from leaving. `separateStacked`
     // cannot always undo that: in a one-tile corridor there is no free neighbour to
     // push to, so the two stayed on the same square.
-    let held =
+    let heldAtStart =
       w.Entities
       |> List.filter (fun e ->
         alive e
@@ -367,42 +536,82 @@ module SimTick =
       |> List.map (fun e -> e.Pos)
       |> Set.ofList
 
-    // Two movers can land on the same free tile on the same Tick: both are mid-step,
-    // so neither of their tiles reads as `held`, and each destination is legal on its
-    // own. This was the second half of the same bug — a Druid of the Fang and a
-    // Deviate Ravager stepped onto one square together at tick 20 of `dungeon 2`, and
-    // `separateStacked` could only report it. The earlier body in the list lands and
-    // the later one waits the Tick, exactly as it would for a body that had stopped
-    // there; the list is the world's own order, so replay is unaffected.
-    let landings =
-      w.Entities
-      |> List.choose (fun e ->
-        match e.Destination with
-        | Some d when
+    // Settle who is left standing where, because a step is not made by asking for it.
+    // The snapshot above is only the first guess at `held`: it calls every body whose
+    // step is due this Tick "vacating", but a due step can be refused — the ground it
+    // asked for is `held` (`Set.contains dest held`, below), or two movers asked for
+    // the same square and this one lost the race (`yields`) — and a body that cannot
+    // move at all never leaves either. A refused body is still on its tile, so its
+    // tile must be `held` for everyone else. Reading only the snapshot is what let a
+    // Deviate Ravager step onto a Rogue at tick 28 of `dungeon 2` seed 1: the Rogue's
+    // step was due, so its tile looked free, but its destination was the parked Druid
+    // of the Fang's tile and its step was refused. Growing `held` can only refuse more
+    // steps, so the fixpoint is monotone and settles in at most one round per body.
+    let rec settleHeld (held: Set<Pos>) =
+      // Two movers can land on the same free tile on the same Tick: both are mid-step,
+      // so neither of their tiles reads as `held`, and each destination is legal on its
+      // own. This was the second half of the same bug — a Druid of the Fang and a
+      // Deviate Ravager stepped onto one square together at tick 20 of `dungeon 2`, and
+      // `separateStacked` could only report it. The earlier body in the list lands and
+      // the later one waits the Tick, exactly as it would for a body that had stopped
+      // there; the list is the world's own order, so replay is unaffected.
+      let landings =
+        w.Entities
+        |> List.choose (fun e ->
+          match e.Destination with
+          | Some d when
+            alive e
+            && e.Totem.IsNone
+            && canMove e
+            && e.MoveTicksLeft <= ticks 1
+            && not (Set.contains d held)
+            ->
+            Some(d, e.Id)
+          | _ -> None)
+
+      let yields =
+        // One tile, one destination: the lower EntityId takes it — the outcome
+        // depends on nothing, not list order and not who planned first.
+        let firstToLand =
+          landings
+          |> List.groupBy fst
+          |> List.map (fun (_, claims) -> claims |> List.minBy snd)
+          |> Map.ofList
+
+        landings
+        |> List.filter (fun (tile, id) -> Map.tryFind tile firstToLand <> Some id)
+        |> List.map snd
+        |> Set.ofList
+
+      // Who actually landed this pass, for `swapStep`: those bodies are mid-motion, not
+      // parked, however settled their new state looks.
+      let landedNow =
+        landings
+        |> List.filter (fun (_, id) -> not (Set.contains id yields))
+        |> List.map snd
+        |> Set.ofList
+
+      // A body whose step was due and did not happen: refused, out-raced, or unable to
+      // move. It stays where it started this Tick, so it holds that tile.
+      let stoodStill =
+        w.Entities
+        |> List.filter (fun e ->
           alive e
           && e.Totem.IsNone
-          && canMove e
+          && e.Destination.IsSome
           && e.MoveTicksLeft <= ticks 1
-          && not (Set.contains d held)
-          ->
-          Some(d, e.Id)
-        | _ -> None)
+          && not (Set.contains e.Id landedNow))
+        |> List.map (fun e -> e.Pos)
+        |> Set.ofList
 
-    let yields =
-      let firstToLand = landings |> List.distinctBy fst |> Map.ofList
+      let grown = Set.union held stoodStill
 
-      landings
-      |> List.filter (fun (tile, id) -> Map.tryFind tile firstToLand <> Some id)
-      |> List.map snd
-      |> Set.ofList
+      if grown.Count = held.Count then
+        held, yields, landedNow
+      else
+        settleHeld grown
 
-    // Who actually landed this pass, for `swapStep`: those bodies are mid-motion, not
-    // parked, however settled their new state looks.
-    let landedNow =
-      landings
-      |> List.filter (fun (_, id) -> not (Set.contains id yields))
-      |> List.map snd
-      |> Set.ofList
+    let held, yields, landedNow = settleHeld heldAtStart
 
     mapAll
       (fun e ->
@@ -428,14 +637,36 @@ module SimTick =
 
             if e.MoveTicksLeft > ticks 1 then
               { e with MoveTicksLeft = e.MoveTicksLeft - ticks 1 }
-            elif Set.contains dest held || Set.contains e.Id yields then
-              e
+            elif Set.contains e.Id yields then
+              // Out-raced for the tile: the claim goes back and the loser
+              // re-plans, which is the whole of the destination rule — one tile,
+              // one destination, and the loser never waits on the winner.
+              { e with
+                  Destination = None
+                  Path = []
+                  MoveTicksLeft = ticks 0
+                  MoveTicksTotal = ticks 0 }
+            elif Set.contains dest held then
+              // Refused by a settled body: ordinary congestion, so the claim is
+              // kept for a few Ticks — but not indefinitely. After
+              // `stepRefusalLimit` consecutive refusals it goes back, and the
+              // counter doubles as the backoff pacing the re-search, which is
+              // what makes mutual waiting impossible.
+              if e.StallTicks >= stepRefusalLimit then
+                { e with
+                    Destination = None
+                    Path = []
+                    MoveTicksLeft = ticks 0
+                    MoveTicksTotal = ticks 0 }
+              else
+                { e with StallTicks = e.StallTicks + ticks 1 }
             else
               { e with
                   Pos = dest
                   Destination = None
                   MoveTicksLeft = ticks 0
-                  MoveTicksTotal = ticks 0 })
+                  MoveTicksTotal = ticks 0
+                  StallTicks = ticks 0 })
       w
     |> separateStacked
     |> swapStep landedNow
@@ -892,6 +1123,65 @@ module SimTick =
                   Path = []
                   StallTicks = ticks 0 })
           | None ->
+            // The flee (operator direction): a humanoid at a fifth of its health
+            // breaks for the next un-engaged group instead of dying quietly --
+            // and what answers is the party's snares, not its damage. The runner
+            // keeps its target, so it is still "in the fight"; only its feet
+            // change. Standing next to an un-engaged ally already counts as
+            // arrived: it plants there, and the pack it fetched is the one the
+            // party walks into next.
+            let fleeTo =
+              if
+                m.CreatureType = CreatureType.Humanoid
+                && SimState.healthPct m <= 20
+                && SimState.canAct m
+              then
+                w.Entities
+                |> List.filter (fun e ->
+                  e.Faction = Hostile
+                  && SimState.alive e
+                  && not e.Dormant
+                  && not e.Engaged
+                  && e.Id <> m.Id)
+                |> List.sortBy (fun e -> Pos.chebyshev m.Pos e.Pos)
+                |> List.tryFind (fun e -> Pos.chebyshev m.Pos e.Pos > 3)
+              else
+                None
+
+            let arrived =
+              w.Entities
+              |> List.exists (fun e ->
+                e.Faction = Hostile
+                && SimState.alive e
+                && not e.Dormant
+                && not e.Engaged
+                && e.Id <> m.Id
+                && Pos.chebyshev m.Pos e.Pos <= 2)
+
+            match fleeTo with
+            | Some ally when not arrived ->
+              match SimState.approachTile m ally.Pos w with
+              | Some spot when spot <> m.Pos ->
+                w
+                |> mapEntity m.Id (fun e ->
+                  if e.Goal = Some spot then
+                    e
+                  else
+                    { e with
+                        Goal = Some spot
+                        Path = []
+                        StallTicks = ticks 0 })
+                |> fun w -> w |> logLine (sprintf "%s flees toward %s" m.Name ally.Name)
+              | _ ->
+                  mapEntity
+                    m.Id
+                    (fun e ->
+                      { e with
+                          Goal = None
+                          Path = []
+                          StallTicks = ticks 0 })
+                    w
+            | _ ->
             if inMelee m target then
               // Already in reach; no reason to move.
               mapEntity
@@ -1004,6 +1294,11 @@ module SimTick =
     |> retarget
     |> mobDecisions
     |> advanceGoals
+    // The forecast's two accumulators are per Tick and the windows are the history of
+    // them, so this closes the Tick: everything that landed above is in the sum before
+    // it becomes a sample. It runs before `encounterReset`, which is the last word on
+    // whether the pull is still on.
+    |> SimState.ManaBudget.settle w0
     // Last, so it sees the fight as the tick left it: the wipe that ended the pull
     // has to have happened before the room can be told to forget it.
     |> SimState.encounterReset

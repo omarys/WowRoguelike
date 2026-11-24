@@ -4,10 +4,12 @@ namespace WowRoguelike.Core
 ///
 /// The log is the only event record the sim keeps, so the ability a line names is
 /// the whole attribution: `<caster>'s <ability> hits <target> for N` for a direct
-/// hit and `. heals .` for a direct heal. What the log cannot say is left out
-/// rather than guessed at — heal- and damage-over-time ticks emit no line at all,
-/// and a swing names no ability, so it is booked as `Auto Attack`. Every total
-/// here is therefore direct damage and direct healing only.
+/// hit and `. heals .` for a heal, whether it landed as a cast or as a tick of a
+/// heal-over-time (`SimTick.bookHotTick` writes the tick in exactly this shape).
+/// What the log cannot say is left out rather than guessed at — damage-over-time
+/// ticks emit no line at all, and a swing names no ability, so it is booked as
+/// `Auto Attack`. Every total here is therefore direct damage and healing
+/// including the heal-over-time ticks, which is what `sim healers` reports.
 module Attribution =
 
   /// What one line says happened.

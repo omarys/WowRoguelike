@@ -39,6 +39,84 @@ type private PendingAction =
   | Targeting of EntityId * string
   | Moving of EntityId
 
+/// One happening worth a picture: what kind, where the actor and the target
+/// stood in grid floats at the moment it fired, the amount to float above the
+/// victim (or the verb, for control effects), and when it was born. Positions
+/// are captured at spawn so a moving victim leaves the number where it was hit.
+type private Fx =
+  { Kind: string
+    From: float * float
+    To: float * float
+    Value: int
+    Text: string
+    Born: float32 }
+
+module private FxParse =
+  open System.Text.RegularExpressions
+
+  // One row per picture. Every pattern captures the actor, the target and the
+  // amount in that order; the picture never needs the spell's name, only where
+  // it came from and where it landed. Crits are listed before their plain
+  // twins so a critical line never half-matches a shorter one.
+  let private damage: (string * string) list =
+    [ "swing-crit", @"^(.+) critically swings at (.+) for (\d+)$"
+      "swing", @"^(.+) swings at (.+) for (\d+)$"
+      "hit-crit", @"^(.+)'s .+ critically hits (.+) for (\d+)$"
+      "hit", @"^(.+)'s .+ hits (.+) for (\d+)$"
+      "heal", @"^(.+)'s .+ heals (.+) for (\d+)$"
+      "tick", @"^(.+): .+ bleeds (.+), (\d+) a tick$"
+      "tick", @"^(.+): .+ lacerates (.+), (\d+)$"
+      "tick", @"^(.+)'s Instant Poison stings (.+) for (\d+)$" ]
+
+  // Control verbs: the actor gets a word over its head rather than a number,
+  // which is all an onlooker needs to read who did what to whom.
+  let private shouts: (string * string) list =
+    [ "vanishes", @"^(.+) vanishes$"
+      "shield", @"^(.+) raises a shield$"
+      "sleeps", @"^(.+) puts (.+) to sleep$"
+      "stuns", @"^(.+) stuns (.+)$"
+      "roots", @"^(.+) roots (.+)$"
+      "silences", @"^(.+) silences (.+)$"
+      "polymorphs", @"^(.+) polymorphs (.+)$"
+      "taunts", @"^(.+) taunts (.+)$"
+      "charges", @"^(.+) charges (.+)$"
+      "summons", @"^(.+) summons (.+)$"
+      "sunders", @"^(.+) sunders (.+)$"
+      "disarms", @"^(.+) disarms (.+)$"
+      "dispels", @"^(.+) dispels .+ from (.+)$"
+      "interrupts", @"^(.+)'s .+ interrupts (.+)'s .+$"
+      "shifts", @"^(.+) shifts into (.+) form$"
+      "hots", @"^(.+) casts a heal-over-time on (.+)$"
+      "afflicts", @"^(.+) afflicts (.+)$"
+      "fizzles", @"^(.+)'s .+ fizzles .*$"
+      "misses", @"^(.+) misses (.+)$"
+      "dodges", @"^(.+) dodges (.+)$"
+      "parries", @"^(.+) parries (.+)$" ]
+
+  let damageKinds = damage |> List.map fst |> Set.ofList
+
+  let private compiled =
+    (damage @ shouts)
+    |> List.map (fun (kind, pattern) -> kind, Regex pattern)
+    |> Array.ofList
+
+  let tryParse (line: string) : (string * string * string * int) option =
+    compiled
+    |> Array.tryPick (fun (kind, re) ->
+      let m = re.Match line
+
+      if not m.Success then
+        None
+      else
+        let g (i: int) = m.Groups.[i].Value
+
+        // Three shapes of row: bare actor, actor plus target, and actor plus
+        // target plus an amount. Groups.Count includes the whole match, hence 2/3/4.
+        match m.Groups.Count with
+        | 2 -> Some(kind, g 1, g 1, 0)
+        | 3 -> Some(kind, g 1, g 2, 0)
+        | _ -> Some(kind, g 1, g 2, int (g 3)))
+
 module private Parse =
 
   /// Abilities are matched by a punctuation-free key so that "Lesser Heal" can
@@ -161,6 +239,17 @@ module private Menu =
     /// Inspecting the maps instead of playing them: which source, which seed.
     | Browse of int * uint64
 
+  /// The terrain a dungeon's map is drawn with — the per-entry tile theme.
+  /// Caverns wears the Wailing Caverns' own sliced tiles; ScarletStone borrows
+  /// stone (Shadowfang walls, Stockade cobble) because the Scarlet sheet's own
+  /// terrain art is dioramas, not tiles; Cave keeps the generated-rock tiles the
+  /// Gully and the browser's plain maps use. The visual:sm / visual:wc tours
+  /// exist to catch this split regressing.
+  type TileTheme =
+    | Cave
+    | Caverns
+    | ScarletStone
+
   /// One playable dungeon and the levels it can be entered at.
   type Entry =
     { Label: string
@@ -168,6 +257,8 @@ module private Menu =
       /// The folder under Assets/ holding this dungeon's sliced creature art;
       /// empty where the art is hand-named at the sprites root instead.
       Art: string
+      /// The terrain tiles the map is drawn with.
+      Theme: TileTheme
       /// Take the band index; the Party's level follows from the band.
       Start: int -> World }
 
@@ -184,10 +275,12 @@ module private Menu =
     [ { Label = "Screaming Gully"
         Bands = [ "level", 24 ]
         Art = ""
+        Theme = Cave
         Start = fun _ -> Content.gully 1UL }
       { Label = "Wailing Caverns"
         Bands = [ "minimum", 17; "median", 21; "maximum", 22 ]
         Art = ""
+        Theme = Caverns
         Start = fun band -> Content.wailingCavernsAt ([ 17; 21; 22 ] |> List.item band) 1UL } ]
     @ [ for wing in Content.scarletWings ->
           { Label = "Scarlet Monastery — " + wing.Name
@@ -196,9 +289,10 @@ module private Menu =
                 "median", wing.Median
                 "maximum", wing.Maximum ]
             Art = "sprites/scarlet-monastery"
+            Theme = ScarletStone
             Start = scarletStart wing.Name } ]
 
-type RoguelikeGame(?browse: int * uint64) as this =
+type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this =
   inherit Game()
 
   let graphics = new GraphicsDeviceManager(this)
@@ -386,6 +480,10 @@ type RoguelikeGame(?browse: int * uint64) as this =
   /// wears the same art within a run.
   let mutable creatureArt: Map<string, string> = Map.empty
 
+  /// The terrain tiles the current world is drawn with, set by whichever menu
+  /// entry or browsed source started it.
+  let mutable tileTheme: Menu.TileTheme = Menu.Cave
+
   let bindCreatureArt (dungeon: string) (w: World) : Map<string, string> =
     let slots =
       textures
@@ -406,6 +504,61 @@ type RoguelikeGame(?browse: int * uint64) as this =
     else
       names |> List.mapi (fun i n -> n, slots.[i % slots.Length]) |> Map.ofList
 
+  /// Operator-supplied named cuts: a creature wears the art its name matches,
+  /// from its own dungeon's folder (Assets/sprites/wailing-caverns and
+  /// Assets/sprites/scarlet-monastery). Roster siblings share a type cut;
+  /// bosses keep their individual files — the Whitemane/Mograine pair shares
+  /// the one sheet cut that holds them both.
+  let creatureCuts : Map<string, string> =
+    [ // Wailing Caverns: the snakes, the shambler, and the pack art lives in
+      // the pair cases of `named` above.
+      "Deviate Viper", "sprites/wailing-caverns/deviate_viper"
+      "Deviate Adder", "sprites/wailing-caverns/deviate_viper"
+      "Deviate Moccasin", "sprites/wailing-caverns/deviate_viper"
+      "Deviate Python", "sprites/wailing-caverns/deviate_viper"
+      "Deviate Dreadfang", "sprites/wailing-caverns/deviate_winged_serpent"
+      "Deviate Venomwing", "sprites/wailing-caverns/deviate_winged_serpent"
+      "Deviate Shambler", "sprites/wailing-caverns/shambling_horror"
+      // Scarlet Monastery: the seven type cuts, matched by creature name.
+      "Scarlet Trainee", "sprites/scarlet-monastery/scarlet_initiates"
+      "Scarlet Gallant", "sprites/scarlet-monastery/scarlet_initiates"
+      "Scarlet Sentry", "sprites/scarlet-monastery/scarlet_initiates"
+      "Scarlet Torturer", "sprites/scarlet-monastery/scarlet_initiates"
+      "Scarlet Soldier", "sprites/scarlet-monastery/scarlet_initiates"
+      "Scarlet Monk", "sprites/scarlet-monastery/scarlet_initiates"
+      "Scarlet Beastmaster", "sprites/scarlet-monastery/scarlet_initiates"
+      "Interrogator Vishas", "sprites/scarlet-monastery/scarlet_initiates"
+      // No hound cut exists; the ghoul sheet is the closest beast shape.
+      "Scarlet Tracking Hound", "sprites/scarlet-monastery/scarlet_ghoul"
+      "Scarlet Centurion", "sprites/scarlet-monastery/scarlet_centurions"
+      "Scarlet Guardsman", "sprites/scarlet-monastery/scarlet_centurions"
+      "Scarlet Defender", "sprites/scarlet-monastery/scarlet_centurions"
+      "Scarlet Protector", "sprites/scarlet-monastery/scarlet_centurions"
+      "Scarlet Champion", "sprites/scarlet-monastery/scarlet_centurions"
+      "Scarlet Myrmidon", "sprites/scarlet-monastery/scarlet_myrmidons"
+      "Scarlet Scryer", "sprites/scarlet-monastery/scarlet_magus"
+      "Scarlet Adept", "sprites/scarlet-monastery/scarlet_magus"
+      "Scarlet Diviner", "sprites/scarlet-monastery/scarlet_magus"
+      "Scarlet Chaplain", "sprites/scarlet-monastery/scarlet_magus"
+      "Scarlet Conjuror", "sprites/scarlet-monastery/scarlet_magus"
+      "Scarlet Evoker", "sprites/scarlet-monastery/scarlet_magus"
+      "Scarlet Sorcerer", "sprites/scarlet-monastery/scarlet_magus"
+      "Scarlet Wizard", "sprites/scarlet-monastery/scarlet_magus"
+      "Scarlet Abbot", "sprites/scarlet-monastery/scarlet_magus"
+      "Arcanist Doan", "sprites/scarlet-monastery/scarlet_magus"
+      "Bloodmage Thalnos", "sprites/scarlet-monastery/scarlet_magus"
+      "Unfettered Spirit", "sprites/scarlet-monastery/undead_invaders"
+      "Haunting Phantasm", "sprites/scarlet-monastery/undead_invaders"
+      "Fallen Champion", "sprites/scarlet-monastery/undead_invaders"
+      "Ironspine", "sprites/scarlet-monastery/undead_invaders"
+      "Azshir the Sleepless", "sprites/scarlet-monastery/undead_invaders"
+      "Houndmaster Loksey", "sprites/scarlet-monastery/boss_houndmaster_loksey"
+      "High Inquisitor Fairbanks", "sprites/scarlet-monastery/boss_high_inquisitor_fairchild"
+      "Herod", "sprites/scarlet-monastery/boss_herod_scarlet_champion"
+      "High Inquisitor Whitemane", "sprites/scarlet-monastery/boss_whitemane_and_mograine"
+      "Scarlet Commander Mograine", "sprites/scarlet-monastery/boss_whitemane_and_mograine" ]
+    |> Map.ofList
+
   /// Which sliced sprite stands for an entity. Serpent Form swaps the caster
   /// for the snake; names with no art fall back to a disc.
   let spriteKey (e: Entity) =
@@ -423,12 +576,33 @@ type RoguelikeGame(?browse: int * uint64) as this =
       | "Shaman" -> "sprites/classes/shaman"
       | "Pet" -> "sprites/pet"
       | "Raptor" -> (let (EntityId i) = e.Id in if i % 2 = 0 then "sprites/raptor0" else "sprites/raptor1")
-      | "Druid of the Fang" -> "sprites/fang_druid"
-      | "Lady Anacondra" -> "sprites/anacondra"
-      | "Lord Cobrahn" -> "sprites/cobra_lord"
+      // The Fang druids alternate staff and claw poses; their lords wear the
+      // operator-supplied cuts from Assets/sprites/wailing-caverns. Pythas and
+      // Serpentis keep the older portrait cuts — the Caverns sheet has none of
+      // its own for them.
+      | "Druid of the Fang" ->
+        (let (EntityId i) = e.Id in
+         if i % 2 = 0 then "sprites/wailing-caverns/druid_of_the_fang_staff" else "sprites/wailing-caverns/druid_of_the_fang_claw")
+      | "Lady Anacondra" -> "sprites/wailing-caverns/druid_of_the_fang_female"
+      | "Lord Cobrahn" -> "sprites/wailing-caverns/lord_cobrahn_druid"
       | "Lord Pythas" -> "sprites/pythas"
       | "Lord Serpentis" -> "sprites/serpentis"
-      | "Mutanus the Devourer" -> "sprites/mutanus"
+      | "Mutanus the Devourer" -> "sprites/wailing-caverns/mutanus_the_devourer"
+      // Pair cuts: ravagers, raptors and turtles alternate by entity id so a
+      // pack reads as a pack.
+      | "Deviate Raptor"
+      | "Deviate Guardian" ->
+        (let (EntityId i) = e.Id in
+         if i % 2 = 0 then "sprites/wailing-caverns/deviate_raptor_green" else "sprites/wailing-caverns/deviate_raptor_orange")
+      | "Deviate Ravager" ->
+        (let (EntityId i) = e.Id in
+         if i % 2 = 0 then "sprites/wailing-caverns/deviate_ravager_brown" else "sprites/wailing-caverns/deviate_ravager_green")
+      | "Kresh" ->
+        (let (EntityId i) = e.Id in
+         if i % 2 = 0 then "sprites/wailing-caverns/mutant_turtle_right" else "sprites/wailing-caverns/mutant_turtle_left")
+      | "Deviate Crocolisk" ->
+        (let (EntityId i) = e.Id in
+         if i % 2 = 0 then "sprites/wailing-caverns/snapjaw_turtle_right" else "sprites/wailing-caverns/snapjaw_turtle_left")
       | n when n.Contains "Turtle" -> "sprites/deviate_turtle"
       | _ -> ""
 
@@ -455,6 +629,13 @@ type RoguelikeGame(?browse: int * uint64) as this =
       | Some MoonkinForm -> "sprites/moonkin_form"
       | _ -> ""
 
+    // A pack clone ("Scarlet Trainee 2") is the base creature plus a number.
+    let cloneBase (name: string) =
+      match name.LastIndexOf ' ' with
+      | i when i > 0 && fst (Int32.TryParse(name.Substring(i + 1))) ->
+        Some(name.Substring(0, i))
+      | _ -> None
+
     if SimState.isShifted e then
       "sprites/serpent"
     elif formKey <> "" then
@@ -463,8 +644,27 @@ type RoguelikeGame(?browse: int * uint64) as this =
       totemKey
     elif named <> "" then
       named
+    elif creatureCuts.ContainsKey e.Name then
+      creatureCuts.[e.Name]
     else
-      creatureArt.TryFind e.Name |> Option.defaultValue ""
+      match cloneBase e.Name with
+      | Some baseName when creatureCuts.ContainsKey baseName -> creatureCuts.[baseName]
+      | _ -> creatureArt.TryFind e.Name |> Option.defaultValue ""
+
+  /// Which art each hostile name wears — the tours' proof that every creature
+  /// resolves to real art rather than the placeholder disc. Printed on entry
+  /// start and on every browsed map, so any roster can be checked without
+  /// waiting for a fight to play out.
+  let reportCreatureArt (w: World) =
+    w.Entities
+    |> List.filter (fun e -> e.Faction <> Party)
+    |> List.map (fun e -> e.Name, spriteKey e)
+    |> List.distinct
+    |> List.iter (fun (name, key) ->
+        if textures.ContainsKey key then
+          Console.WriteLine(sprintf "[art] %s → %s" name key)
+        else
+          Console.WriteLine(sprintf "[art] UNBOUND: %s" name))
 
   /// Where each entity's art was drawn last frame. A walk to the left turns a
   /// sprite even while it holds a target standing behind it.
@@ -774,6 +974,69 @@ type RoguelikeGame(?browse: int * uint64) as this =
       world <- { world with Log = world.Log |> List.truncate 500 }
       printedLogLines <- 500
 
+  // ── The play-by-play ──────────────────────────────────────────────────
+  // Bars say what happened; these moments show it happening. Every fresh log
+  // line becomes a short-lived picture — a number rising off where it landed,
+  // a streak across the gap a ranged hit opened, a verb above a caster — aged
+  // in real seconds so the show reads the same at any sim speed.
+  let mutable fx: Fx list = []
+  let fxWatch = System.Diagnostics.Stopwatch.StartNew()
+
+  // Hostile names repeat (five Zealots in a pull), so a name resolves to the
+  // entity nearest the other end of the line it appeared in. Names that have
+  // left the world make no picture; the log keeps stale summaries too.
+  let findNamed (name: string) (near: float * float) =
+    world.Entities
+    |> List.filter (fun e -> e.Name = name)
+    |> List.sortBy (fun e ->
+      let x, y = drawnAt e
+      abs (x - fst near) + abs (y - snd near))
+    |> List.tryHead
+
+  let spawnFx (fresh: int) =
+    if fresh > 0 then
+      let born = float32 fxWatch.Elapsed.TotalSeconds
+
+      let placed (e: Entity) =
+        let x, y = drawnAt e
+        (x, y)
+
+      for line in world.Log |> List.truncate fresh |> List.rev do
+        match FxParse.tryParse line with
+        | Some (kind, actor, other, value) when Set.contains kind FxParse.damageKinds ->
+          findNamed actor (0.0, 0.0)
+          |> Option.bind (fun a ->
+            findNamed other (placed a)
+            |> Option.map (fun v -> a, v))
+          |> Option.iter (fun (a, v) ->
+            let ap, vp = placed a, placed v
+            let apart = abs (fst ap - fst vp) + abs (snd ap - snd vp)
+
+            // Anything with room between the two ends reads as a projectile:
+            // a bow shot, a bolt, a heal flung across the room.
+            let shown =
+              if apart <= 2.5 then
+                kind
+              elif kind = "heal" then
+                "heal-bolt"
+              elif kind = "swing" then
+                "shot"
+              elif kind = "swing-crit" then
+                "shot-crit"
+              else
+                "bolt"
+
+            fx <- { Kind = shown; From = ap; To = vp; Value = value; Text = ""; Born = born } :: fx)
+        | Some (verb, actor, _, _) ->
+          findNamed actor (0.0, 0.0)
+          |> Option.iter (fun a ->
+            let p = placed a
+            fx <- { Kind = "shout"; From = p; To = p; Value = 0; Text = verb; Born = born } :: fx)
+        | None -> ()
+
+      // A busy pull can out-spawn the screen; keep the newest 96.
+      fx <- fx |> List.truncate 96
+
   /// One Tick, taking whatever the player queued since the last one.
   let advance () =
     let due = List.ofSeq pending
@@ -790,7 +1053,13 @@ type RoguelikeGame(?browse: int * uint64) as this =
     // and stays off anyone the player has taken over.
     let commands = PartyAi.supplementExcept manual (playerOrders due) world
 
+    let linesBefore = List.length world.Log
+
     world <- SimTick.step commands world
+
+    // The step's own lines become pictures before the console sees them, so
+    // the two consumers of the Log never drift apart.
+    spawnFx (List.length world.Log - linesBefore)
 
   do
     graphics.PreferredBackBufferWidth <- panelX + panelW
@@ -811,20 +1080,50 @@ type RoguelikeGame(?browse: int * uint64) as this =
 
   let menuItems = Menu.entries ()
 
+  /// The visual tours (`mise run visual:sm`, `mise run visual:wc`): a list of
+  /// stops, each a menu entry plus the band to run it at, started without the
+  /// menu and advanced automatically a few seconds after each outcome, so the
+  /// whole sequence is watchable end to end. The Scarlet tour runs every
+  /// Monastery wing, in `scarletWings` order, at median difficulty; the
+  /// Caverns tour runs the one Wailing Caverns entry through its three bands —
+  /// proving the cave art stays cave art after the per-entry tile-theme split
+  /// is exactly what this tour exists to catch.
+  let tourStops : (int * int * Menu.Entry) list =
+    match smTour, wcTour with
+    | Some true, _ ->
+        [ for i, e in List.indexed menuItems do
+            if e.Label.StartsWith "Scarlet Monastery — " then (i, 1, e) ]
+    | _, Some true ->
+        menuItems
+        |> List.indexed
+        |> List.tryFind (fun (_, e) -> e.Label = "Wailing Caverns")
+        |> Option.map (fun (i, e) -> [ for band in 0 .. e.Bands.Length - 1 -> (i, band, e) ])
+        |> Option.defaultValue []
+    | _ -> []
+
+  let mutable tour = tourStops.Length > 0
+  let mutable tourIndex = 0
+
+  /// While set, the ended wing's final frame is held for reading before the
+  /// next one loads. Nothing ticks during the hold.
+  let mutable tourHold: System.Diagnostics.Stopwatch option = None
+
   /// Every map the game can draw, for inspection: the generated Dungeon, both
   /// hand-traced Caverns levels, and each Scarlet wing. The art folder is the
   /// one a playable entry uses, so a browsed map wears the creatures it wears
-  /// in play. The Scarlet floorplans are hand-traced and ignore the seed; the
+  /// in play; the theme is the entry's too, so a browsed Scarlet wing wears
+  /// stone. The Scarlet floorplans are hand-traced and ignore the seed; the
   /// other three re-roll with it.
-  let browseSources : (string * string * (uint64 -> World)) list =
-    [ yield ("generated dungeon (72x40)", "", (fun seed -> Content.dungeon seed))
-      yield ("Screaming Gully", "", (fun seed -> Content.gully seed))
-      yield ("Wailing Caverns (stitched)", "", (fun seed -> Content.wailingCaverns seed))
+  let browseSources : (string * string * Menu.TileTheme * (uint64 -> World)) list =
+    [ yield ("generated dungeon (72x40)", "", Menu.Cave, (fun seed -> Content.dungeon seed))
+      yield ("Screaming Gully", "", Menu.Cave, (fun seed -> Content.gully seed))
+      yield ("Wailing Caverns (stitched)", "", Menu.Caverns, (fun seed -> Content.wailingCaverns seed))
 
       for wing in Content.scarletWings do
         yield
           ("Scarlet Monastery — " + wing.Name,
            "sprites/scarlet-monastery",
+           Menu.ScarletStone,
            (fun seed -> Content.scarletMonasteryAt wing.Name Content.Median seed)) ]
 
   /// A fresh run starts in the menu, so the dungeon and its level are chosen
@@ -847,13 +1146,16 @@ type RoguelikeGame(?browse: int * uint64) as this =
     let entry = menuItems |> List.item index
     world <- entry.Start band
     creatureArt <- bindCreatureArt entry.Art world
+    tileTheme <- entry.Theme
     selected <- None
     pendingAction <- None
     pending.Clear()
     printedLogLines <- 0
     accumulator <- 0.0
+    fx <- []
     menu <- Menu.Closed
     Console.WriteLine(sprintf "[%s — level %d]" entry.Label (snd entry.Bands.[band]))
+    reportCreatureArt world
 
   /// Show a browsed map in the normal view: the renderer, camera and tileset all
   /// work off `world`, so browsing is a matter of putting a different World in
@@ -861,9 +1163,11 @@ type RoguelikeGame(?browse: int * uint64) as this =
   let showBrowse (source: int) (seed: uint64) =
     let source = max 0 (min (browseSources.Length - 1) source)
     let seed = max 1UL seed
-    let _, art, start = browseSources |> List.item source
+    let _, art, theme, start = browseSources |> List.item source
     world <- start seed
     creatureArt <- bindCreatureArt art world
+    tileTheme <- theme
+    reportCreatureArt world
     selected <- None
     pendingAction <- None
     pending.Clear()
@@ -964,7 +1268,7 @@ type RoguelikeGame(?browse: int * uint64) as this =
   /// Browsing draws the map, not a card over it: one strip at the top so the
   /// floorplan stays visible while the keys stay on screen.
   let drawBrowseHud (source: int) (seed: uint64) =
-    let label, _, _ = browseSources |> List.item source
+    let label, _, _, _ = browseSources |> List.item source
 
     let text =
       sprintf
@@ -996,7 +1300,29 @@ type RoguelikeGame(?browse: int * uint64) as this =
     | Some (source, seed) -> showBrowse source seed
     | None -> ()
 
+    // The tour skips the menu and opens straight into the first stop. This
+    // match is in LoadContent for the same reason the browse one is: creature
+    // art binds from the already-loaded textures.
+    if tour then
+      let i, band, _ = tourStops.[0]
+      startEntry i band
+
   member this.StepWorld (keyboard: KeyboardState) (gameTime: GameTime) =
+    // The Scarlet tour: an ended wing holds its last frame long enough to read
+    // the outcome, then the next wing loads without a menu. `continues` is the
+    // harness's own run-over predicate, so the tour ends a wing exactly when a
+    // `sim seat` run would.
+    if tour then
+      match tourHold with
+      | Some watch when watch.Elapsed.TotalSeconds > 5.0 ->
+        tourIndex <- (tourIndex + 1) % tourStops.Length
+        let i, band, _ = tourStops.[tourIndex]
+        startEntry i band
+        tourHold <- None
+      | _ ->
+        if tourHold.IsNone && not (SimState.continues world) then
+          tourHold <- Some(System.Diagnostics.Stopwatch.StartNew())
+
     if keyboard.IsKeyDown(Keys.Escape) then
       menu <- Menu.PickDungeon 0
 
@@ -1104,7 +1430,7 @@ type RoguelikeGame(?browse: int * uint64) as this =
     if runOnce then
       runOnce <- false
       advance ()
-    elif ticksPerSecond > 0.0 then
+    elif ticksPerSecond > 0.0 && tourHold.IsNone then
       // Fixed-timestep accumulator: speed scales how much real time one Tick
       // consumes, and pause is simply zero Ticks per second.
       accumulator <- accumulator + gameTime.ElapsedGameTime.TotalSeconds * ticksPerSecond
@@ -1150,12 +1476,40 @@ type RoguelikeGame(?browse: int * uint64) as this =
 
     spriteBatch.Begin()
 
-    let decorations = [|
-      "sprites/mushroom_green"
-      "sprites/mushroom_blue"
-      "sprites/mushroom_teal"
-      "sprites/fern"
-    |]
+    // The tour's heading: which wing is running, and — once it ends — the
+    // outcome and what loads next, held above the frozen final frame.
+    if tour then
+      let heading =
+        match tourHold with
+        | Some _ ->
+          let prefix =
+            match SimState.outcome world with
+            | EncounterCleared -> "CLEARED — next: "
+            | _ -> "WIPED — next: "
+
+          let _, _, entry = tourStops.[(tourIndex + 1) % tourStops.Length]
+          prefix + entry.Label
+        | None ->
+          let _, _, entry = tourStops.[tourIndex]
+          entry.Label
+
+      drawTextShadow heading (panelX / 2 - measure heading / 2) 8 (Color(255, 235, 180))
+
+    // Floor decorations per theme: the generated cave grows the sliced-sheet
+    // mushrooms and fern; the Caverns grow their own stalagmites, glowing
+    // mushrooms and fern; the monastery stays bare — its terrain art is
+    // borrowed dioramas with no object cells.
+    let decorations =
+      match tileTheme with
+      | Menu.ScarletStone -> [||]
+      | Menu.Caverns -> [| "tiles/wc-stalactites"; "tiles/wc-mushrooms"; "tiles/wc-fern" |]
+      | _ ->
+        [|
+          "sprites/mushroom_green"
+          "sprites/mushroom_blue"
+          "sprites/mushroom_teal"
+          "sprites/fern"
+        |]
 
     for y in camY .. min (camY + rows - 1) (world.Grid.Height - 1) do
       for x in camX .. min (camX + columns - 1) (world.Grid.Width - 1) do
@@ -1170,18 +1524,68 @@ type RoguelikeGame(?browse: int * uint64) as this =
             [ -1, 0; 1, 0; 0, -1; 0, 1 ]
             |> List.exists (fun (dx, dy) -> Grid.isFloor world.Grid { X = x + dx; Y = y + dy })
 
-          match textures.TryFind "tiles/wall" with
-          | Some t -> spriteBatch.Draw(t, dest, (if exposed then Color(200, 200, 205) else Color(80, 80, 92)))
+          // The wall variety cell joins on a fraction of the tiles, by hash,
+          // so the swap does not line up with any room edge. Deep wall mass
+          // draws the theme's arch tile; the Caverns edge alternates root and
+          // vine walls, the Monastery its borrowed gothic, stone and courtyard
+          // walls.
+          let wallKey =
+            match tileTheme with
+            | Menu.ScarletStone ->
+              // Monastery architecture: solid stone brick for deep wall mass and
+              // side/pillar walls; gothic arched windows only on exposed walls
+              // whose south face opens onto a floor tile (top-down RPG facade).
+              if exposed && Grid.isFloor world.Grid { X = x; Y = y + 1 } then
+                match h % 6 with
+                | 0 -> "tiles/sm-wall"
+                | 3 -> "tiles/sm-wall-dark"
+                | _ -> "tiles/sm-wall-stone"
+              else
+                "tiles/sm-wall-stone"
+            | Menu.Caverns ->
+              if exposed then
+                if h % 5 = 0 then "tiles/wc-wall-vines"
+                elif h % 13 = 0 then "tiles/wc-arch-vines"
+                else "tiles/wc-wall-roots"
+              else
+                "tiles/wc-arch"
+            | _ -> "tiles/wall"
+
+          match textures.TryFind wallKey with
+          | Some t ->
+            let wallTint =
+              match tileTheme with
+              | Menu.ScarletStone -> if exposed then Color(195, 185, 180) else Color(72, 68, 76)
+              | _ -> if exposed then Color(200, 200, 205) else Color(80, 80, 92)
+            spriteBatch.Draw(t, dest, wallTint)
           | None -> spriteBatch.Draw(pixel, Rectangle(dest.X, dest.Y, tile - 1, tile - 1), Color(46, 44, 40))
         else
-          match textures.TryFind(if h % 3 = 0 then "tiles/floor1" else "tiles/floor0") with
+          // The Monastery floor uses genuine top-down stone flagstone tiles
+          // (clean masonry with an occasional weathered variant); the Caverns
+          // floor cycles their own stone, moss and dirt tiles; the generated
+          // cave keeps its authored slate, dimmed because it reads better.
+          let floorKey, floorTint =
+            match tileTheme with
+            | Menu.ScarletStone ->
+              (if h % 5 = 0 then "tiles/sm-floor-cobweb" else "tiles/sm-floor-cobble"), Color(230, 222, 212)
+            | Menu.Caverns ->
+              (match h % 4 with
+               | 0 -> "tiles/wc-floor-stone1"
+               | 1 -> "tiles/wc-floor-moss"
+               | 2 -> "tiles/wc-floor-dirt"
+               | _ -> "tiles/wc-floor-stone0"),
+              Color.White
+            | _ ->
+              (if h % 3 = 0 then "tiles/floor1" else "tiles/floor0"), Color(190, 190, 190)
+
+          match textures.TryFind floorKey with
           | Some t ->
             // Mirroring by the tile hash hides the repeat.
             let flip = if (h >>> 3) % 2 = 0 then SpriteEffects.None else SpriteEffects.FlipHorizontally
-            spriteBatch.Draw(t, dest, Nullable(), Color(190, 190, 190), 0.0f, Vector2.Zero, flip, 0.0f)
+            spriteBatch.Draw(t, dest, Nullable(), floorTint, 0.0f, Vector2.Zero, flip, 0.0f)
           | None -> spriteBatch.Draw(pixel, Rectangle(dest.X, dest.Y, tile - 1, tile - 1), Color(24, 26, 34))
 
-          if (h >>> 5) % 100 < 7 then
+          if decorations.Length > 0 && (h >>> 5) % 100 < 7 then
             match textures.TryFind decorations.[(h >>> 12) % decorations.Length] with
             | Some d ->
               let ox = (h >>> 16) % (tile - d.Width + 1)
@@ -1236,8 +1640,22 @@ type RoguelikeGame(?browse: int * uint64) as this =
         if e.MaxResource > 0 then
           bar (cx - 16) (top - 7) 32 2 (float e.Resource / float e.MaxResource) (Color(90, 150, 230))
 
-        if e.Casting.IsSome then
-          bar (cx - 16) (top - 11) 32 3 1.0 (Color(240, 200, 90))
+        match e.Casting with
+        | Some c ->
+          // The bar fills as the cast completes, so the moment it lands reads
+          // from across the room; pushback shows as it drains back.
+          let total = max 1 (int c.Ability.CastTicks)
+
+          let filled = min 1.0 (max 0.0 (1.0 - float c.Remaining / float total))
+          bar (cx - 16) (top - 11) 32 3 filled (Color(240, 200, 90))
+
+          // A pulse under the caster while it weaves: a cast is the one thing
+          // worth interrupting, so it should be findable at a glance.
+          let pulse =
+            0.35f + 0.25f * sin (7.0f * float32 fxWatch.Elapsed.TotalSeconds)
+
+          spriteBatch.Draw(disc, Rectangle(cx - 22, feet - 9, 44, 18), Color(240, 200, 90) * pulse)
+        | None -> ()
 
         // What is on it: one chip per aura, so a slept, stunned or sundered
         // enemy reads at a glance. Green helps the holder, amber hurts it.
@@ -1274,6 +1692,125 @@ type RoguelikeGame(?browse: int * uint64) as this =
           drawTextShadow text (cx - measure text / 2) y (Color(255, 235, 180))
       else
         drawArt (Color(70, 70, 70) * 0.55f)
+
+    // The play-by-play: damage numbers rise off where they landed, ranged hits
+    // streak across the gap that carried them, and a control verb hangs over
+    // its actor. Grid floats captured at spawn, so the camera carries it.
+    let nowFx = float32 fxWatch.Elapsed.TotalSeconds
+    fx <- fx |> List.filter (fun f -> nowFx - f.Born < 1.2f) |> List.truncate 96
+
+    let spot (p: float * float) =
+      int ((fst p - float camX) * float tile), int ((snd p - float camY) * float tile) + tile - 3
+
+    for f in fx do
+      let age = nowFx - f.Born
+
+      let fade (life: float32) = max 0.0f (1.0f - age / life)
+
+      // The floating amount: white for a plain hit, amber and shouted for a
+      // crit, green for a heal, dull red for a periodic tick.
+      let number (colour: Color) (text: string) (delay: float32) (life: float32) =
+        if age >= delay then
+          let a = fade life
+
+          if a > 0.0f then
+            let rise = int ((age - delay) * 26.0f)
+            let x, y = spot f.To
+            drawTextShadow text (x + tile / 2 - measure text / 2) (y - tile - 8 - rise) (colour * a)
+
+      // Melee lands with a slash across the victim and a ring flash at its feet.
+      let meleeFlash (impact: Color) =
+        let x, y = spot f.To
+
+        if age < 0.18f then
+          let a = 1.0f - age / 0.18f
+          let midy = y - tile / 2
+
+          spriteBatch.Draw(
+            pixel,
+            Rectangle(x + tile / 2 - 13, midy - 2, 26, 4),
+            Nullable(),
+            Color.White * (0.8f * a),
+            -0.7f,
+            Vector2(0.5f, 0.5f),
+            SpriteEffects.None,
+            0.0f)
+
+        if age < 0.2f then
+          let t2 = age / 0.2f
+          let w = int (16.0f + 26.0f * t2)
+          spriteBatch.Draw(disc, Rectangle(x + tile / 2 - w / 2, y - w / 4, w, w / 2), impact * (0.5f * (1.0f - t2)))
+
+      match f.Kind with
+      | "shout" ->
+        let a = fade 1.2f
+        let x, y = spot f.From
+        drawTextShadow f.Text (x + tile / 2 - measure f.Text / 2) (y - tile - 22) (Color(255, 235, 180) * a)
+      | "swing" ->
+        meleeFlash Color.White
+        number Color.White (string f.Value) 0.0f 0.9f
+      | "swing-crit" ->
+        meleeFlash (Color(255, 200, 60))
+        number (Color(255, 200, 60)) (sprintf "%d!" f.Value) 0.0f 0.9f
+      | "hit" ->
+        meleeFlash Color.White
+        number Color.White (string f.Value) 0.0f 0.9f
+      | "hit-crit" ->
+        meleeFlash (Color(255, 200, 60))
+        number (Color(255, 200, 60)) (sprintf "%d!" f.Value) 0.0f 0.9f
+      | "heal" -> number (Color(120, 255, 150)) (sprintf "+%d" f.Value) 0.0f 0.9f
+      | "tick" -> number (Color(200, 110, 110)) (string f.Value) 0.0f 0.6f
+      | shot when
+        shot = "shot" || shot = "shot-crit" || shot = "bolt" || shot = "heal-bolt"
+        ->
+        // The projectile: an eased dot with a short fading tail, then its
+        // number once it lands. Heals fly green; shots pale; spells cool blue.
+        let flight = 0.22f
+        let t = min 1.0f (age / flight)
+        let eased = t * t * (3.0f - 2.0f * t)
+        let colour =
+          if shot = "heal-bolt" then Color(140, 255, 170)
+          elif shot = "shot" || shot = "shot-crit" then Color(225, 225, 230)
+          else Color(185, 200, 255)
+
+        let lerp (from: float * float) (dest: float * float) (k: float32) =
+          (fst from + (fst dest - fst from) * float k, snd from + (snd dest - snd from) * float k)
+
+        let head = lerp f.From f.To eased
+        let back = lerp head f.From 0.35f
+
+        let hx, hy = spot head
+        let bx, by = spot back
+
+        if t < 1.0f then
+          spriteBatch.Draw(pixel, Rectangle(hx - 2, hy - 2, 4, 4), colour)
+
+          // The tail is a rotated bar from the back point to the head.
+          let dx = float32 (hx - bx)
+          let dy = float32 (hy - by)
+          let len = max 2 (int (sqrt (dx * dx + dy * dy)))
+          let ang = atan2 dy dx
+          let midx = (hx + bx) / 2
+          let midy = (hy + by) / 2
+
+          spriteBatch.Draw(
+            pixel,
+            Rectangle(midx - len / 2, midy - 1, len, 2),
+            Nullable(),
+            colour * (0.7f * (1.0f - t)),
+            ang,
+            Vector2(0.5f, 0.5f),
+            SpriteEffects.None,
+            0.0f)
+
+        // The number waits for the hit to land.
+        if shot = "heal-bolt" then
+          number (Color(120, 255, 150)) (sprintf "+%d" f.Value) flight 0.7f
+        elif shot = "shot-crit" then
+          number (Color(255, 200, 60)) (sprintf "%d!" f.Value) flight 0.7f
+        else
+          number Color.White (string f.Value) flight 0.7f
+      | _ -> ()
 
     // The side panel: the party's health and mana, then the queue.
     panel (Rectangle(panelX, 0, panelW, uiTop))
@@ -1429,9 +1966,14 @@ module Program =
   [<EntryPoint>]
   let main (argv: string[]) =
     let args = argv |> Array.toList
-    use game = new RoguelikeGame(?browse = browseArgs args)
+    let smTour = if args |> List.contains "--sm-tour" then Some true else None
+    let wcTour = if args |> List.contains "--wc-tour" then Some true else None
+    use game = new RoguelikeGame(?browse = browseArgs args, ?smTour = smTour, ?wcTour = wcTour)
 
     Console.WriteLine "WowRoguelike — Screaming Gully (Wailing Caverns, first encounter)"
+    Console.WriteLine ""
+    Console.WriteLine "--sm-tour runs all four Scarlet Monastery wings in sequence at median difficulty."
+    Console.WriteLine "--wc-tour runs the Wailing Caverns entry through its minimum/median/maximum bands."
     Console.WriteLine ""
     Console.WriteLine "Mouse: click a party member, then an ability button, then a target."
     Console.WriteLine "       Click an empty floor tile to move the selected member."

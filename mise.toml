@@ -97,3 +97,11 @@ run = "mise trust . && pre-commit install --install-hooks && pre-commit install 
 [tasks.hooks-run]
 description = "Run every hook against the whole tree"
 run = "pre-commit run --all-files"
+
+[tasks."visual:sm"]
+description = "Watch all four Scarlet Monastery wings run in the graphical client, one after another (stone tiles)"
+run = "dotnet run --project src/WowRoguelike.Game -c Release -- --sm-tour"
+
+[tasks."visual:wc"]
+description = "Watch the Wailing Caverns entry run at minimum/median/maximum in the graphical client (cave tiles)"
+run = "dotnet run --project src/WowRoguelike.Game -c Release -- --wc-tour"

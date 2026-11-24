@@ -414,9 +414,18 @@ module SimCombat =
       let roll, w = rollRange 0 9999 w
 
       let mitigate raw =
+        // Tree of Life multiplies the armour the target *wears*, not the armour it
+        // has: `ItemArmor` is the gear share of `Armor` (see the field's note), so
+        // +180% is applied to that share alone and a buff such as Inspiration is
+        // neither multiplied nor multiplied through. The two shares are equal for
+        // every entity that exists today, so in the common case this reads exactly as
+        // "+180% armour" while staying right if a buff ever separates them.
+        let treeArmor = if SimState.inStance t TreeForm then t.ItemArmor * 180 / 100 else 0
+
         let armor =
           max 0
             (t.Armor
+             + treeArmor
              + (t.Auras |> List.sumBy Aura.armorBonus)
              - (t.Auras |> List.sumBy Aura.armorReduction))
 
@@ -487,6 +496,46 @@ module SimCombat =
 
       mapEntity e.Id (fun x -> { x with Resource = min x.MaxResource (x.Resource + gain) }) w
 
+  /// Water Shield pays one globe for each hit that lands, and pays the holder the
+  /// mana the globe was carrying. The charge is the shield's clock, so this is the
+  /// only place it is spent by damage: every source in the game — a swing, a spell,
+  /// a bleed tick — arrives through `dealDamage`, which is why the globe is taken
+  /// here rather than at a swing site that would have to be found four times.
+  ///
+  /// The aura is rewritten in place rather than dropped and re-added, so the buff
+  /// bar keeps its row and a Shaman holding anything else loses nothing.
+  let private spendWaterShieldGlobe (targetId: EntityId) (w: World) =
+    match tryEntity targetId w with
+    | Some t when alive t ->
+      match Aura.waterShield t.Auras with
+      | Some(WaterShield(charges, _, globeMana, _, _)) when charges > 0 ->
+        let left = charges - 1
+
+        let w =
+          mapEntity
+            targetId
+            (fun e ->
+              { e with
+                  Resource = min e.MaxResource (e.Resource + globeMana)
+                  Auras =
+                    e.Auras
+                    |> List.choose (function
+                      | WaterShield(c, mx, gm, bp, mp) when c > 0 ->
+                        if c > 1 then Some(WaterShield(c - 1, mx, gm, bp, mp)) else None
+                      | a -> Some a) })
+            w
+
+        if left = 0 then logLine (sprintf "%s's Water Shield is spent" t.Name) w else w
+      | _ -> w
+    | _ -> w
+
+  /// The two casts Undertow watches. Matched on the base name so the cheaper
+  /// "Healing Wave (Rank n)" rung `Content.shamanDownrank` builds is covered too:
+  /// that row is renamed *after* its talents are folded in, and the talent is about
+  /// the spell rather than about the rank.
+  let private undertowCast (name: string) =
+    name.StartsWith("Healing Wave") || name.StartsWith("Lesser Healing Wave")
+
   let dealDamage (targetId: EntityId) (amount: int) (w: World) =
     // Shield Wall takes its share before anything lands, so it covers every
     // source: a swing, a spell, a DoT tick.
@@ -497,11 +546,18 @@ module SimCombat =
       | None -> amount
 
     // What a creature was before this hit: needed to notice a death, which is
-    // the one thing the quest tracker has to hear about.
-    let victim =
+    // the one thing the quest tracker has to hear about. The health it had left is
+    // also the only honest measure of the hit. Overkill is not damage, and the
+    // healers' forecast divides the health still standing by the rate it comes off:
+    // a 200-point hit on a 5 hp corpse counted as 200 would claim the pull is forty
+    // times shorter than it is, and a shorter forecast is the one direction that
+    // makes the healers spend.
+    let victim, effective =
       match tryEntity targetId w with
-      | Some t when t.Faction = Hostile && alive t -> Some t.Name
-      | _ -> None
+      | Some t when t.Faction = Hostile && alive t -> Some t.Name, min amount t.Health
+      | _ -> None, 0
+
+    let w = w |> ManaBudget.recordDamage effective
 
     // Taking a hit is paid for in rage, at the same rate as dealing one.
     let w =
@@ -541,6 +597,11 @@ module SimCombat =
       | Some name when (tryEntity targetId w |> Option.exists (fun t -> not (alive t))) ->
         SimState.recordKill name w
       | _ -> w
+
+    // Water Shield: the globe that paid for this hit, and the mana it was holding.
+    // Placed before the pushback below so the pool the pushback is priced against
+    // is the pool the Shaman actually has.
+    let w = if amount > 0 then spendWaterShieldGlobe targetId w else w
 
     // Pushback: damage pushes an interruptible cast in progress back by half a
     // second instead of cancelling it, at most twice per cast, and the target's
@@ -623,6 +684,28 @@ module SimCombat =
         |> Option.defaultValue targetId
       | _ -> targetId
 
+  /// Tree of Life's aura of life: while a party Druid holds the form, every party
+  /// member — the Druid included — heals as though it had `Spirit / 5` more bonus
+  /// healing, which is the form's "20% of your spirit" at the rate the rest of
+  /// this file already spends Spirit at.
+  ///
+  /// Read off the world at the moment of the heal rather than written into
+  /// `Entity.BonusHealing` when the form goes up, because a stance is not a
+  /// permanent state: a Druid that shifts out to land a Healing Touch would leave
+  /// the buff behind on four heroes for the rest of the run, and one that shifted
+  /// back in would have to be watched by every consumer of `BonusHealing`. Summed
+  /// over every tree in the party, so a second Restoration Druid is worth a second
+  /// share instead of nothing.
+  ///
+  /// "Nearby" is the party, which is how every other party-wide effect in this
+  /// model is scoped (`PartyBuffKind`): a sim whose party walks in a file does not
+  /// need a radius, and the one place a radius *is* modelled — a totem — has an
+  /// entity to hang it on.
+  let treeOfLifeHealing (w: World) =
+    w.Entities
+    |> List.filter (fun e -> e.Faction = Party && alive e && SimState.inStance e TreeForm)
+    |> List.sumBy (fun e -> e.Stats.Spirit / 5)
+
   /// Resolve one ability's effects against one target. The resource is spent
   /// here, on resolution, so an interrupted cast costs nothing.
   let resolveAbility (actorId: EntityId) (targetId0: EntityId) (ability: Ability) (w0: World) : World =
@@ -664,10 +747,31 @@ module SimCombat =
         if ruptureBp <= 0 then ability.ResourceCost
         else ability.ResourceCost * (10000 + ruptureBp) / 10000
 
-      let cost = if freeMana then 0 else listCost
+      let cost =
+        // Tree of Life's half of its bargain: the form takes the direct heals away
+        // and cheapens the heal-over-time ones by a fifth, so a Druid in the tree
+        // pays 128 for the Rejuvenation it pays 160 for out of it. Identified by
+        // the `HealOverTime` effect rather than by name, so Rejuvenation, Regrowth
+        // and any HoT added later are all covered by one rule.
+        if freeMana then
+          0
+        elif
+          SimState.inStance actor TreeForm
+          && (ability.Effects |> List.exists (function HealOverTime _ -> true | _ -> false))
+        then
+          listCost * 8000 / 10000
+        else
+          listCost
+
+      // What the healer actually paid, and what it owes the fight. Charged here, at
+      // the one place a spell is paid for, so the reserve sees the same number the pool
+      // does. Damage goes in its own bucket because it is the one kind of spend the
+      // reserve must not charge for: it is what the gate is allowed to buy with the
+      // surplus, so charging it would raise the very bar that licensed it.
+      let paid = min cost actor.Resource
 
       let w0 =
-        mapEntity
+        (mapEntity
           actorId
           (fun e ->
             { e with
@@ -678,7 +782,15 @@ module SimCombat =
                 Auras =
                   let a = Aura.refresh (RecentlyCast Content.fiveSecondRule) e.Auras
                   if waived || freeMana then Aura.spendEmpower a else a })
-          w0
+          w0)
+        |> fun w ->
+          if actor.Role = Some Healer then
+            if Ability.isDamaging ability then
+              ManaBudget.recordDamageSpend actorId paid w
+            else
+              ManaBudget.recordSpend actorId paid w
+          else
+            w
 
       // One weapon strike, so Multi-Shot's second and third targets roll exactly
       // what the first one does. `WeaponDamage` is the single-target case.
@@ -726,6 +838,15 @@ module SimCombat =
         let w = if actor.Faction = Party then addThreat victim actor amount w else w
         amount, crit, w
 
+      // Vanish's stealth ends the moment its holder lands an attack of its own:
+      // attacking out of stealth is the vanilla opener model. One drop before the
+      // fold covers every damage effect below, whatever shape it takes.
+      let w0 =
+        if actor.Faction = Party && Ability.isDamaging ability then
+          SimState.breakStealth actorId w0
+        else
+          w0
+
       (w0, ability.Effects)
       ||> List.fold (fun w effect ->
         match effect with
@@ -767,15 +888,30 @@ module SimCombat =
             | None -> actor.Pos
 
           let extra =
-            w.Entities
-            |> List.filter (fun e ->
-              e.Faction <> actor.Faction
-              && alive e
-              && e.Id <> targetId
-              && Pos.chebyshev aim e.Pos <= 8)
-            |> List.sortBy (fun e -> Pos.chebyshev aim e.Pos)
-            |> List.truncate (max 0 (maxTargets - 1))
-            |> List.map (fun e -> e.Id)
+            // Player cleave (the operator's ruling, m02387): a cleave is every
+            // hostile adjacent to the swinging body, not the nearest three to
+            // the aim, and never a cone. Name-gated on the party side, so
+            // Multi-Shot keeps its three-target cap and its radius. The Warrior
+            // has no Cleave row in this content — Swipe is the whole of the
+            // rule today.
+            if actor.Faction = Party && ability.Name = "Swipe" then
+              w.Entities
+              |> List.filter (fun e ->
+                e.Faction <> actor.Faction
+                && alive e
+                && e.Id <> targetId
+                && Pos.chebyshev actor.Pos e.Pos <= 1)
+              |> List.map (fun e -> e.Id)
+            else
+              w.Entities
+              |> List.filter (fun e ->
+                e.Faction <> actor.Faction
+                && alive e
+                && e.Id <> targetId
+                && Pos.chebyshev aim e.Pos <= 8)
+              |> List.sortBy (fun e -> Pos.chebyshev aim e.Pos)
+              |> List.truncate (max 0 (maxTargets - 1))
+              |> List.map (fun e -> e.Id)
 
           targetId :: extra
           |> List.fold (fun (w: World) victim ->
@@ -879,8 +1015,12 @@ module SimCombat =
           // The tree's share of the heal lands on the rolled number, beside the
           // flat bonus healing Spiritual Guidance turns Spirit into. One roll,
           // one multiply, and a character with no talents multiplies by 10000.
+          // `treeOfLifeHealing` is added to the flat bonus and not to the
+          // multiplier: it *is* bonus healing, which is what `BonusHealing` is, so
+          // it is the same shape as Spiritual Guidance and lands before the tree's
+          // percent exactly as that does.
           let amount =
-            (rolled + actor.BonusHealing)
+            (rolled + actor.BonusHealing + treeOfLifeHealing w)
             * (Talents.healBp ability.Name actor.Talents * wayBp / 10000)
             / 10000
 
@@ -922,6 +1062,37 @@ module SimCombat =
                 { e with
                     Auras =
                       Aura.refresh (HealingWay(secTicks 15.0, min 3 (Aura.healingWayStacks e.Auras + 1))) e.Auras })
+
+          // Undertow: a Healing Wave or Lesser Healing Wave has a chance to hand a
+          // spent globe back, and at a full shield to spend one instead. Both halves
+          // are one roll, because they are one talent and the inversion *is* the
+          // talent: a Shaman sitting on nine globes tops nothing up, so the proc
+          // costs it a charge and the cycle keeps turning. The globe taken at full is
+          // spent without paying back its mana — that is what makes the inversion a
+          // tax rather than a second helping.
+          let w =
+            if actor.Talents.UndertowBp <= 0 || not (undertowCast ability.Name) then
+              w
+            else
+              let roll, w = rollRange 0 9999 w
+
+              if roll >= actor.Talents.UndertowBp then
+                w
+              else
+                match tryEntity actorId w |> Option.bind (fun a -> Aura.waterShield a.Auras) with
+                | Some(WaterShield(charges, maxCharges, _, _, _)) ->
+                  let next = if charges >= maxCharges then charges - 1 else charges + 1
+
+                  w
+                  |> mapEntity actorId (fun e ->
+                    { e with
+                        Auras =
+                          e.Auras
+                          |> List.choose (function
+                            | WaterShield(_, mx, gm, bp, mp) ->
+                              if next > 0 then Some(WaterShield(next, mx, gm, bp, mp)) else None
+                            | a -> Some a) })
+                | _ -> w
 
           // Inspiration / Ancestral Healing and Illumination are both paid for by
           // the same crit that already enlarged the heal above, so the roll is not
@@ -984,8 +1155,16 @@ module SimCombat =
               let w =
                 if actor.Faction = Party then addHealThreat actor effective w else w
 
+              // Two lines, because the log is two things at once. The first is the only
+              // shape `Attribution` reads — `<caster>'s <spell> heals <target> for N`,
+              // the same shape a direct heal and a heal-over-time tick are written in
+              // — and a Swiftmend written any other way is healing the ledger cannot
+              // see: the biggest heal in the kit, invisible to `sim healers` and to
+              // `sim attrib`. The second says what was eaten, which is the part a
+              // reader of the log wants and no parser can use.
               w
               |> logLine (sprintf "%s consumes the %s on %s for %d" actor.Name consumed t.Name effective)
+              |> logLine (sprintf "%s's %s heals %s for %d" actor.Name ability.Name t.Name effective)
             | None -> w |> logLine (sprintf "%s finds no heal-over-time on %s" actor.Name t.Name)
           | None -> w
 
@@ -1027,7 +1206,7 @@ module SimCombat =
                   Casting = None
                   Cooldowns = e.Cooldowns |> Map.add cancelled interruptLockout })
             |> wake targetId
-            |> logLine (sprintf "%s interrupts %s's %s" actor.Name t.Name cancelled)
+            |> logLine (sprintf "%s's %s interrupts %s's %s" actor.Name ability.Name t.Name cancelled)
           | Some t ->
             w |> logLine (sprintf "%s fails to interrupt %s" actor.Name t.Name)
           | None -> w
@@ -1062,6 +1241,34 @@ module SimCombat =
             |> logLine (sprintf "%s puts %s to sleep" actor.Name t.Name)
           | Some t -> w |> logLine (sprintf "%s is immune to %s" t.Name ability.Name)
           | None -> w
+
+        | Vanish duration ->
+          // The caster's threat leaves every Hostile's table, and a gaze already
+          // on it stops here — `resolveTarget` re-picks from the members it can
+          // still see, and the stealth keeps the vanished body out of that pool
+          // until its own next attack ends it.
+          let w =
+            w.Entities
+            |> List.filter (fun m -> m.Faction = Hostile)
+            |> List.fold (fun acc m ->
+              mapEntity
+                m.Id
+                (fun x ->
+                  { x with
+                      Threat = x.Threat |> Map.remove actorId
+                      Target = if x.Target = Some actorId then None else x.Target })
+                acc)
+              w
+
+          w
+          |> mapEntity
+               actorId
+               (fun e ->
+                 { e with
+                     Auras =
+                       Stealthed duration
+                       :: (e.Auras |> List.filter (fun a -> not (Aura.isStealthed a))) })
+          |> logLine (sprintf "%s vanishes" actor.Name)
 
         | Shapeshift(Serpent, duration, bonus) ->
           w
@@ -1120,11 +1327,43 @@ module SimCombat =
           let amount, w = rollRange lo hi w
           let amount, _, w = rollCrit actor.CritChanceBp actor.Talents.CritDamageBp amount w
 
+          // Enemy cleave is a 90° cone, not a circle: the three adjacent tiles
+          // in the arc the cleaver faces — its target's tile and the two
+          // flanking it. Facing is direction-to-target because the grid keeps no
+          // facing field, and the 8-connected grid makes "the three front tiles"
+          // the target tile plus both half-steps toward it (for a diagonal, the
+          // two orthogonal half-steps). This is the whole fix for the graveyard
+          // wipe: the melee-stepping healer standing behind the tank's mob was
+          // eating every cleave aimed at the tank, ~12 a run. One name test —
+          // `cleave` in Content is a single row every cleaving mob shares (Sentry,
+          // Torturer, Gallant, Monk, Soldier, Fallen Champion, Loksey,
+          // Beastmaster, Guardsman, Myrmidon, Herod, Centurion) — and the
+          // faction gate keeps any future player cleave a full circle, because
+          // the operator's rule is omnidirectional for players (Whirlwind too:
+          // a spin has no front).
+          let frontArc =
+            if actor.Faction = Hostile && ability.Name = "Cleave" then
+              match tryEntity targetId w with
+              | Some t ->
+                  let dx, dy = sign (t.Pos.X - actor.Pos.X), sign (t.Pos.Y - actor.Pos.Y)
+                  let flanks =
+                    if dx = 0 then [ -1, dy; 1, dy ]
+                    elif dy = 0 then [ dx, -1; dx, 1 ]
+                    else [ dx, 0; 0, dy ]
+
+                  Some((dx, dy) :: flanks |> List.map (fun (fx, fy) -> Pos.move fx fy actor.Pos))
+              | None -> None // nothing aimed at: no facing, and radius-1 keeps the old circle
+            else
+              None
+
           w.Entities
           |> List.filter (fun e ->
             e.Faction <> actor.Faction
             && alive e
-            && Pos.chebyshev actor.Pos e.Pos <= radius)
+            && Pos.chebyshev actor.Pos e.Pos <= radius
+            && (frontArc
+                |> Option.map (fun tiles -> List.contains e.Pos tiles)
+                |> Option.defaultValue true))
           |> List.fold (fun w t ->
             let dealt, w = spellHit ability.Name actor t.Id amount w
             let w = dealDamage t.Id dealt w
@@ -1190,6 +1429,14 @@ module SimCombat =
             |> logLine (sprintf "%s roots %s" actor.Name t.Name)
           | None -> w
 
+        | Cripple(duration, slowBp) ->
+          match tryEntity targetId w with
+          | Some t when alive t ->
+            w
+            |> mapEntity targetId (fun e -> { e with Auras = Aura.refresh (Crippled(duration, slowBp)) e.Auras })
+            |> logLine (sprintf "%s cripples %s" actor.Name t.Name)
+          | _ -> w
+
         | Polymorph duration ->
           match tryEntity targetId w with
           | Some t when CreatureType.polymorphable t.CreatureType ->
@@ -1207,11 +1454,45 @@ module SimCombat =
           | None -> w
 
         | HealOverTime(duration, perTick) ->
-          // The tree's share of a heal-over-time is applied to its per-Tick
-          // amount, which is what Improved Rejuvenation buys.
-          let perTick = perTick * Talents.healBp ability.Name actor.Talents / 10000
+          // Four multipliers stack on a heal-over-time, and every one of them is
+          // read at this single moment, because a `Rejuvenation` aura carries a
+          // number and not a recipe (`Rejuvenation(remaining, healPerTick, source)`).
+          //
+          //  - `healBp`: the tree's own bonus and this spell's line — Improved
+          //    Rejuvenation is the one that buys it.
+          //  - `periodicBp`: Genesis, which is periodic-only, so it lands here and
+          //    on the DoT site and on no direct heal.
+          //  - Preservation: Regrowth's tail, and only while the target is
+          //    *already* wearing Rejuvenation. That condition is why this branch
+          //    resolves its target before it prices the tick, and it is why the
+          //    field cannot live on Regrowth's `SpellTalent` row — that row is
+          //    folded into the ability once, at construction, when no target
+          //    exists yet.
+          //  - `treeOfLifeHealing`: the party's `Spirit / 5`, and the only additive
+          //    one. Spread across the HoT's own seconds rather than added per
+          //    second: per second it would be worth `duration` times what the same
+          //    bonus is worth to a direct heal, and Rejuvenation would out-heal
+          //    Healing Touch on a bonus meant to be a fifth of a Druid's Spirit.
+          let target = tryEntity targetId w
 
-          match tryEntity targetId w with
+          let preservationBp =
+            match target with
+            | Some t when
+              ability.Name = "Regrowth"
+              && actor.Talents.PreservationBp > 0
+              && Aura.healOverTimeRemainingFor "Rejuvenation" t.Auras > ticks 0
+              ->
+              10000 + actor.Talents.PreservationBp
+            | _ -> 10000
+
+          let perTick = perTick * Talents.healBp ability.Name actor.Talents / 10000
+          let perTick = perTick * Talents.periodicBp actor.Talents / 10000
+          let perTick = perTick * preservationBp / 10000
+
+          let perTick =
+            perTick + treeOfLifeHealing w / max 1 (duration / secTicks 1.0)
+
+          match target with
           | Some t ->
             w
             |> mapEntity targetId (fun e ->
@@ -1252,6 +1533,21 @@ module SimCombat =
               w
 
           w |> logLine (sprintf "%s: %s grants %d rage" actor.Name ability.Name amount)
+
+        | RaiseShield(charges, globeMana, regenPerGlobeBp, mp5) ->
+          // The globes go up full, and there is nothing to schedule afterwards: no
+          // cooldown, no duration, no refresh. The shield comes off when the last
+          // charge is spent (`spendWaterShieldGlobe`) and the AI puts it back the
+          // next time it is short — `PartyAi.shieldOrders`. `refresh` keeps a stale
+          // half-spent aura from sitting beside the fresh one.
+          w
+          |> mapEntity
+               actorId
+               (fun e ->
+                 { e with
+                     Auras =
+                       Aura.refresh (WaterShield(charges, charges, globeMana, regenPerGlobeBp, mp5)) e.Auras })
+          |> logLine (sprintf "%s's %s raises %d globes" actor.Name ability.Name charges)
 
         | Lacerate(duration, perTick, maxStacks) ->
           // The stack count is read off the target's auras, so the fifth press is
@@ -1375,6 +1671,11 @@ module SimCombat =
           // carries a number and no attacker. The Hunter's serpent sting is the
           // only slayable dot in the build, and it does not crit.
           let perTick = perTick * Talents.damageBp ability.Name actor.Talents / 10000
+          // Genesis: periodic damage is the other half of the talent's wording, and
+          // a Restoration Druid's Moonfire and Entangling Roots are the only damage
+          // it lands. Applied beside the tree's damage share rather than folded into
+          // it, so a build can have one and not the other.
+          let perTick = perTick * Talents.periodicBp actor.Talents / 10000
 
           let perTick =
             match tryEntity targetId w with
@@ -1436,7 +1737,7 @@ module SimCombat =
             | Some _ -> Some actor.Pos
             | None ->
               Path.neighbours
-                (fun p -> Grid.isFloor w.Grid p && not (claimedByOther w actorId p))
+                (fun p -> Grid.isFloor w.Grid p && not (occupiedByOther w actorId p))
                 actor.Pos
               |> List.sortBy (fun p -> Pos.chebyshev actor.Pos p)
               |> List.tryHead
@@ -1489,7 +1790,7 @@ module SimCombat =
               { Id = id
                 Name = spec.Name
                 Level = actor.Level
-                CreatureType = CreatureType.Beast
+                CreatureType = spec.CreatureType
                 OffHand = false
                 Faction = Party
                 Role = Some Dps
@@ -1513,6 +1814,7 @@ module SimCombat =
                 // A pet holds no mana and no talent prices a share of it.
                 BaseResource = 0
                 ResourceRegenPerTick = 0
+                CombatRegenBp = 0
                 ResourceKind = Mana
                 ComboPoints = 0
                 Abilities = []
@@ -1533,6 +1835,9 @@ module SimCombat =
                 MeleeDamageBonus = petBonus
                 RangedAttackPower = 0
                 Armor = petArmor
+                // A pet has no gear list, so its whole body armour is its item
+                // armour; nothing multiplies it but Thick Hide, above.
+                ItemArmor = petArmor
                 ArmorClass = Leather
                 DodgeChanceBp = 0
                 BlockChanceBp = 0
@@ -1549,7 +1854,17 @@ module SimCombat =
                 ExpiresInTicks = spec.Lifetime }
 
             w
-            |> (fun w -> { w with Entities = summon :: w.Entities })
+            |> (fun w ->
+              // A totem drop is the one thing about a summon the ledger wants: its
+              // pulses are silent, so this count — not the log the drop also
+              // writes — is the record of the set the run kept standing.
+              let w =
+                if spec.Totem.IsSome then
+                  { w with TotemLedger = TotemLedger.drop spec.Name w.TotemLedger }
+                else
+                  w
+
+              { w with Entities = summon :: w.Entities })
             |> logLine (sprintf "%s summons %s" actor.Name spec.Name)
 
         | Resurrect(healthPct, manaPct) ->
@@ -1567,9 +1882,11 @@ module SimCombat =
         | Intercept ->
           match tryEntity actorId w, tryEntity targetId w with
           | Some a, Some t ->
+            // `occupiedByOther`, not `claimedByOther`: the Charge writes `Pos`
+            // outright, so a tile somebody is stepping through is not free ground.
             let spot =
               Path.neighbours
-                (fun p -> Grid.isFloor w.Grid p && not (claimedByOther w actorId p))
+                (fun p -> Grid.isFloor w.Grid p && not (occupiedByOther w actorId p))
                 t.Pos
               |> List.sortBy (fun p -> Pos.chebyshev a.Pos p)
               |> List.tryHead
@@ -1668,7 +1985,36 @@ module SimCombat =
         actor.Id
         (fun e ->
           { e with
-              Cooldowns = e.Cooldowns |> Map.add ability.Name ability.CooldownTicks
+              // Tree of Life's house rule: Swiftmend has no cooldown in the form, so
+              // the emergency button is available as often as the Druid can afford
+              // it. Identified by the `ConsumeHealOverTime` effect rather than by
+              // name, so this reads as "the spell that eats a heal-over-time is never
+              // on cooldown in the tree". The cooldown exists to stop the Druid from
+              // spending every heal-over-time it lays down; in the tree those are
+              // already a fifth cheaper, and the form has given up its direct heals.
+              // A cooldown is not always one spell's own: the shocks share one 6 s
+              // timer in WoW (`Content.shockCooldownGroup`), so casting Earth Shock
+              // has to put Flame Shock on cooldown too. Writing every name in the
+              // group keeps `Entity.Cooldowns` a plain name → ready-tick map, which
+              // is what `PartyAi.ready` and the affordability refusal already read;
+              // the alternative — a group field on `Ability` — would be a second
+              // place for "is this ready" to be answered, and it would have to be
+              // threaded through every construction site in `Content`.
+              Cooldowns =
+                if
+                  SimState.inStance actor TreeForm
+                  && (ability.Effects |> List.exists (function ConsumeHealOverTime -> true | _ -> false))
+                then
+                  e.Cooldowns
+                else
+                  let shares =
+                    if List.contains ability.Name Content.shockCooldownGroup then
+                      Content.shockCooldownGroup
+                    else
+                      [ ability.Name ]
+
+                  (e.Cooldowns, shares)
+                  ||> List.fold (fun cds name -> cds |> Map.add name ability.CooldownTicks)
               Goal = None
               Path = []
               Destination = None
@@ -1784,10 +2130,32 @@ module SimCombat =
             // (it is only consulted for a cast with a cast time). No log line: the
             // AI re-asks every Tick and would bury the log in refusals.
             w
-          elif ability.Stance |> Option.exists (SimState.inStance actor >> not) then
+          elif SimState.inStance actor TreeForm && Ability.isDamaging ability then
+            // Tree of Life: "you cannot cast damaging spells". The operator's house
+            // rule lets Healing Touch through on Nature's Swiftness and says nothing
+            // about the damage half, so the damage ban stays absolute. Read off
+            // `Ability.isDamaging` rather than a name list, so a spell added to the
+            // Druid's kit is covered without a second edit. Logged rather than silent
+            // because a healer's AI never asks for these: a line here is a real
+            // mistake, not per-Tick noise.
+            w |> logLine (sprintf "%s cannot cast %s in Tree of Life" actor.Name ability.Name)
+          elif
+            ability.Stance |> Option.exists (SimState.inStance actor >> not)
             // The one place a required form is enforced, so an ability that names
             // one can never be cast out of it: Tree of Life forbids Healing Touch,
             // and the shift is the cost of the heal rather than a formality.
+            //
+            // The operator's house rule is the exception: on Nature's Swiftness a
+            // Healing Touch is castable from the tree, because an instant heal is the
+            // one thing the form's own heal-over-times cannot do and it is worth the
+            // shift back. Gated on the buff being `Instant` rather than on the
+            // ability's name, so the rule reads as "the buff that skips the cast pays
+            // for the shift" and would cover any instant heal the class gains later.
+            && not (
+              (Aura.empower actor.Auras).Instant
+              && Empower.appliesTo ability.Name (Aura.empower actor.Auras)
+            )
+          then
             w |> logLine (sprintf "%s is in the wrong form for %s" actor.Name ability.Name)
           elif ability.CastTicks > ticks 0 && not (canCast actor) then
             // Already casting is not a failure worth logging: it is the caller's

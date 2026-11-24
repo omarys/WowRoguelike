@@ -96,11 +96,32 @@ FUTURE_FORMS = {
     "moonkin_form": ((1215, 117, 1544, 510), SPRITE),
 }
 
+# The Scarlet Monastery sheet: a dark painted dungeon scene, not a tile grid — the
+# 300px-cell lattice that carries the wailing sheet is REFUTED here (a lattice
+# scan finds no pale-stone cell anywhere), so these boxes come from a 250px
+# sliding-window scan ranked by measured uniformity/structure, with the numbers
+# that chose each one recorded in .pi/research/octowow/scarlet-sheet-boxes.md.
+SCARLET_TILES = {
+    # name, (x0, y0, x1, y1), edge, lumstd, RGB, why
+    "scarlet-wall": (1875, 450, 2125, 700),    # 11.52 / 40.7 / (70,68,62) — most structured grayish cell, mortar-line-like edge density
+    "scarlet-wall2": (1075, 825, 1325, 1075),  # 11.47 / 51.7 / (80,75,74) — second distinct structured grayish tone, wall variety
+    "scarlet-floor0": (2100, 1200, 2350, 1450),  # 0.81 / 0.8 / (49,50,55) — flattest box on the sheet, dark slate floor
+    "scarlet-floor1": (975, 1525, 1225, 1775),    # 0.81 / 0.9 / (49,50,55) — second flat box, same palette
+}
+# shortcut: boxes chosen by pixel statistics without eyes; the flat cells may be
+# painted background rather than authored floor tiles. If the SM tour looks wrong,
+# re-pick from the scan (rerun the stats script; candidates recorded in
+# /tmp/ctx-exec-* or rederive: 250px windows, stride 25, rank by edge density).
+# Deliberately skipped: no ornate-floor cell (the warm mid-edge cells carry high
+# luminance variance — painted objects or banners, not flat ornate floor) and no
+# object decoration sprite (no cell shows the small-bright-blob-on-flat signature).
+
 # name -> (sheet, tiles, sprites)
 SHEETS = {
     "wailing": (TILESETS / "Gemini_Generated_Image_tyj66ztyj66ztyj6.jpg", TILES, SPRITES),
     "forms": (TILESETS / "Gemini_Generated_Image_Extended_Druid_Shaman_Hunter.jpg", {}, FORMS),
     "future-forms": (TILESETS / "Gemini_Generated_Image_Druid_Tree_and_Moonkin.jpg", {}, FUTURE_FORMS),
+    "scarlet": (TILESETS / "Gemini_Generated_Image_Scarlet_Monastery.jpg", SCARLET_TILES, {}),
 }
 
 def key_out(img, tol=30):

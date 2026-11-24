@@ -424,6 +424,49 @@ module Content =
             Range = 1
             Effects = [ Lacerate(secTicks 15.0, 12, 5) ] } ] }
 
+  /// Bash ranks 1-3 (levels 10, 32, 44): the bear's kick, 10 Rage on the 60 s
+  /// vanilla cooldown, a 3-yard melee stun whose duration is the rank — 2, 3 then
+  /// 4 s. Both halves of the button are modelled because they are both the
+  /// button: the `Interrupt` is what breaks the cast and the `Stun` is what a
+  /// Bash is, and the engine cancels the cast on either (`SimCombat.fs`, the
+  /// `Interrupt` and `Stun` branches). No damage — the vanilla row deals none.
+  let bashRanks: AbilityDef =
+    { Name = "Bash"
+      Resource = Rage
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ for level, seconds in [ 10, 2; 32, 3; 44, 4 ] do
+            { Level = level
+              Cost = 10
+              CastTicks = ticks 0
+              CooldownTicks = secTicks 60.0
+              Range = 3
+              Effects = [ Interrupt; Stun(secTicks seconds) ] } ] }
+
+  /// Feral Charge, the 11-point Feral talent's interrupt half: 5 Rage, 15 s
+  /// cooldown, instant, 25 yards, and the one kick the bear can land on a caster
+  /// that is not yet in its reach.
+  ///
+  /// shortcut: no school lock or immobilize in the sim; this is the interrupt
+  /// half of vanilla Feral Charge, upgrade if hostiles ever cast while rooted.
+  /// shortcut: vanilla Feral Charge is an 11-point Feral talent; modeled as
+  /// trained because bearTalents grants no abilities.
+  let feralCharge: AbilityDef =
+    { Name = "Feral Charge"
+      Resource = Rage
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ { Level = 20
+            Cost = 5
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 15.0
+            Range = 25
+            Effects = [ Interrupt ] } ] }
+
   /// Claw ranks 1-5 (levels 20-58): 45 Energy, 100% weapon damage plus a flat step,
   /// and one combo point. The cat's builder, and the reason a cat spends its energy
   /// in 45s where a rogue spends the same bar in 40s. Rows from
@@ -462,6 +505,29 @@ module Content =
               CooldownTicks = ticks 0
               Range = 1
               Effects = [ WeaponDamage(22500, bonus); ComboPoint 1 ] } ] }
+
+  /// Ravage ranks 1-4 (levels 32-58): 60 Energy for 350% weapon damage plus a step,
+  /// and one combo point. It is the cat's stealth opener — the same window Ambush
+  /// opens a Rogue's pull from, under the feral name, and offered from the same
+  /// branch in `PartyAi.meleeOrders` rather than as a rotation strike.
+  ///
+  /// Like Ferocious Bite, its first rank is 32, so `AbilityDef.at` drops the whole
+  /// row from a level-24 kit: a cat seated at the ladder's level-24 default opens
+  /// with Claw and gets Ravage only once the party is seated at 32 or above.
+  let ravageRanks: AbilityDef =
+    { Name = "Ravage"
+      Resource = Energy
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ for level, bonus in [ 32, 147; 42, 217; 50, 273; 58, 343 ] do
+            { Level = level
+              Cost = 60
+              CastTicks = ticks 0
+              CooldownTicks = ticks 0
+              Range = 1
+              Effects = [ WeaponDamage(35000, bonus); ComboPoint 1 ] } ] }
 
   /// Rake ranks 1-4 (levels 24-54): 40 Energy, 100% weapon damage plus a step, one
   /// combo point, and a nine-second bleed. Rank 1 lands exactly at 24, which is the
@@ -751,6 +817,35 @@ module Content =
 
   let flashOfLight = rank24 flashOfLightRanks
 
+  /// Holy Shock: one rank, at the top of the ladder — the Paladin's instant heal
+  /// and its panic button. The rank-1 payload OctoWoW documented heals 311-320
+  /// (`.pi/research/octowow/paladin.md` §3), and Healing Light 3/3 folds onto it
+  /// exactly as onto the other two heals. Heal-only by the operator's ruling:
+  /// the 97-104 Holy damage half of the row is not modelled, because a fourth
+  /// damage button on a class whose swing is already priced buys nothing.
+  ///
+  /// shortcut: the 150-mana cost and the 30 s cooldown are UNVERIFIED — the
+  /// OctoWoW payload (§3) carried the rank-1 tooltip only, with no cost or
+  /// cooldown line, so both are this file's estimate. Ranks 2-4 and the
+  /// no-cooldown proc talent are likewise UNVERIFIED and not modelled.
+  let holyShockRanks: AbilityDef =
+    { Name = "Holy Shock"
+      Resource = Mana
+      Stance = None
+      TargetKind = Ally
+      Interruptible = false
+      Ranks =
+        [ { Level = 30
+            Cost = 150
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 30.0
+            Range = 8
+            Effects = [ Heal(311, 320) ] } ] }
+
+  // No `rank24` pin: the one rank is level 30, above the level-24 pin every
+  // other ladder carries (`rankAt` takes `.Value`), so a party below 30 simply
+  // does not know the spell (`AbilityDef.kitAt`), and the graveyard is level 30.
+
   /// Judgement: one rank for the whole game (level 4), and no damage of its own —
   /// it unleashes the active Seal. With no seals modelled it stays the Seal of
   /// Righteousness rank-3 judge, 53-57 Holy, for 31 mana. The table puts it at
@@ -988,6 +1083,22 @@ module Content =
   /// Raptor Strike ranks 1-6 (levels 1-40): the next melee swing plus a flat step
   /// for 6 s of cooldown. The one ability in the hunter's kit that really is a
   /// weapon strike.
+  /// Wing Clip, rank 1 (hunter.md, direct): level 12, 40 mana, instant, 5 yd
+  /// melee, 5 damage and a 50 % movement slow for 10 s.
+  let wingClipRanks: AbilityDef =
+    { Name = "Wing Clip"
+      Resource = Mana
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ { Level = 12
+            Cost = 40
+            CastTicks = ticks 0
+            CooldownTicks = ticks 0
+            Range = 1
+            Effects = [ Damage(5, 5); Cripple(secTicks 10.0, 5000) ] } ] }
+
   let raptorStrikeRanks: AbilityDef =
     { Name = "Raptor Strike"
       Resource = Mana
@@ -1016,6 +1127,7 @@ module Content =
   /// researched per-shot total in the hunter's weapon table below.
   let private hunterPet (health: int) (armor: int) : SummonSpec =
     { Name = "Pet"
+      CreatureType = CreatureType.Beast
       Health = health
       Armor = armor
       Swing = Some(38, 62, secTicks 2.0)
@@ -1190,9 +1302,8 @@ module Content =
 
   /// Earth Shock ranks 1-5 (levels 4-36): 125-133 at rank 4, instant, 6 s
   /// cooldown — and it is the shaman's interrupt, which is why the party gains a
-  /// second kick that is not the Rogue's or the Warrior's.
-  /// shortcut: shocks share one 6 s cooldown in WoW; here each has its own, so a
-  /// shaman can chain Earth Shock into Flame Shock.
+  /// second kick that is not the Rogue's or the Warrior's. The 6 s timer is
+  /// **shared** with Flame Shock (`shockCooldownGroup` below), as it is in WoW.
   let earthShockRanks: AbilityDef =
     { Name = "Earth Shock"
       Resource = Mana
@@ -1236,6 +1347,20 @@ module Content =
                 [ SpellDamage(direct, direct, Fire); DamageOverTime(secTicks 12.0, perTick) ] } ] }
 
   let flameShock = rank24 flameShockRanks
+
+  /// Shocks share one 6 s cooldown in WoW: pressing either puts both on the timer.
+  /// This used to be a `shortcut:` — "here each has its own, so a shaman can chain
+  /// Earth Shock into Flame Shock" — which was a latent balance hole rather than
+  /// only a fidelity note: the moment the AI learned to press Earth Shock for the
+  /// interrupt it already holds (`PartyAi.assignedKick`), two independent 6 s shock
+  /// buttons would have been two interrupts where vanilla allows one, *and* more
+  /// damage than a shock shaman can actually deal.
+  ///
+  /// `SimCombat` writes every name here whenever any member of the group is cast
+  /// (`SimCombat.fs`, the `Cooldowns` write on cast), so `Entity.Cooldowns` stays a
+  /// plain name → ready-tick map and every reader — `PartyAi.ready`, the affordability
+  /// gate, the refusal message — keeps working unchanged.
+  let shockCooldownGroup = [ earthShock.Name; flameShock.Name ]
 
   /// Healing Wave ranks 1-10 (levels 1-60): 389-453 for 200 mana at rank 5, on a
   /// 3.0 s cast. A damage shaman will not cast it — the party's healer does the
@@ -1506,8 +1631,9 @@ module Content =
               Range = 1
               Effects = [ Damage(damage, damage); Interrupt; Silence(secTicks 2.0) ] } ] }
 
-  /// Sap: 65 energy, 3 tiles, and a 30 s incap that starts nothing. No cooldown,
-  /// deliberately: being out of combat only *is* the limiter, so a second Sap can
+  /// Sap: 65 energy, 3 tiles, and a 45 s incap that starts nothing (45 s is the
+  /// operator's direction on the duration). No cooldown, deliberately: being out
+  /// of combat only *is* the limiter, so a second Sap can
   /// never happen inside a fight. `Sleep`, so the first damage breaks it.
   let sap: AbilityDef =
     { Name = "Sap"
@@ -1522,7 +1648,7 @@ module Content =
               CastTicks = ticks 0
               CooldownTicks = ticks 0
               Range = 3
-              Effects = [ Sleep(secTicks 30.0) ] } ] }
+              Effects = [ Sleep(secTicks 45.0) ] } ] }
 
   /// Cheap Shot: 60 energy for a 4 s stun on a target that cannot see it coming.
   /// Trained at 26, so a level-24 Rogue does not have it and the anchor is safe.
@@ -1563,11 +1689,51 @@ module Content =
               Range = 1
               Effects = [ Stun(secTicks 4.0) ] } ] }
 
+  /// Vanish: the Rogue's last resort. Instant and free — vanilla spends a Flash
+  /// Powder reagent and the sim models none, so the button costs no energy — on
+  /// vanilla's 5-minute cooldown, single rank trained at 22. The effect is the
+  /// whole job: every Hostile's threat table forgets the Rogue, and nothing can
+  /// settle on it while the stealth runs. The Rogue's own next attack ends it.
+  let vanish: AbilityDef =
+    { Name = "Vanish"
+      Resource = Energy
+      Stance = None
+      TargetKind = Self
+      Interruptible = false
+      Ranks =
+        [ { Level = 22
+            Cost = 0
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 300.0
+            Range = 0
+            Effects = [ Vanish(secTicks 30.0) ] } ] }
+
+  /// Blind: the second last resort, for when Vanish is on cooldown. A Blinding
+  /// Powder reagent in vanilla and therefore no energy here. Single rank,
+  /// trained at 34, so the level-33 graveyard wing fights without it and the
+  /// level-36/39 wings carry it. A `Sleep`, so damage on the target frees it —
+  /// and it carries no `Interrupt` effect on purpose: it is crowd control, not
+  /// a kick, and the interrupt assignment sorts by effect.
+  let blind: AbilityDef =
+    { Name = "Blind"
+      Resource = Energy
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ { Level = 34
+            Cost = 0
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 180.0
+            Range = 3
+            Effects = [ Sleep(secTicks 10.0) ] } ] }
+
   // -- Mage ----------------------------------------------------------------
 
   /// Frostbolt ranks 1-7 (levels 4-38): the cast grows 1.5 → 3.0 s across the
-  /// ladder. Every rank also slows the target 40 % for 5-8 s; `Effect` has no
-  /// snare, so the slow is not modelled and only the damage is.
+  /// ladder, and every rank chills the target 40 % slower — rank 3 for 6 s and
+  /// rank 4 for 7 s are direct evidence (`mage.md`), the rest interpolate inside
+  /// the sourced 5-8 s window the tooltips quote.
   let frostboltRanks: AbilityDef =
     { Name = "Frostbolt"
       Resource = Mana
@@ -1575,22 +1741,41 @@ module Content =
       TargetKind = Foe
       Interruptible = true
       Ranks =
-        [ for level, cost, cast, lo, hi in
-            [ 4, 25, 1.5, 18, 20
-              8, 35, 1.8, 31, 35
-              14, 50, 2.2, 51, 57
-              20, 65, 2.6, 74, 83
-              26, 100, 3.0, 126, 138
-              32, 130, 3.0, 174, 190
-              38, 160, 3.0, 227, 247 ] do
+        [ for level, cost, cast, lo, hi, chill in
+            [ 4, 25, 1.5, 18, 20, 5.0
+              8, 35, 1.8, 31, 35, 5.0
+              14, 50, 2.2, 51, 57, 6.0
+              20, 65, 2.6, 74, 83, 7.0
+              26, 100, 3.0, 126, 138, 8.0
+              32, 130, 3.0, 174, 190, 8.0
+              38, 160, 3.0, 227, 247, 8.0 ] do
             { Level = level
               Cost = cost
               CastTicks = secTicks cast
               CooldownTicks = ticks 0
               Range = 8
-              Effects = [ SpellDamage(lo, hi, Frost) ] } ] }
+              Effects = [ SpellDamage(lo, hi, Frost); Cripple(secTicks chill, 4000) ] } ] }
 
   let frostbolt = rank24 frostboltRanks
+
+  /// Frost Nova, rank 1 (missing_abilities M3, direct): level 10, 55 mana,
+  /// instant, 25 s cooldown, roots its target in place for 8 s, breaking on
+  /// damage. shortcut: the spell is a nova 10 yd around its caster; this is the
+  /// single-target form, because the one job the kit needs it for is stopping a
+  /// runner — upgrade if area control is ever modelled.
+  let frostNovaRanks: AbilityDef =
+    { Name = "Frost Nova"
+      Resource = Mana
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ { Level = 10
+            Cost = 55
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 25.0
+            Range = 2
+            Effects = [ Root(secTicks 8.0) ] } ] }
 
   /// Arcane Missiles ranks 1-5 (levels 8-40): a channel of one missile a second,
   /// so `CastTicks` is the channel length and the whole channel lands as one hit
@@ -1854,6 +2039,30 @@ module Content =
 
   let entanglingRoots = rank24 entanglingRootsRanks
 
+  /// Hibernate, rank 1 (level 18): 90 mana for a 1.5 s cast that sleeps a Beast
+  /// or Dragonkin for up to 20 s, breaking on damage. Direct evidence
+  /// (`.pi/research/level24/missing_abilities.md` D3: level 18, 90 mana, 1.5 s,
+  /// 30 yd, 20 sec); the ladder stops at the sourced rank rather than inventing
+  /// ranks 2-3. The 30 yd is the 6 tiles of this file's 40-yd-8-tile convention.
+  /// The engine's `Sleep` lands on `sleepable` types (Beast, Humanoid, Dragonkin),
+  /// so the AI narrows Hibernate to its vanilla Beast/Dragonkin at booking time
+  /// (`canControl`) rather than the engine growing a per-ability creature gate.
+  let hibernateRanks: AbilityDef =
+    { Name = "Hibernate"
+      Resource = Mana
+      Stance = None
+      TargetKind = Foe
+      Interruptible = true
+      Ranks =
+        [ { Level = 18
+            Cost = 90
+            CastTicks = secTicks 1.5
+            CooldownTicks = ticks 0
+            Range = 6
+            Effects = [ Sleep(secTicks 20.0) ] } ] }
+
+  let hibernate = rank24 hibernateRanks
+
   // -- casters' damage, and the Warrior's cooldowns ---------------------------
 
   /// Wrath ranks 1-6 (levels 1-38): 63-74 at rank 4, where the table's 1.15.9
@@ -2001,6 +2210,27 @@ module Content =
               Effects = [ Charge; Stun(secTicks 1.0); Threat(300) ] } ] }
 
   let charge = rank24 chargeRanks
+
+  /// Hamstring, rank 1 (missing_abilities W9, direct): level 8, 10 rage,
+  /// instant, 5 yd melee, "causing 5 damage and slowing the enemy's movement by
+  /// 40% for 15 sec". Marginal on a static floor — the reason it is in the kit
+  /// is the runner: a crippled body crosses tiles at three-fifths speed and the
+  /// party catches it before it reaches the next pack.
+  let hamstringRanks: AbilityDef =
+    { Name = "Hamstring"
+      Resource = Rage
+      Stance = None
+      TargetKind = Foe
+      Interruptible = false
+      Ranks =
+        [ { Level = 8
+            Cost = 10
+            CastTicks = ticks 0
+            CooldownTicks = ticks 0
+            Range = 1
+            Effects = [ Damage(5, 5); Cripple(secTicks 15.0, 4000) ] } ] }
+
+  let hamstring = rank24 hamstringRanks
 
   /// Intercept (level 20): the in-combat counterpart. Ten rage buys the same leap,
   /// a three-second stun and a thirty-second cooldown, where Charge is free (it
@@ -2159,6 +2389,12 @@ module Content =
   /// not stopped yet.
   let fiveSecondRule = secTicks 5.0
 
+  /// Vanilla regenerates mana on a two-second server tick, which is the granularity
+  /// `Content.derive` prices Spirit regeneration at: `.pi/research/ranks/mage.md`
+  /// records the client line as "13 + Spirit / 4 … mana per 2-second tick, out of the
+  /// five-second rule". Energy keeps its own clock and does not read this.
+  let manaRegenTicks = secTicks 2.0
+
   let hero
     (id: int)
     (name: string)
@@ -2196,6 +2432,7 @@ module Content =
       MaxResource = resource
       BaseResource = resource
       ResourceRegenPerTick = partyRegen
+      CombatRegenBp = 0
       ResourceKind = Mana
       ComboPoints = 0
       Abilities = abilities
@@ -2210,6 +2447,7 @@ module Content =
       MeleeDamageBonus = 0
       RangedAttackPower = 0
       Armor = 0
+      ItemArmor = 0
       ArmorClass = Cloth
       DodgeChanceBp = 0
       BlockChanceBp = 0
@@ -2263,6 +2501,7 @@ module Content =
       MaxResource = resource
       BaseResource = resource
       ResourceRegenPerTick = mobRegen
+      CombatRegenBp = 0
       ResourceKind = Mana
       ComboPoints = 0
       Abilities = abilities
@@ -2277,6 +2516,7 @@ module Content =
       MeleeDamageBonus = 0
       RangedAttackPower = 0
       Armor = 0
+      ItemArmor = 0
       ArmorClass = Cloth
       DodgeChanceBp = 0
       BlockChanceBp = 0
@@ -3713,22 +3953,50 @@ module Content =
     let s, armorBp, attackPower = buffed buffs d.Stats
     let talents = sheet.Talents
 
-    // Endurance Training is one talent with two bodies: the holder's own pool here
-    // and the pet's at summon time (`SimCombat`, the `Summon` branch).
-    let maxHealth = (d.BaseHealth + pool s.Stamina 10) * (10000 + talents.HealthBp) / 10000
+    // Ancestral Knowledge raises "the total value of all your stats" — the same
+    // fold `buffed` gives Blessing of Kings: every stat up once, on the dressed
+    // set, before any pool reads a stat.
+    let s =
+      if talents.AllStatsBp = 0 then
+        s
+      else
+        let up (n: int) = n * (10000 + talents.AllStatsBp) / 10000
 
-    // Ancestral Knowledge and Divine Intellect are a share of Intellect taken
-    // before the pool is derived, which is why they beat a flat bonus outright:
-    // one point of Intellect is fifteen mana, not one.
+        { s with
+            Strength = up s.Strength
+            Agility = up s.Agility
+            Stamina = up s.Stamina
+            Intellect = up s.Intellect
+            Spirit = up s.Spirit }
+
+    // Endurance Training is one talent with two bodies: the holder's own pool here
+    // and the pet's at summon time (`SimCombat`, the `Summon` branch). Heart of
+    // the Wild's Bear leg folds the same way — Stamina up before the pool reads it.
+    let maxHealth =
+      (d.BaseHealth + pool (s.Stamina * (10000 + talents.StaminaBp) / 10000) 10)
+      * (10000 + talents.HealthBp) / 10000
+
+    // Divine Intellect and Heart of the Wild's every-form fifth are a share of
+    // Intellect taken before the pool is derived, which is why they beat a flat
+    // bonus outright: one point of Intellect is fifteen mana, not one.
     let intellect = s.Intellect * (10000 + talents.IntellectBp) / 10000
     // Spiritual Guidance adds a share of Spirit to every direct heal. It lands on
     // the entity so `resolveAbility` can add it without knowing about talents.
     let bonusHealing = s.Spirit * talents.SpiritToHealingBp / 10000
-    // Meditation and Reflection are a share of regeneration, which is why the
-    // rate has to be Spirit-shaped for them to be worth anything at all: a flat
-    // point a Tick floors 15% away to nothing.
-    let spiritRegen = max 1 (s.Spirit * 4 / 100)
-    let regen = spiritRegen * (10000 + talents.RegenBp) / 10000
+    // Vanilla's regeneration, priced on the client's own two-second mana tick:
+    // `13 + Spirit / 4` points, which is `mp5 = 32.5 + 0.625 x Spirit` in the form
+    // most tables quote (`.pi/research/ranks/mage.md`, the zugzugdb line).
+    //
+    // This used to be `Spirit * 4 / 100` per Tick. With twenty Ticks in a second that
+    // is `Spirit * 0.8` a second — some four and a half times the truth at level 60,
+    // where Spirit 133 paid 100 mana a second against Shadow Bolt's 84. Every mana
+    // class was mana-positive while chain-casting and finished an arm at 97-100%
+    // while the Rage and Energy classes finished at 16-53%.
+    //
+    // The regeneration talents are *not* a multiplier on this (see `CombatRegenBp`):
+    // Reflection and Meditation buy a share of the rate through the five-second rule,
+    // which is a different question from how fast the pool fills when nothing is cast.
+    let regen = 13 + s.Spirit / 4
 
     // Vanilla's ranged attack power is `level x 2 + agility x 2 - 20`, which is
     // why this is not a third conversion on `Sheet`: the level term and the -20
@@ -3743,17 +4011,30 @@ module Content =
       else
         level * 2 + s.Agility * sheet.RangedApPerAgility - 20
 
+    // The gear's own share, before agility and the flat bonuses. Toughness and
+    // Thick Hide are a percent of it, and Bear Form is one too — a form is a
+    // trait, a talent is a row, and the two fold together here. Tree of Life
+    // multiplies this and only this (`SimCombat`, the mitigation site).
+    let gearArmor = d.Armor * (10000 + traits.ItemArmorBp + talents.ItemArmorBp) / 10000
+
+    // Heart of the Wild's Cat leg: Strength up before attack power reads it,
+    // which in this model is the only thing Strength feeds.
+    let strength = s.Strength * (10000 + talents.StrengthBp) / 10000
+
     {| MaxHealth = maxHealth
        MaxResource = defaultArg sheet.FixedPool (d.BaseMana + pool intellect 15)
        BaseResource = defaultArg sheet.FixedPool d.BaseMana
        RegenPerTick = regen
+       CombatRegenBp = talents.RegenBp
        BonusHealing = bonusHealing
        CritChanceBp = 500 + s.Agility * 10 + traits.CritBonusBp
        DodgeChanceBp = 500 + s.Agility * 5 + traits.DodgeBonusBp
-       Armor = d.Armor + armorBp + s.Agility * 2 + traits.ArmorBonus
+       Armor = gearArmor + armorBp + s.Agility * 2 + traits.ArmorBonus
+       ItemArmor = gearArmor
        BlockChanceBp = traits.BlockChanceBp
-       BlockValue = traits.BlockValue
-       AttackPower = s.Strength * sheet.ApPerStrength + s.Agility * sheet.ApPerAgility + attackPower
+       BlockValue = traits.BlockValue * (10000 + talents.BlockValueBp) / 10000
+       AttackPower = (strength * sheet.ApPerStrength + s.Agility * sheet.ApPerAgility + attackPower)
+                     * (10000 + talents.AttackPowerBp) / 10000
        RangedAttackPower = rangedAttackPower |}
 
   /// A Party member at one level. The passives are applied to the stats before
@@ -3811,6 +4092,7 @@ module Content =
       MaxResource = d.MaxResource
       BaseResource = d.BaseResource
       ResourceRegenPerTick = d.RegenPerTick
+      CombatRegenBp = d.CombatRegenBp
       ResourceKind = resource
       ComboPoints = 0
       Abilities = abilities
@@ -3825,6 +4107,7 @@ module Content =
       MeleeDamageBonus = meleeBonus
       RangedAttackPower = d.RangedAttackPower
       Armor = d.Armor
+      ItemArmor = d.ItemArmor
       ArmorClass = armorClass
       DodgeChanceBp = d.DodgeChanceBp
       BlockChanceBp = d.BlockChanceBp
@@ -3864,14 +4147,20 @@ module Content =
   // the build and left out rather than half-modelled.
 
   /// The totem buttons a Shaman's tree discounts. Totemic Focus is -25% on all of
-  /// them, which is a per-spell cost line and nothing else.
+  /// them, which is a per-spell cost line and nothing else. The list carries every
+  /// totem `totemKit` can summon — the talent reads "all totem spells", so the two
+  /// cleaners and Grounding pay the discounted price with the rest, and a totem
+  /// added to the kit later belongs here by the same sentence.
   let private totemDiscount =
     [ for name in
         [ "Healing Stream Totem"
           "Mana Spring Totem"
           "Stoneskin Totem"
           "Grace of Air Totem"
-          "Mana Tide Totem" ] do
+          "Mana Tide Totem"
+          "Cure Poison Totem"
+          "Cleansing Totem"
+          "Grounding Totem" ] do
         { Spell = name
           CostBp = 2500
           HealBp = 0
@@ -3879,42 +4168,108 @@ module Content =
           CritBp = 0
           ElementShareBp = 0; CastTicksOff = ticks 0 } ]
 
-  /// Shaman 0/5/46: Purification 5/5 (+10% healing), Improved Healing Wave 5/5
-  /// (-0.5 s cast), Tidal Focus 5/5 (-5% healing mana), Tidal Mastery 5/5 (+5%
-  /// crit), Healing Focus 5/5 (-70% pushback), Ancestral Knowledge 5/5 (+5% Int),
-  /// Restorative Totems 5/5 (+25% totem effect), Totemic Focus 5/5 (-25% totem
-  /// mana) and Healing Way 3/3 (+18% a stack to the target's next Healing Wave).
-  /// Ancestral Healing 3/3 comes in beside it as `CritArmorBp`.
+  /// Shaman Restoration, OctoWoW's tree (`shamanTalents` is the whole of it, and the
+  /// seventeen talents it does not carry each need an engine primitive — they are
+  /// named in `.pi/research/octowow/shaman-restoration-tree.md`).
+  ///
+  /// **There is no Purification in this tree.** OctoWoW replaced it, so `HealDoneBp`
+  /// is zero rather than 10% — the same note the second half of this comment has
+  /// always carried, now said once instead of once here and once there.
+  ///
+  /// - Improved Healing Wave 5/5: `-0.75 s` on Healing Wave (3.00 → 2.25 s = 45
+  ///   Ticks). This used to be 0.5 s, which is the 1.12 talent's number; the
+  ///   operator's row says three quarters of a second and there is no rounding to do.
+  /// - Tidal Focus 5/5: `HealCostBp 500`, and — because OctoWoW's version covers
+  ///   totems as well — the 25% totem discount in `totemDiscount`.
+  /// - Tidal Mastery 5/5: `CritBp 500` on every healing and **lightning** spell, which
+  ///   is Healing Wave, Lightning Bolt and the two rows the kit has no entry for.
+  /// - Improved Chain Heal 2/2: `-1 s` on Chain Heal. The row is here and inert —
+  ///   the Shaman's kit carries no Chain Heal, so there is nothing to fold it into.
+  ///   Recorded rather than dropped because the tree has it, the same way the
+  ///   Paladin's missing Holy Shock is named instead of quietly omitted.
+  /// - Stable Shields 3/3: `ShieldCharges 6`, which is what makes Water Shield nine
+  ///   globes instead of three.
+  /// - Improved Water Shield 3/3: `WaterShieldRegenBp 200` and `WaterShieldMp5 9` —
+  ///   the two halves of one talent, read off the live globe count.
+  /// - Undertow 3/3: `UndertowBp 500` on Healing Wave and Lesser Healing Wave.
+  /// Ancestral Knowledge 5/5 — "the total value of all your stats"
+  /// (`.pi/research/octowow/shaman.md` §5, the costs list): `AllStatsBp = 500`,
+  /// the stat-wide fold `derive` takes before any pool reads a stat. This used to
+  /// be narrowed to `IntellectBp` — the axis the model had — and the note carried
+  /// the narrowing as recorded; the axis exists now, and the narrowing is gone.
   ///
   /// shortcut: Improved Reincarnation is modelled as the cooldown cut alone
   /// (`.pi/research/level24/shaman.md` §5) — its +20% health and mana at 2/2 is
   /// already baked into `reincarnation`'s fraction, the same way a rank's numbers
   /// are baked into its `Ability`.
-  /// Shaman 0/5/46 under OctoWoW's tree, which is `shamanTalents`' shape with two
-  /// things taken away: **Purification no longer exists** (OctoWoW replaced it), so
-  /// `HealDoneBp` is zero rather than 10%; and Totemic Focus is gone, so the totem
-  /// discount is Tidal Focus's now — the OctoWoW talent "reduce[s] the mana cost of
-  /// your totems" as well as your heals, which is why one list serves both.
-  /// Ancestral Knowledge's "all your stats" is still narrowed to `IntellectBp`: a
-  /// stat-wide multiplier is a new axis, and it is named in
-  /// `.pi/research/octowow/shaman.md` §5 rather than half-modelled here.
   let private shamanTalents =
     { Talents.none with
         HealDoneBp = 0
         HealCostBp = 500
-        IntellectBp = 500
+        AllStatsBp = 500
         TotemEffectBp = 2500
         CritArmorBp = 2500
         HealingWayBp = 1800
+        ShieldCharges = 6
+        WaterShieldRegenBp = 200
+        WaterShieldMp5 = 9
+        UndertowBp = 500
         CooldownOff = [ "Reincarnation", secTicks -600.0 ]
         Spells =
-          { Spell = "Healing Wave"
-            CostBp = 0
-            HealBp = 0
-            DamageBp = 0
-            CritBp = 0
-            ElementShareBp = 0; CastTicksOff = secTicks 0.5 }
-          :: totemDiscount }
+          // Tidal Mastery's critical-effect chance, on the two spells the kit has.
+          [ { Spell = "Healing Wave"
+              CostBp = 0
+              HealBp = 0
+              DamageBp = 0
+              CritBp = 500
+              ElementShareBp = 0; CastTicksOff = secTicks 0.75 }
+            { Spell = "Lightning Bolt"
+              CostBp = 0
+              HealBp = 0
+              DamageBp = 0
+              CritBp = 500
+              ElementShareBp = 0; CastTicksOff = ticks 0 }
+            { Spell = "Lesser Healing Wave"
+              CostBp = 0
+              HealBp = 0
+              DamageBp = 0
+              CritBp = 500
+              ElementShareBp = 0; CastTicksOff = ticks 0 }
+            { Spell = "Chain Heal"
+              CostBp = 0
+              HealBp = 0
+              DamageBp = 0
+              CritBp = 500
+              ElementShareBp = 0; CastTicksOff = secTicks 1.0 } ]
+          @ totemDiscount }
+
+  /// Water Shield 1/1: instant, no cooldown, and it lasts until its globes are spent
+  /// — not a timed buff, so nothing here has a duration and the AI recasts only when
+  /// the shield is gone (`PartyAi.shieldOrders`). Nine globes is three base plus
+  /// Stable Shields' six, read off the talent because `withTalents` can shorten a row
+  /// or discount it but cannot hand it an effect it was not built with.
+  ///
+  /// Cost is Lightning Shield's rank-3 row, 125 at 24 (`.pi/research/level24/
+  /// shaman.md`, Enhancement table). The operator's ruling is that Water Shield costs
+  /// "similar to Lightning Shield"; the sim has no Shield row of its own to borrow —
+  /// nothing in the vocabulary retaliates, so Lightning Shield is one of the abilities
+  /// the kit omits — so the figure comes from the same table every other number on
+  /// this character does, and it is neither levelled nor scaled.
+  ///
+  /// shortcut: 83 mana a globe is **UNVERIFIED**. It is the archive figure quoted in
+  /// `.pi/research/octowow/shaman.md:27` ("Water Shield '3 globes … 83 mana is
+  /// restored'"); the payload states no per-globe number for the ranks this bracket
+  /// reaches, so the quote is kept and labelled rather than tuned to a measurement.
+  let private shamanWaterShield (t: Talents) =
+    { Name = "Water Shield"
+      CastTicks = ticks 0
+      CooldownTicks = ticks 0
+      ResourceCost = 125
+      Stance = None
+      Interruptible = false
+      Range = 0
+      TargetKind = Self
+      Effects = [ RaiseShield(3 + t.ShieldCharges, 83, t.WaterShieldRegenBp, t.WaterShieldMp5) ] }
 
   /// Warrior 3/0/48 under OctoWoW's tree — the operator's own build
   /// (`/talents/warrior/?points=Y--VYFoKQSopQQYB`: Arms 3 in Improved Heroic
@@ -3936,6 +4291,12 @@ module Content =
   ///   is. Two over-applications ride along: `Shoot`, because a crossbow is not a
   ///   one-handed melee weapon, and the off hand of a dual-wielder, which the Warrior
   ///   does not have.
+  /// - Toughness 5/5 — "Increases your armor value from items by [2/4/6/8/10]% and
+  ///   the amount of damage absorbed by your shield by [3/6/9/12/15]%"
+  ///   (`.pi/research/octowow/warrior.md` §3): the two halves land on the two
+  ///   percent fields built for them — `ItemArmorBp = 1000` on the gear's own
+  ///   share and `BlockValueBp = 1500` on the shield's block value, both folded
+  ///   in `derive`.
   ///
   /// shortcut: Shield Wall's "+2 sec duration" is baked into its row as twelve
   /// seconds rather than modelled, the same way a rank's numbers are baked into its
@@ -3943,6 +4304,8 @@ module Content =
   let private warriorTalents =
     { Talents.none with
         DamageDoneBp = 1000
+        ItemArmorBp = 1000
+        BlockValueBp = 1500
         CooldownOff =
           [ "Taunt", secTicks -2.0
             "Disarm", secTicks -20.0
@@ -3973,8 +4336,10 @@ module Content =
   /// - Divine Intellect 5/5: `IntellectBp 1000`.
   /// - Spiritual Focus 2/2: `healerTraits 500 7000` — OctoWoW cut the talent to two
   ///   ranks and kept the 70% endpoint, so the trait survives a rank change.
-  /// - Healing Light 3/3: `HealBp 1200` on Flash of Light and Holy Light. Holy Shock
-  ///   is the talent's third target and has no kit row (§5(b)).
+  /// - Healing Light 3/3: `HealBp 1200` on Flash of Light, Holy Light and Holy
+  ///   Shock — the talent's third target, now that the kit carries the row.
+  ///   Holy Power stays a two-spell crit (see below): the payload gives no
+  ///   evidence it reaches the instant.
   /// - Illumination 5/5: `ManaRefundOnCritBp 6000`, which is a **nerf** — the sim
   ///   refunded the whole cost of a crit heal, OctoWoW refunds 60% at five ranks.
   /// - Holy Power 3/3: `CritBp 600` on Holy Light and Flash of Light. The comment
@@ -3987,9 +4352,10 @@ module Content =
   /// **Divine Favor is gone from the kit, not retuned.** 1.12's Divine Favor is a
   /// two-minute cooldown that makes the next heal a guaranteed crit; OctoWoW's is a
   /// passive five-rank Holy Shock crit talent gated behind Holy Shock. Same name,
-  /// different ability — so the row is deleted and nothing replaces it, because Holy
-  /// Shock is not in the kit either. The Paladin therefore has no panic button, which
-  /// is a real loss of power and shows up on the ladder rather than being argued away.
+  /// different ability — so the row is deleted and nothing replaces it. Holy Shock
+  /// itself is now in the kit (`holyShockRanks`), heal-only by the operator's ruling,
+  /// so the passive crit talent behind it stays unported — a crit rider on one rank
+  /// of an instant is not worth the axis it would need.
   /// Paladin Holy 40 / Protection 0 / Retribution 11 under OctoWoW's tree — the
   /// operator's build, decoded in `.pi/research/octowow/paladin.md` §6. **Eight of the
   /// seventeen talents in it are expressible as data**, and two of the seven originally
@@ -4015,9 +4381,11 @@ module Content =
   /// is gone and `SureCrit` is now set only by the Priest's Inner Focus.
   ///
   /// The eight that need an axis are named with their missing field in §5(b) — they are
-  /// concentrated in the Paladin because its interesting talents are all triggers: Holy
-  /// Shock's either-target cast, Daybreak's reactive heal, Blessed Strikes' reset proc,
-  /// Ironclad's armour-to-healing conversion, Holy Judgement's cast-time cut.
+  /// concentrated in the Paladin because its interesting talents are all triggers:
+  /// Daybreak's reactive heal, Blessed Strikes' reset proc, Ironclad's
+  /// armour-to-healing conversion, Holy Judgement's cast-time cut. Holy Shock's
+  /// either-target cast was on this list and is off it: the operator ruled the
+  /// spell heal-only, so no either-target axis was built for it.
   ///
   /// Blessing of Kings 1/1 was on that list and is no longer: `PartyBuffs` is a talent
   /// that hands the *party* a passive, and `buffed` grew a percentage column to hold one
@@ -4038,6 +4406,7 @@ module Content =
           [ for spell, healBp, critBp, costBp in
               [ "Flash of Light", 1200, 600, 0
                 "Holy Light", 1200, 600, 0
+                "Holy Shock", 1200, 0, 0
                 "Judgement", 0, 0, 900 ] ->
               { Spell = spell
                 CostBp = costBp
@@ -4158,6 +4527,19 @@ module Content =
   /// rather than a slow, expensive Rejuvenation). Swiftmend and Nature's
   /// Swiftness are in the kit as cooldowns.
   ///
+  /// **Genesis 5/5** (+15% to periodic effects) is `PeriodicBp` 1500, and it is
+  /// the reason that axis exists rather than a second `HealDoneBp` line: the
+  /// talent names *periodic*, so Rejuvenation and Regrowth's tail gain it while
+  /// Regrowth's up-front half and the Druid's Wrath do not. It pays both halves
+  /// of its wording — the DoT site reads it too — because a Restoration Druid's
+  /// Moonfire and Entangling Roots are the only damage it ever lands.
+  ///
+  /// **Preservation 3/3** (+30% Regrowth periodic while the target wears
+  /// Rejuvenation) is `PreservationBp` 3000. It cannot live on Regrowth's
+  /// `SpellTalent` row, which is folded into the ability once at construction:
+  /// this talent reads the *target's* aura list, and that is not known until the
+  /// cast resolves. See the field's note for the ordering limitation.
+  ///
   /// The owner asked for Nature's Swiftness on the Druid after the L33 ladder
   /// showed the class two seconds behind a Priest on every spike ("12 deaths
   /// beside a Priest, 3 with a Priest in that seat", §"Balance status"), so the
@@ -4168,6 +4550,8 @@ module Content =
     { Talents.none with
         HealDoneBp = 1000
         RegenBp = 1500
+        PeriodicBp = 1500
+        PreservationBp = 3000
         Spells =
           [ { Spell = "Healing Touch"
               CostBp = 1000
@@ -4390,6 +4774,21 @@ module Content =
   let catForm = form CatForm "Cat Form" 60
   let travelForm = form TravelForm "Travel Form" 60
   let treeOfLife = form TreeForm "Tree of Life" 60
+
+  // Tree of Life is the one form whose bonus is not in this row. `form` writes a
+  // `TakeStance` and nothing else, and the stance is what the rest of the engine
+  // reads, so the form's four effects live at the sites they change rather than as
+  // a second list of numbers here that could disagree with them:
+  //
+  //  - +180% armour from items → `SimCombat`, the `mitigate` site, off `ItemArmor`.
+  //  - +20% of the Druid's Spirit as bonus healing for the party → `SimCombat`,
+  //    `treeOfLifeHealing`, read at both the direct-heal and the HoT site.
+  //  - -20% mana on heal-over-time spells → `SimCombat`, the cost calculation.
+  //  - no damaging spells, no Healing Touch, no Swiftmend cooldown → the two
+  //    `UseAbility` gates and the cooldown write, all in `SimCombat`.
+  //
+  // Healing Touch's ban is already in the data and was here before this form had
+  // any of the above: `healingTouchR4Ranks` carries `Stance = Some HumanForm`.
   let moonkinForm = form MoonkinForm "Moonkin Form" 60
 
   /// Shifting back out, and free. Vanilla reaches the same place by cancelling the
@@ -4529,6 +4928,17 @@ module Content =
         CritBonusBp = attackCritBp
         PushbackResistanceBp = pushbackResistanceBp }
 
+  /// The Shaman's traits are the healer's with a shield on the arm: five per cent
+  /// block for thirteen points, which is Arctic Buckler's own block value. A separate
+  /// record rather than a fourth argument to `healerTraits`, because the Druid, the
+  /// Priest and the Paladin share that function and none of them carries a shield —
+  /// handing them a block chance would silently change three classes this change is
+  /// not allowed to touch.
+  let private shamanTraits =
+    { healerTraits 500 7000 with
+        BlockChanceBp = 500
+        BlockValue = 13 }
+
   // Sourced level-24 sheets. Base attributes and base health/mana are the
   // vanilla class+race row for level 24 (Human Warrior, Night Elf Rogue, Gnome
   // Mage, Human Priest, Night Elf Druid); the gear totals and weapons are the
@@ -4579,7 +4989,7 @@ module Content =
           level
           ([ tauntRanks; heroicStrikeRanks; sunderArmorRanks ]
            @ (if shielded then [ shieldBashRanks; shieldBlockRanks; shieldWallRanks ] else [])
-           @ [ chargeRanks; interceptRanks; disarmRanks; executeRanks; shootRanks ]))
+           @ [ chargeRanks; hamstringRanks; interceptRanks; disarmRanks; executeRanks; shootRanks ]))
 
     heroStats
       buffs
@@ -4711,7 +5121,7 @@ module Content =
       partyThreatBp
       (AbilityDef.kitAt
         level
-        [ sinisterStrike; backstab; ambush; eviscerate; gouge; kick; sap; cheapShot; kidneyShot ])
+        [ sinisterStrike; backstab; ambush; eviscerate; gouge; kick; sap; cheapShot; kidneyShot; vanish; blind ])
       { X = 1; Y = 7 }
     |> fun r ->
       // A second Assassin's Blade in the off hand: dual wield is learned at 10.
@@ -4839,6 +5249,7 @@ module Content =
           level
           [ fireballRanks
             frostboltRanks
+            frostNovaRanks
             arcaneMissilesRanks
             arcaneExplosionRanks
             blizzardRanks
@@ -4898,16 +5309,36 @@ module Content =
     | CatDruid
     | MoonkinDruid
 
-  /// The feral build, of which the tank is the only body that rides it. One
-  /// talent: Primal Fury 2/2, a feral talent that hands the bear five rage every
-  /// time it lands a critical. It says "while in Bear or Dire Bear Form" and it
-  /// needs no form field — a cat builds energy, and `ProcResult.GrantResource`
-  /// pays only into rage, so the clause is the resource kind.
+  /// The bear's own half of the feral build — the tank's body, with the damage
+  /// spec's set in `catTalents` below. Four talents are data now, each cited from
+  /// `.pi/research/octowow/druid-feral.md` §4:
+  /// - Thick Hide 3/3 — "Increases your Armor contribution from items by
+  ///   [3/6/10]%": `ItemArmorBp = 1000`, folded with Bear Form's own +180% on
+  ///   the gear's share in `derive` (`Traits.ItemArmorBp`, set below).
+  /// - Heart of the Wild 5/5 — "increases your Intellect by [4/8/12/16/20]%",
+  ///   the talent's every-form fifth: `IntellectBp = 2000`. The bear's own leg
+  ///   — "while in Bear or Dire Bear Form your Stamina is increased by
+  ///   [..20]%" — is `StaminaBp = 2000`; the cat's Strength leg is the cat's
+  ///   field, not this build's.
+  /// - Predatory Strikes 3/3 — "Increases your melee attack power in Cat, Bear,
+  ///   and Dire Bear Forms by [3/6/10]%": `AttackPowerBp = 1000`. The talent's
+  ///   damage half — Claw, Rake, Maul, Swipe — lands where the bear kit folds
+  ///   spell lines, and the bear kit does not: it is a bare `AbilityDef.kitAt`,
+  ///   so the Maul rider stays named here rather than half-modelled. Swipe is
+  ///   unchanged by OctoWoW outright (§4).
+  /// - Primal Fury 2/2 — five rage every time the bear lands a critical, the proc
+  ///   below. It says "while in Bear or Dire Bear Form" and it needs no form
+  ///   field — a cat builds energy, and `ProcResult.GrantResource` pays only into
+  ///   rage, so the clause is the resource kind.
   ///
-  /// Everything else a feral build wants — attack power, a hit chance, an
-  /// energy-regen multiplier — is a feral note's bucket (b) list.
+  /// Everything else a feral build wants — a hit chance, an energy-regen
+  /// multiplier — is a feral note's bucket (b) list.
   let private bearTalents =
     { Talents.none with
+        StaminaBp = 2000
+        IntellectBp = 2000
+        ItemArmorBp = 1000
+        AttackPowerBp = 1000
         Procs =
           [ { Talent = "Primal Fury"
               Event = OnCrit
@@ -4919,8 +5350,8 @@ module Content =
   /// operator asked for by URL (`/talents/druid/?points=BSAaAI-AoYDQaDSQIFQB-Ag`,
   /// 51 points, and the one-point difference from `…AFQB-Ao` is exactly Berserk
   /// below). It is the cat's tree, and the cat no longer borrows the bear's or
-  /// the Rogue's: the two feral specs share a form, a resource kind and nothing
-  /// else, and `bearTalents` above stays the one Primal Fury proc it was.
+  /// the Rogue's: the two feral specs share a form, a resource kind and the
+  /// Heart of the Wild legs they both carry, and nothing else.
   ///
   /// Expressible, pick by pick:
   /// - Natural Weapons 3/3 — "[3/6/10]% damage with physical attacks in all forms":
@@ -4932,9 +5363,9 @@ module Content =
   ///   and twelve energy is that 20% of this row's 60 — the arithmetic is written out
   ///   so the two can be checked against each other rather than taken on trust.
   /// - Predatory Strikes 3/3 — "[7/14/20]% damage caused by Claw, Rake, Maul, Swipe":
-  ///   the Claw line is `DamageBp = 2000`. The talent's other half, +10% melee attack
-  ///   power, is not modelled: a cat's attack power is `MeleeDamageBonus`, derived
-  ///   from Strength and the sheet, and no field on `Talents` multiplies it. Rake is
+  ///   the Claw line is `DamageBp = 2000`. The talent's other half — "+[3/6/10]%
+  ///   melee attack power in Cat, Bear and Dire Bear Forms" — is `AttackPowerBp =
+  ///   1000`, folded on the total attack power in `derive`. Rake is
   ///   named by the same clause and gets no line — most of Rake's damage is its
   ///   bleed, and a percentage that must reach the aura as well as the strike is a
   ///   change to the bleed path, not a line here.
@@ -4964,8 +5395,10 @@ module Content =
   /// - Leader of the Pack 1/1 — a party-wide +3% crit aura. `PartyBuffs` carries
   ///   `PartyBuffKind` and has no crit entry; adding one is a new buff for the party
   ///   layer, not a line in a build.
-  /// - Heart of the Wild 5/5 — +20% Strength in cat form. `Talents` has `IntellectBp`
-  ///   and `HealthBp` and no `StrengthBp`, so the cat's half has no field to land in.
+  /// - Heart of the Wild 5/5 — "+20% Intellect", the every-form fifth
+  ///   (`IntellectBp = 2000` — the same leg the bear carries), and "+20% Strength
+  ///   while in Cat Form": `StrengthBp = 2000`, folded on the stat before attack
+  ///   power reads it.
   /// - Furor 4/5 — a shift into cat form grants energy, and nothing in this model pays
   ///   on a shift: `TakeStance` sets an aura and the resource clock is never consulted
   ///   about it.
@@ -4988,6 +5421,9 @@ module Content =
   let private catTalents =
     { Talents.none with
         DamageDoneBp = 1000
+        IntellectBp = 2000
+        StrengthBp = 2000
+        AttackPowerBp = 1000
         Spells =
           [ { Spell = "Shred"
               CostBp = 2000
@@ -5007,6 +5443,75 @@ module Content =
               DamageBp = 1500
               CritBp = 0
               ElementShareBp = 0; CastTicksOff = ticks 0 } ] }
+
+  /// The Moonkin's build — the operator's `oCaYYKFYJLDAB--FAAoAC`, Balance 39 /
+  /// Restoration 12 — carried as far as the model reaches without a new axis.
+  /// Every line below is a field that already exists and is already read; the
+  /// picks that are not here are named with their reasons, which is this file's
+  /// convention for a build it can only partly honour.
+  ///
+  /// Landed (Balance): Improved Wrath 5/5, Improved Moonfire 2/2, Moonfury 3/3,
+  /// Vengeance 5/5, Guidance of the Dream 3/3. Landed (Restoration): Subtlety 5/5
+  /// (as `threatBp` on the hero, not a field here — threat is a property of the
+  /// entity), Reflection 2/3.
+  ///
+  /// - Improved Wrath 5/5 — "reduces the cast time and global cooldown of your
+  ///   Wrath spell by [0.1…0.5] sec" (`.pi/research/octowow/druid-moonkin.md` §4).
+  ///   Half a second off Wrath's own cast, `SpellTalent.CastTicksOff`.
+  /// - Improved Moonfire 2/2 and Moonfury 3/3 both raise Moonfire's damage, so
+  ///   they share one row: 10% + 12% is the 2200 below, against Improved
+  ///   Moonfire's own 10% crit. Moonfury also names Starfire, Hurricane and
+  ///   Insect Swarm, and **none of the three exist in this file** — the 12% here
+  ///   is the two spells the kit actually carries, which is why it is not a
+  ///   `DamageDoneBp` on the whole build.
+  /// - Moonglow 3/3 — the 9% is on Moonfire and Wrath of the talent's eight
+  ///   names; the other six are heals and Hurricane/Insect Swarm, none of which a
+  ///   Moonkin carries.
+  /// - Vengeance 5/5 — "+[20…100]% critical strike damage bonus of your Starfire,
+  ///   Moonfire and Wrath". `Talents.CritDamageBp` is class-wide rather than
+  ///   per-spell, so a Moonkin that some day gains a fourth damage spell would
+  ///   give it Vengeance too. No row is per-spell today, so nothing leaks now.
+  /// - Reflection 2/3 — `RegenBp` is documented for exactly this talent.
+  /// - Guidance of the Dream 3/3 — the 70% pushback resistance is **already paid**
+  ///   to this spec by `healerTraits 500 7000`, so there is no second line for it
+  ///   and adding one would charge the same pick twice.
+  ///
+  /// Named and not landed:
+  /// - Omen of Clarity 1/1 — the proc axis *can* express it (`OnSpellHit` →
+  ///   `EmpowerNext` with `FreeMana`), and OctoWoW's page says it fires from
+  ///   offensive spell casts as well as melee, so the shape is right. The
+  ///   **chance is not published** — the note quotes "has a chance" with no
+  ///   number — so there is nothing to write in `ChanceBp` that would not be
+  ///   invented. Land it the day the percentage is sourced.
+  /// - Natural Weapons 3/3 — a spell-hit stat, and `Traits` has no hit field.
+  /// - Nature's Reach 2/2 — `Ability.Range` is a construction literal; a range
+  ///   percentage is a new `SpellTalent` field.
+  /// - Improved Starfire 3/3, Moonfury's other half, Balance of All Things 3/3,
+  ///   Eclipse 1/1 — all four are priced on Starfire, Insect Swarm or Hurricane,
+  ///   and none of the three rows exists in this file.
+  /// - Nature's Grace 1/1, Owlkin Frenzy 1/1, Sylvan Blessing 2/2 — no `OnSpellCrit`
+  ///   event, no `OnDamaged` event, no `OnKill` event respectively.
+  /// - Improved Mark of the Wild 5/5 — `PartyBuffKind.MarkOfTheWild` is a flat
+  ///   amount with no percentage column to raise it.
+  let private moonkinTalents =
+    { Talents.none with
+        CritDamageBp = 10000
+        RegenBp = 1000
+        Spells =
+          [ { Spell = "Wrath"
+              CostBp = 900
+              HealBp = 0
+              DamageBp = 1200
+              CritBp = 0
+              ElementShareBp = 0
+              CastTicksOff = secTicks 0.5 }
+            { Spell = "Moonfire"
+              CostBp = 900
+              HealBp = 0
+              DamageBp = 2200
+              CritBp = 1000
+              ElementShareBp = 0
+              CastTicksOff = ticks 0 } ] }
 
   /// Which forms a Druid of this spec may stand in. The operator's rule: Tree of
   /// Life belongs to the healer and Moonkin to the caster damage spec, while Bear
@@ -5036,28 +5541,27 @@ module Content =
 
     // Nature's Grace and Gift of Nature are healing talents, so the healer's build is
     // `druidTalents`; Bear and Cat carry their own (the bear's rage proc, the cat's
-    // physical damage and its two feral traits), and the Moonkin runs `Talents.none`
-    // because no balance tree is modelled — it is a caster whose damage is the
-    // Wrath/Moonfire rows and nothing else.
+    // physical damage and its two feral traits), and the Moonkin carries the
+    // Balance/ Restoration half of its build as far as the model reaches — see
+    // `moonkinTalents`, which also names the picks it cannot honour.
     let talents =
       match spec with
       | TreeDruid -> druidTalents
       | BearDruid -> bearTalents
       | CatDruid -> catTalents
-      | MoonkinDruid -> Talents.none
+      | MoonkinDruid -> moonkinTalents
 
-    // Bear Form is +180% armour from items at level 10 (Dire Bear's 360% arrives at
-    // at 40): 1.8 x the 444 the set carries at 24 is 799. `Traits.ArmorBonus` is the
-    // only lever for it — health comes from the class's own stamina row and
-    // `Traits` has no health field.
-    //
-    // shortcut: a flat sum pinned to the level-24 set does not grow with the
-    // level-60 sheet, so a level-60 bear carries 2817 where its own gear would
-    // carry 5650; a per-spec armour multiplier is a new field, and a separate
-    // decision.
+    // Bear Form is +180% armour from items at level 10 (Dire Bear's 360% arrives
+    // at 40): `Traits.ItemArmorBp = 18000` is the per-spec armour multiplier the
+    // old flat pin used to approximate — 1.8 x the 444 the set carries at 24 was
+    // the old 799, and the fold in `derive` now grows with the gear instead of
+    // stopping at level 24. Thick Hide's +10% is `bearTalents`' `ItemArmorBp`,
+    // folded on the same line. Health comes from the class's own stamina row and
+    // `Traits` has no health field, so the bear's health side is `bearTalents`'
+    // Stamina leg, not a trait.
     let traits =
       match spec with
-      | BearDruid -> { Traits.none with ArmorBonus = 799 }
+      | BearDruid -> { Traits.none with ItemArmorBp = 18000 }
       // Sharpened Claws 3/3 is +6% crit and Feral Swiftness 2/2 +4% dodge — the two
       // picks of the cat's own build that are a number on the hero rather than a
       // line about a spell. Feral Swiftness' other half is a movement speed bonus,
@@ -5075,8 +5579,15 @@ module Content =
     let pool = if spec = BearDruid || spec = CatDruid then Some 100 else None
 
     // A tank holds threat the way the Warrior tank does, and a damage spec holds
-    // it the way every other damage class does.
-    let threatBp = if spec = BearDruid then bearThreatBp else partyThreatBp
+    // it the way every other damage class does. Subtlety 5/5 is the exception: it
+    // takes 20% of the Moonkin's spell threat away, and threat is a property of the
+    // hero (`Entity.ThreatMultiplierBp`) rather than a field on `Talents`, so that
+    // one pick is written here instead of in `moonkinTalents`.
+    let threatBp =
+      match spec with
+      | BearDruid -> bearThreatBp
+      | MoonkinDruid -> 8000
+      | TreeDruid | CatDruid -> partyThreatBp
 
     let resource =
       match spec with
@@ -5102,6 +5613,8 @@ module Content =
           level
           [ { heroicStrikeRanks with Name = "Maul" }
             { tauntRanks with Name = "Growl" }
+            bashRanks
+            feralCharge
             swipeRanks
             savageBiteRanks
             faerieFireFeralRanks
@@ -5111,30 +5624,65 @@ module Content =
         @ [ bearForm ]
       | TreeDruid ->
         // Today's Druid healer, unchanged, plus the form it stands in.
-        withTalents
-          druidTalents
-          (AbilityDef.kitAt
-            level
-            [ healingTouchR4Ranks
-              regrowthRanks
-              rejuvenationRanks
-              entanglingRootsRanks
-              wrathRanks
-              moonfireRanks ]
-          @ [ swiftmend; naturesSwiftness; rebirth; innervate; removeCurse; abolishPoison ])
+        let kit =
+          withTalents
+            druidTalents
+            (AbilityDef.kitAt
+              level
+              [ healingTouchR4Ranks
+                regrowthRanks
+                rejuvenationRanks
+                entanglingRootsRanks
+                hibernateRanks
+                wrathRanks
+                moonfireRanks ])
+          @ [ swiftmend; naturesSwiftness; rebirth; innervate; removeCurse; abolishPoison ]
+
+        // The downrank, and it has to be a rank rather than a second spell:
+        // Healing Touch's ladder runs 1.5 → 3.5 s of cast from 40-55 up to 572-694,
+        // and the top rank is 301 mana out of a 3,034 pool. That is the right button
+        // for a spike and the wrong one for a top-up, because the hole it fills on a
+        // body already wearing Rejuvenation and Regrowth is regularly smaller than
+        // the heal. Two rungs down is what covers a top-up without the overheal, and
+        // `directFor` already picks the smallest heal that still covers the hole —
+        // so putting the row in the kit is the whole fix, and the Druid gets the same
+        // downranking the Priest has always had through Lesser Heal beside Heal.
+        //
+        // It carries its own name on purpose: cooldowns, casts and HoT lookups are
+        // all keyed by name, so two rows called "Healing Touch" would share one
+        // cooldown and one selector row, and a command naming it could not say which
+        // rank it meant. The talents are folded in before the rename, while the row
+        // still answers to "Healing Touch" and Tranquil Spirit still finds it.
+        let downrank =
+          AbilityDef.at (max 1 (level - 12)) healingTouchR4Ranks
+          |> Option.map (fun a -> withTalents druidTalents [ a ])
+          |> Option.bind List.tryHead
+          |> Option.map (fun a -> { a with Name = "Healing Touch (Rank 4)" })
+
+        kit
+        @ (match downrank with
+           | Some a -> [ a ]
+           | None -> [])
         @ [ treeOfLife; humanForm ]
       | CatDruid ->
         // The cat's own rows, not the Rogue's under feral names. Claw is 45 Energy
-        // for 100% weapon damage, Shred 60 for 225%, Rake an energy bleed, Rip a
-        // finisher whose bleed scales with the points it spends, and Ferocious Bite
-        // the 35-Energy finisher. `withTalents` folds the build into them once, at
-        // construction, so Improved Shred's twelve energy and the three damage lines
-        // are already in the `Ability` the tick loop reads.
+        // for 100% weapon damage, Shred 60 for 225%, Ravage the stealth opener at
+        // 350%, Rake an energy bleed, Rip a finisher whose bleed scales with the
+        // points it spends, and Ferocious Bite the 35-Energy finisher. `withTalents`
+        // folds the build into them once, at construction, so Improved Shred's twelve
+        // energy and the three damage lines are already in the `Ability` the tick loop
+        // reads.
         withTalents
           catTalents
           (AbilityDef.kitAt
             level
-            [ clawRanks; shredRanks; rakeRanks; ripRanks; ferociousBiteRanks; berserkCat ])
+            [ clawRanks
+              shredRanks
+              ravageRanks
+              rakeRanks
+              ripRanks
+              ferociousBiteRanks
+              berserkCat ])
         @ [ catForm ]
       | MoonkinDruid ->
         // A caster dps: the three damage spells the healer already carries, plus
@@ -5361,11 +5909,53 @@ module Content =
           level
           [ flashOfLightRanks
             holyLightRanks
+            holyShockRanks
             judgementRanks
             paladinHammerOfJusticeRanks
             divineProtectionRanks ]
         @ [ purify ]))
       { X = 1; Y = 8 }
+
+  /// The Warlock's demon — the second `SummonSpec` instance in the game, and the
+  /// first that is not a Beast. An Imp is a Demon, so it cannot be Polymorphed by
+  /// the Mage who shares its corner of the roster, which is what `CreatureType` on
+  /// the spec exists for.
+  ///
+  /// shortcut: the Imp swings. In the era it stands at range and casts Firebolt,
+  /// and this body cannot: `SummonSpec` carries a raw swing tuple rather than an
+  /// `AutoAttack` (Domain.fs:1119 explains why), so a summoned entity is built with
+  /// `Abilities = []` (SimCombat.fs, the `Summon` branch) and has nothing to cast
+  /// with. Until the spec grows an ability list the Imp is a melee body whose swing
+  /// is priced at the Firebolt damage a level-appropriate Imp turns out, which keeps
+  /// its share of the Warlock's damage roughly right even though the shape is wrong.
+  /// Health and armour are this file's estimate, scaled like the Hunter's pet so the
+  /// pool grows with the party's.
+  let private warlockDemon (health: int) (armor: int) : SummonSpec =
+    { Name = "Imp"
+      CreatureType = CreatureType.Demon
+      Health = health
+      Armor = armor
+      Swing = Some(34, 56, secTicks 2.0)
+      Lifetime = None
+      MoveTicksPerTile = secTicks 0.4
+      Totem = None }
+
+  let summonDemonRanks: AbilityDef =
+    { Name = "Summon Demon"
+      Resource = Mana
+      Stance = None
+      TargetKind = Self
+      Interruptible = false
+      Ranks =
+        [ for level, health, armor in [ 1, 120, 90; 24, 420, 340; 48, 1250, 950 ] do
+            { Level = level
+              Cost = 0
+              CastTicks = ticks 0
+              CooldownTicks = ticks 0
+              Range = 1
+              Effects = [ Summon(warlockDemon health armor) ] } ] }
+
+  let summonDemon = rank24 summonDemonRanks
 
   /// Gnome Warlock: cloth, the same washed-out set as the Mage — five of the
   /// researched slots have no verifiable item at 24 — with the Gravestone
@@ -5373,8 +5963,14 @@ module Content =
   /// party's passives, which is the lowest armour of the nine and the largest
   /// mana pool.
   ///
-  /// shortcut: no demon. `Summon`'s only caller is the hunter's pet, so the Imp
-  /// and Voidwalker are still out, and adding a demon here would be the second.
+  /// shortcut: one demon. `Summon` has two callers now — the Hunter's pet and the
+  /// Warlock's Imp — but only the Imp is built. The **Felhunter** exists to Spell
+  /// Lock a caster, and the **Succubus** exists to Charm a body out of the pull;
+  /// neither has a carrier in this model. A summoned entity is built with
+  /// `Abilities = []` (see `warlockDemon` above), and `Effect` has no `Charm` at all
+  /// (the control vocabulary is `Polymorph`/`Sleep`/`Rooted`/`Stunned`, Domain.fs:258-272).
+  /// Adding either as a third damage body would give the AI a choice justified by
+  /// reasons the bodies cannot deliver, so the choice is not offered.
   /// Life Tap has no effect in the vocabulary
   /// (nothing moves health into mana) and is left out for the same reason.
   ///
@@ -5422,7 +6018,7 @@ module Content =
         warlockTalents
         (AbilityDef.kitAt
           level
-          [ shadowBoltRanks; corruptionRanks; curseOfAgonyRanks; warlockImmolateRanks; fearRanks ]))
+          [ shadowBoltRanks; corruptionRanks; curseOfAgonyRanks; warlockImmolateRanks; fearRanks; summonDemonRanks ]))
       { X = 3; Y = 6 }
 
   /// The Shaman's totems, at the ranks a level-60 casts. Each is a `Summon`, so it
@@ -5458,6 +6054,7 @@ module Content =
          Effects =
            [ Summon
                { Name = name
+                 CreatureType = CreatureType.Elemental
                  Health = 5
                  Armor = 0
                  Swing = None
@@ -5491,10 +6088,92 @@ module Content =
     |> List.filter (fun (requirement, _) -> level >= requirement)
     |> List.map snd
 
+  /// Healing Wave's top rank is the most expensive single-target heal in the game
+  /// — 265 mana for 552-638 on a 3.0 s cast at rank 6 — and a shaman at 36 trains
+  /// nothing else to heal with: `directFor`'s "cheapest hole closed" ordering then
+  /// has exactly one row to sort, so every hole is paid for at the top rank.
+  ///
+  /// `shmana` books the damage per receiver and the cost lands on one row. The
+  /// Warlock's Imp is a 420-health body: it took 25 of the shaman's 83 presses for
+  /// 6,199 mana and 3,205 healing, 0.52 a point, while the Priest on the same body
+  /// paid 63 a press for 3.01 and the Paladin 58 for 2.63 — the cheap rung, not a
+  /// better target, is the whole difference. The top rank is also where the overheal
+  /// is: 55 of 83 casts hit the health cap and 27.3% of the healing attempt was
+  /// clipped, which is the Druid's Regrowth signature before its own downrank.
+  ///
+  /// So the kit carries a rank rather than a second spell, which is the shape the
+  /// Restoration Druid's kit already has and for the same reason: `directFor`
+  /// already sorts on `costToClose`, so putting the row in the kit is the whole fix.
+  ///
+  /// Which rank is the one thing measured rather than reasoned. `sim healers 30`,
+  /// same 30 seeds, one build per row — no downrank: 49.1 hps, 7,461 heal mana,
+  /// 2.00 a point, 11.1% blocked, 4 of 30 dry; rank 5 at 200: 52.5 / 7,423 / 2.06 /
+  /// 8.2% / 6 dry; rank 4 at 155: 55.8 / 6,437 / 2.55 / 5.0% / 0 dry; rank 3 at 80:
+  /// 56.2 / 7,114 / 2.33 / 2.0% / 3 dry; ranks 4 and 3 together: 55.3 / 6,172 / 2.64 /
+  /// 2.6% / 5 dry. Rank 5 is too close to the top to matter — 453 potential still
+  /// dwarfs the 128-point hole a pet presents — and rank 3 alone overspends in
+  /// presses, because a 204-point hole needs two of them. Rank 4 alone is the one
+  /// row that lowers the spend, raises throughput and leaves no seed dry at once;
+  /// the pair buys 2.64 a point but hands back the dry pulls (5 of 30), which is the
+  /// defect being fixed and not one to trade for.
+  ///
+  /// "Two rungs down" is read off the ladder rather than spelled as a level offset,
+  /// unlike the Druid's `level - 12`: this ladder is spaced 5, 6, 6, 6, 8 levels up to
+  /// rank 7, so one fixed offset means two rungs at one level and one rung at the next.
+  ///
+  /// The row carries its own name on purpose: cooldowns, casts and every selector
+  /// row are keyed by name, so two rows called "Healing Wave" would share one
+  /// cooldown and one log row and a command could not say which rank it meant. The
+  /// talents are folded in before the rename, while the row still answers to
+  /// "Healing Wave" and Tidal Focus still finds it.
+  let private shamanDownrank (level: int) : Ability list =
+    let ladder = shamanHealingWaveRanks.Ranks
+
+    (ladder |> List.filter (fun r -> r.Level <= level))
+    |> (fun trained ->
+      // The trained rank's own position, two rows back. Nothing at the bottom of the
+      // ladder is a top-up — rank 1 is what a level-1 shaman has — so an index that
+      // falls off the end yields no row rather than the smallest one.
+      if trained.IsEmpty then None else List.tryItem (trained.Length - 3) ladder)
+    |> Option.bind (fun rank ->
+      AbilityDef.at rank.Level shamanHealingWaveRanks
+      |> Option.map (fun a -> withTalents shamanTalents [ a ])
+      |> Option.bind List.tryHead
+      |> Option.map (fun a ->
+        { a with
+            Name =
+              sprintf
+                "Healing Wave (Rank %d)"
+                ((ladder |> List.findIndex (fun r -> r.Level = rank.Level)) + 1) }))
+    |> Option.toList
+
   /// Orc Shaman: the Druid's verified leather-and-cloth set, which is as far as
   /// the ≤24 pieces are sourced — shaman trains mail at 40, so nothing better is
   /// available in the bracket. Strength 43 makes him the best melee of the
   /// casters and Rockbiter rather than Windfury is what a 24 has.
+  ///
+  /// **The main hand is an ASSUMPTION and is labelled as one.** The verified ≤24
+  /// caster weapon is the two-hander *Staff of the Blessed Seer*, kept until now
+  /// because no ≤24 one-hand caster weapon could be sourced
+  /// (`.pi/research/level24/shaman.md:92-95`). The operator has ruled that this
+  /// Shaman carries a shield and a one-hander at 24, so the staff is gone and the
+  /// row standing in its place is named for what it is: **a damage figure, not a
+  /// citation**. It carries the staff's 3.00 s speed less twelve points off each end
+  /// (47-71 → 35-59) — the operator's own "roughly -12 weapon damage per swing" — and
+  /// the staff's own +2 Sta / +3 Spi, because inventing stats for an item nobody
+  /// named would be a fake citation and a bare damage swap is the honest version of
+  /// an unverified row. What the swap buys is real and sourced: **Arctic Buckler**,
+  /// the one verified ≤24 shield (642 armour, 13 block, +3 Sta, +8 Spirit, quest
+  /// *Blackfathom Villainy*), which is 642 armour and a 5% block the staff could not
+  /// give. The arithmetic is therefore -12 a swing for +642 armour and 13 blocked a
+  /// block, and nothing in this record claims the one-hander is best in slot.
+  ///
+  /// shortcut: Arctic Buckler's armour takes the level-24 total to 880, which is
+  /// **above** this record's own level-60 `Gear60` anchor of 729. `dress` keeps the
+  /// larger of the two (`max at24 at60`), so the Shaman's armour is flat from 24 to
+  /// 60 instead of growing. That is a consequence of the operator's ruling and not a
+  /// new level-60 number: inventing one would be worse than a flat curve, and the
+  /// level-60 shaman sheet is outside this pass.
   ///
   /// Counted as a `Healer`, though the kit is the elemental one: he carries
   /// Healing Wave and the Party only heals through `role Healer`
@@ -5503,8 +6182,10 @@ module Content =
   /// Wave costs 200 for 389-453 where a Priest's heal is cheaper per point.
   ///
   /// shortcut: Lightning Shield and Rockbiter are left out — nothing in the
-  /// vocabulary retaliates or imbues a weapon. The totems are in, one per element
-  /// as the class plays them; `PartyAi.totemOrders` keeps them up.
+  /// vocabulary retaliates or imbues a weapon. Water Shield is the shield the kit
+  /// *does* carry, because its globes are mana rather than retaliation. The totems
+  /// are in, one per element as the class plays them; `PartyAi.totemOrders` keeps
+  /// them up.
   let private shaman (buffs: PartyBuffKind list) (level: int) (id: int) =
     heroStats
       buffs
@@ -5513,7 +6194,7 @@ module Content =
       "Shaman"
       Healer
       Leather
-      (healerTraits 500 7000)
+      shamanTraits
       { Base = orcShamanBase
         Gear =
           [ gear "Azure Silk Hood" (Some 24) 33 (0, 0, 0, 0, 0)
@@ -5525,7 +6206,10 @@ module Content =
             gear "Darkweave Breeches" (Some 17) 35 (0, 0, 4, 7, 6)
             gear "Spidersilk Boots" (Some 20) 29 (0, 0, 4, 4, 7)
             gear "Lavishly Jeweled Ring" (Some 17) 0 (0, 2, 0, 6, 0)
-            gear "Staff of the Blessed Seer" (Some 18) 0 (0, 0, 2, 0, 3) ]
+            // ASSUMED — see the doc comment above. A damage figure in the staff's
+            // slot, not an item anyone sourced.
+            gear "Assumed caster one-hander" (Some 18) 0 (0, 0, 2, 0, 3)
+            shieldPiece "Arctic Buckler" (Some 24) 642 (0, 0, 3, 0, 8) ]
 
         Gear60 = (729, (0, 0, 234, 227, 72))
         Talents = shamanTalents
@@ -5533,7 +6217,9 @@ module Content =
         ApPerAgility = 0
         RangedApPerAgility = 0
         FixedPool = None }
-      [ (1, { Min = 47; Max = 71; Ticks = secTicks 3.0; Range = 1 })
+      [ // 47-71 at 3.00 s was the staff. 35-59 is the assumed one-hander:
+        // twelve points off each end, same speed — see the doc comment above.
+        (1, { Min = 35; Max = 59; Ticks = secTicks 3.0; Range = 1 })
         (28, { Min = 104; Max = 156; Ticks = secTicks 4.0; Range = 1 })
         (33, { Min = 104; Max = 157; Ticks = secTicks 3.5; Range = 1 })
         (38, { Min = 104; Max = 157; Ticks = secTicks 3.5; Range = 1 })
@@ -5548,7 +6234,17 @@ module Content =
           level
           [ shamanLightningBoltRanks; earthShockRanks; flameShockRanks; shamanHealingWaveRanks ]
         @ totemKit shamanTalents level
-        @ [ naturesSwiftness; reincarnation; ancestralSpirit; purge; curePoison; cureDisease ]))
+        // The cheap rung `shamanDownrank` builds, in the kit beside the trained rank:
+        // `directFor` sorts on `costToClose`, so the row's existence is the whole fix
+        // and no roster or AI branch has to know a Shaman from a Priest.
+        @ shamanDownrank level
+        @ [ naturesSwiftness
+            reincarnation
+            ancestralSpirit
+            purge
+            curePoison
+            cureDisease
+            shamanWaterShield shamanTalents ]))
       { X = 3; Y = 7 }
 
   /// Night Elf Hunter: level-24 leather only — hunters too train mail at 40 — on
@@ -5564,7 +6260,7 @@ module Content =
   /// is Coordinated Assault, which shares "20% of your attack power" with the pet.
   /// shortcut: a pet without Growl, Bite or Claw. Those have no home in the
   /// vocabulary, so the pet is a plain swing rather than a threat-generating
-  /// companion. Aspects, Hunter's Mark, Concussive Shot and Wing Clip are also out:
+  /// companion. Aspects, Hunter's Mark and Concussive Shot are also out:
   /// nothing in the vocabulary carries a ranged-attack-power *buff* or a movement
   /// slow — `Effect` has stun, root, sleep and disarm, but no snare of any strength.
   /// The snare was priced rather than guessed: doubling every hostile's
@@ -5762,6 +6458,7 @@ module Content =
           [ arcaneShotRanks
             serpentStingRanks
             raptorStrikeRanks
+            wingClipRanks
             aimedShotRanks
             scatterShot
             multiShot
@@ -6134,6 +6831,8 @@ module Content =
       Rng = rng
       PartyBuffs = partyBuffs
       Quests = []
+      Forecast = Forecast.empty
+      TotemLedger = TotemLedger.empty
       Log = [] }
 
   // =========================================================================
@@ -6280,6 +6979,8 @@ module Content =
           Combat = Rng.stream seed Rng.CombatStream }
       PartyBuffs = partyBuffs
       Quests = []
+      Forecast = Forecast.empty
+      TotemLedger = TotemLedger.empty
       Log = [] }
 
   /// Wailing Caverns' objectives, and the script that stands in for the
@@ -6329,7 +7030,7 @@ module Content =
   /// continuous dungeon and populated from the lore table. Placement is by the
   /// room each fight belongs to, not by template-fitting a generated floorplan.
   let wailingCavernsAt (level: int) (seed: uint64) : World =
-    let grid, _, roomFloors = Maps.stitch ()
+    let grid, entrance, roomFloors = Maps.stitch ()
     let occupied = System.Collections.Generic.HashSet<Pos>()
     let mutable nextId = 6
 
@@ -6341,14 +7042,10 @@ module Content =
     let freeTiles room =
       roomFloors.[room] |> List.filter (fun p -> not (occupied.Contains p))
 
-    let place room (mk: int -> Pos -> Entity) =
-      match freeTiles room with
-      | p :: _ ->
-        occupied.Add p |> ignore
-        Some(mk (takeId ()) p)
-      | [] -> None
-
-    let partyTiles = freeTiles "the-screaming-gully" |> List.truncate 5
+    let partyTiles =
+      freeTiles "the-screaming-gully"
+      |> List.truncate 5
+      |> List.sortBy (fun p -> p.Y, abs (p.X - entrance.X), p.X)
 
     let party =
       List.map2
@@ -6359,70 +7056,139 @@ module Content =
     for p in partyTiles do
       occupied.Add p |> ignore
 
+    // Keep hostiles well clear of the entrance vestibule so the party never
+    // spawns inside proximity aggro (`SimState.aggroRadius = 2`) or surrounded.
+    let safeSpawnBuffer = 10
+
+    let isSafeForMob (p: Pos) =
+      partyTiles |> List.forall (fun sp -> Pos.chebyshev p sp > safeSpawnBuffer)
+
+    let mobTiles room =
+      let candidates = freeTiles room |> List.filter isSafeForMob
+
+      if room = "the-screaming-gully" then
+        candidates |> List.sortBy (fun p -> p.Y, p.X)
+      else
+        candidates
+
+    let place room (mk: int -> Pos -> Entity) =
+      match mobTiles room with
+      | p :: _ ->
+        occupied.Add p |> ignore
+        Some(mk (takeId ()) p)
+      | [] -> None
+
+    // Packs, not scatter (the operator's direction after the visual runs): a
+    // pack is a knot of a few bodies around an anchor tile, and anchors are at
+    // least `packGap` apart, so one fight is one pack rather than the room. Where
+    // a room cannot fit another separated anchor, the tile farthest from the
+    // existing anchors is used anyway -- a linked pack, like a real dungeon's
+    // patrols, is better than dropping the quota the research sourced. Overflow
+    // bodies that do not fit in the knot fall back to the old scatter, so the
+    // room totals are exactly what `.pi/research/wc/mobs.md` calls for.
+    let mutable anchors: Pos list = []
+    let packGap = 7
+
+    let placePack room (mks: (int -> Pos -> Entity) list) =
+      // Where the room cannot fit another separated anchor, take the tile
+      // farthest from the existing anchors. Measured against the graded
+      // alternative (packs at three tiles): a knot of three-apart packs fights
+      // as one twelve-mob pull, while a far, sparse line fights as rolling
+      // local segments -- a hurt mob only wakes its own four-tile
+      // neighbourhood, so the line never arrives all at once. The quota never
+      // drops either way.
+      let anchor =
+        match mobTiles room |> List.tryFind (fun p -> anchors |> List.forall (fun a -> Pos.chebyshev p a >= packGap)) with
+        | Some a -> Some a
+        | None ->
+          mobTiles room
+          |> List.sortByDescending (fun p -> anchors |> List.map (fun a -> Pos.chebyshev p a) |> List.fold max 0)
+          |> List.tryHead
+
+      match anchor with
+      | Some a ->
+        anchors <- a :: anchors
+
+        let rec fill rest spots acc =
+          match rest, spots with
+          | mk :: rest', p :: ps ->
+            occupied.Add p |> ignore
+            fill rest' ps (mk (takeId ()) p :: acc)
+          | _ -> (List.rev acc, rest)
+
+        let knots, overflow =
+          fill mks (freeTiles room |> List.filter (fun p -> Pos.chebyshev p a <= 2)) []
+
+        knots @ (overflow |> List.choose (place room))
+      | None -> []
+
     // The population follows `.pi/research/wc/mobs.md` §6: the boss placement is
     // the sourced part, the per-room trash counts are the defensible estimate
     // (the wiki publishes per-creature totals for the zone but not per room).
     let mobs =
-      [ // Screaming Gully — Anacondra's cavern, the first big room.
-        yield! place "the-screaming-gully" ladyAnacondra |> Option.toList
-        for _ in 1..4 do
-          yield! place "the-screaming-gully" raptor |> Option.toList
-        for _ in 1..4 do
-          yield! place "the-screaming-gully" deviateGuardian |> Option.toList
-        for _ in 1..4 do
-          yield! place "the-screaming-gully" druidOfTheFang |> Option.toList
-        for _ in 1..2 do
-          yield! place "the-screaming-gully" evolvingEctoplasm |> Option.toList
-        // Winding Chasm — the long connecting passage, and the side chamber.
-        for _ in 1..12 do
-          yield! place "the-winding-chasm" deviateLasher |> Option.toList
-        for _ in 1..6 do
-          yield! place "the-winding-chasm" deviateShambler |> Option.toList
-        for _ in 1..8 do
-          yield! place "the-winding-chasm" druidOfTheFang |> Option.toList
-        for _ in 1..4 do
-          yield! place "the-winding-chasm" deviateCrocolisk |> Option.toList
-        for _ in 1..3 do
-          yield! place "the-winding-chasm" deviateDreadfang |> Option.toList
-        // Pit of Fangs — the snake pit and its river: Cobrahn, Pythas, and Kresh.
-        yield! place "the-pit-of-fangs" lordCobrahn |> Option.toList
-        yield! place "the-pit-of-fangs" lordPythas |> Option.toList
-        yield! place "the-pit-of-fangs" kresh |> Option.toList
-        for _ in 1..8 do
-          yield! place "the-pit-of-fangs" deviatePython |> Option.toList
-        for _ in 1..5 do
-          yield! place "the-pit-of-fangs" deviateAdder |> Option.toList
-        for _ in 1..5 do
-          yield! place "the-pit-of-fangs" deviateViper |> Option.toList
-        for _ in 1..6 do
-          yield! place "the-pit-of-fangs" deviateCrocolisk |> Option.toList
-        for _ in 1..10 do
-          yield! place "the-pit-of-fangs" druidOfTheFang |> Option.toList
-        // Crag of the Everliving — Serpentis, Verdan, Skum and the most trash.
-        yield! place "crag-of-the-everliving" lordSerpentis |> Option.toList
-        yield! place "crag-of-the-everliving" verdan |> Option.toList
-        yield! place "crag-of-the-everliving-south" skum |> Option.toList
-        for _ in 1..20 do
-          yield! place "crag-of-the-everliving" deviateLasher |> Option.toList
-        for _ in 1..10 do
-          yield! place "crag-of-the-everliving" deviateShambler |> Option.toList
-        for _ in 1..6 do
-          yield! place "crag-of-the-everliving" deviateVenomwing |> Option.toList
-        for _ in 1..4 do
-          yield! place "crag-of-the-everliving-south" deviateDreadfang |> Option.toList
-        for _ in 1..12 do
-          yield! place "crag-of-the-everliving-south" druidOfTheFang |> Option.toList
+      [ // Screaming Gully — Anacondra's cavern. She stands with two guards, the
+        // shape `gullyAt` already uses, and the trash falls into packs of about
+        // four (`.pi/research/wc/mobs.md` §6.1 totals, pack shapes are the
+        // operator's direction).
+        yield! placePack "the-screaming-gully" [ ladyAnacondra; druidOfTheFang; druidOfTheFang ]
+        yield! placePack "the-screaming-gully" [ for _ in 1..4 -> raptor ]
+        yield! placePack "the-screaming-gully" [ for _ in 1..4 -> deviateGuardian ]
+        yield! placePack "the-screaming-gully" [ for _ in 1..2 -> druidOfTheFang
+                                                 for _ in 1..2 -> evolvingEctoplasm ]
+        // Winding Chasm — the long connecting passage, pack by pack along it.
+        yield! placePack "the-winding-chasm" [ for _ in 1..4 -> deviateLasher ]
+        yield! placePack "the-winding-chasm" [ for _ in 1..4 -> deviateLasher ]
+        yield! placePack "the-winding-chasm" [ for _ in 1..4 -> deviateLasher ]
+        yield! placePack "the-winding-chasm" [ for _ in 1..4 -> deviateShambler ]
+        yield! placePack "the-winding-chasm" [ for _ in 1..2 -> deviateShambler
+                                               for _ in 1..2 -> deviateCrocolisk ]
+        yield! placePack "the-winding-chasm" [ for _ in 1..4 -> druidOfTheFang ]
+        yield! placePack "the-winding-chasm" [ for _ in 1..4 -> druidOfTheFang ]
+        yield! placePack "the-winding-chasm" [ for _ in 1..2 -> deviateCrocolisk
+                                               for _ in 1..3 -> deviateDreadfang ]
+        // Pit of Fangs — the bosses each stand alone as their own pull, the
+        // snake pit's trash in knots around them.
+        yield! placePack "the-pit-of-fangs" [ lordCobrahn ]
+        yield! placePack "the-pit-of-fangs" [ lordPythas ]
+        yield! placePack "the-pit-of-fangs" [ kresh ]
+        yield! placePack "the-pit-of-fangs" [ for _ in 1..4 -> deviatePython ]
+        yield! placePack "the-pit-of-fangs" [ for _ in 1..4 -> deviatePython ]
+        yield! placePack "the-pit-of-fangs" [ for _ in 1..5 -> deviateAdder ]
+        yield! placePack "the-pit-of-fangs" [ for _ in 1..5 -> deviateViper ]
+        yield! placePack "the-pit-of-fangs" [ for _ in 1..4 -> deviateCrocolisk
+                                              for _ in 1..2 -> deviateCrocolisk ]
+        yield! placePack "the-pit-of-fangs" [ for _ in 1..4 -> druidOfTheFang ]
+        yield! placePack "the-pit-of-fangs" [ for _ in 1..4 -> druidOfTheFang
+                                              for _ in 1..2 -> druidOfTheFang ]
+        // Crag of the Everliving — Serpentis, Verdan and Skum each their own
+        // pull, the lashers in knots through both halves.
+        yield! placePack "crag-of-the-everliving" [ lordSerpentis ]
+        yield! placePack "crag-of-the-everliving" [ verdan ]
+        yield! placePack "crag-of-the-everliving-south" [ skum ]
+        yield! placePack "crag-of-the-everliving" [ for _ in 1..4 -> deviateLasher ]
+        yield! placePack "crag-of-the-everliving" [ for _ in 1..4 -> deviateLasher ]
+        yield! placePack "crag-of-the-everliving" [ for _ in 1..4 -> deviateLasher ]
+        yield! placePack "crag-of-the-everliving" [ for _ in 1..4 -> deviateLasher
+                                                    for _ in 1..4 -> deviateShambler ]
+        yield! placePack "crag-of-the-everliving" [ for _ in 1..2 -> deviateShambler
+                                                    for _ in 1..2 -> deviateVenomwing ]
+        yield! placePack "crag-of-the-everliving" [ for _ in 1..4 -> deviateVenomwing ]
+        yield! placePack "crag-of-the-everliving-south" [ for _ in 1..4 -> deviateDreadfang ]
+        yield! placePack "crag-of-the-everliving-south" [ for _ in 1..4 -> druidOfTheFang ]
+        yield! placePack "crag-of-the-everliving-south" [ for _ in 1..4 -> druidOfTheFang
+                                                          for _ in 1..4 -> druidOfTheFang ]
         // Dreamer's Rock — Naralex asleep, and the two waves the ritual calls up:
-        // both stand here Dormant until their quest wakes them.
-        yield! place "dreamers-rock" naralex |> Option.toList
+        // both stand here Dormant until their quest wakes them, so their shape is
+        // scenery and stays scattered. Only the living trash is packed.
+        yield! placePack "dreamers-rock" [ naralex ]
         for _ in 1..3 do
           yield! place "dreamers-rock" (fun id pos -> { deviateMoccasin id pos with Dormant = true }) |> Option.toList
         for _ in 1..8 do
           yield! place "dreamers-rock" (fun id pos -> { nightmareEctoplasm id pos with Dormant = true }) |> Option.toList
-        for _ in 1..6 do
-          yield! place "dreamers-rock" evolvingEctoplasm |> Option.toList
+        yield! placePack "dreamers-rock" [ for _ in 1..4 -> evolvingEctoplasm ]
+        yield! placePack "dreamers-rock" [ for _ in 1..2 -> evolvingEctoplasm ]
         // Mutanus comes up out of the water on the last wave.
-        yield! place "dreamers-rock-east" mutanus |> Option.toList ]
+        yield! placePack "dreamers-rock-east" [ mutanus ] ]
 
     { Tick = ticks 0
       RestTicks = ticks 0
@@ -6432,6 +7198,8 @@ module Content =
       Rng = Rng.streamsOf seed
       PartyBuffs = partyBuffs
       Quests = wailingCavernsQuests
+      Forecast = Forecast.empty
+      TotemLedger = TotemLedger.empty
       Log = [] }
 
   // -- Scarlet Monastery ----------------------------------------------------
@@ -6780,15 +7548,24 @@ module Content =
     // Walking order zigzags (it is a chebyshev sort), so evenly spaced indices put
     // two packs in one room — which is how a wing becomes a single 12-mob fight.
     let centres =
+      // One pull per proportional slice of the walk: pull i sits near the
+      // (i+1)-th of (pulls+1) walk positions, so the wing is cleared from the
+      // door to the deepest corner. The first tiles that merely satisfy the
+      // spacing crowd every pack into the entrance room — at long side 400 that
+      // stacks the whole wing into one 39-mob gauntlet the party meets two
+      // thousand ticks in. The spacing check still holds within a slice, so no
+      // two pulls share a room by the zigzag argument above.
       let chosen = ResizeArray<Pos>()
 
-      for p in walk do
-        if
-          chosen.Count < pulls
-          && Pos.chebyshev p anchor > partyRoom
-          && chosen |> Seq.forall (fun c -> Pos.chebyshev c p >= packSpacing)
-        then
-          chosen.Add p
+      for k in 0 .. pulls - 1 do
+        let lo = k * walk.Length / (pulls + 1)
+        let hi = max (lo + 1) ((k + 1) * walk.Length / (pulls + 1))
+
+        walk.[lo .. hi - 1]
+        |> Array.tryFind (fun p ->
+          Pos.chebyshev p anchor > partyRoom
+          && chosen |> Seq.forall (fun c -> Pos.chebyshev c p >= packSpacing))
+        |> Option.iter chosen.Add
 
       // A wing too cramped for that spacing still needs its pulls: fall back to
       // evenly spaced positions along the walk.
@@ -6875,7 +7652,8 @@ module Content =
     let wing = wingOf wingName
     let level = levelOf difficulty wing
     let grid = MapsScarlet.wing wing.Name
-    let floors = MapsScarlet.floorTiles grid
+    let layout = grid
+    let floors = MapsScarlet.floorTiles layout
     let entrance = floors |> List.maxBy (fun p -> p.Y, -p.X)
 
     // Enter in the roomiest tile near the door rather than in the doorway: five
@@ -6885,7 +7663,7 @@ module Content =
       [ for dy in -2 .. 2 do
           for dx in -2 .. 2 do
             { X = p.X + dx; Y = p.Y + dy } ]
-      |> List.filter (Grid.isFloor grid)
+      |> List.filter (Grid.isFloor layout)
       |> List.length
 
     let anchor =
@@ -6895,8 +7673,8 @@ module Content =
       |> List.head
 
     let mobs =
-      scarletPopulate grid (scarletPullPlan wing.Name) (Set.singleton anchor) anchor
-      |> List.map (fun e -> { e with Armor = 40 * e.Level })
+      scarletPopulate layout (scarletPullPlan wing.Name) (Set.singleton anchor) anchor
+      |> List.map (fun e -> { e with Armor = 40 * e.Level; ItemArmor = 40 * e.Level })
 
     let partyTiles =
       // Marching order, not a cluster: the Tank stands at the head of the route
@@ -6904,7 +7682,7 @@ module Content =
       // in a two-tile doorway box the Tank in with its own healers, and the whole
       // wing is then lost to geometry rather than to difficulty.
       let pack = mobs |> List.minBy (fun m -> Pos.chebyshev m.Pos anchor)
-      let route = (Path.astar grid (fun _ -> false) anchor pack.Pos).Path |> List.truncate 5
+      let route = (Path.astar layout (fun _ -> false) anchor pack.Pos).Path |> List.truncate 5
 
       if route.Length = 5 then
         List.rev route
@@ -6927,6 +7705,8 @@ module Content =
       Rng = Rng.streamsOf seed
       PartyBuffs = partyBuffs
       Quests = []
+      Forecast = Forecast.empty
+      TotemLedger = TotemLedger.empty
       Log = [] }
 
   /// The three worlds at the reference level of 24. Their `*At` forms take the
@@ -6935,3 +7715,41 @@ module Content =
   let gully (seed: uint64) : World = gullyAt 24 seed
   let dungeon (seed: uint64) : World = dungeonAt 24 seed
   let wailingCaverns (seed: uint64) : World = wailingCavernsAt 24 seed
+
+  /// The story's boss fights. `wailingCavernsAt` places every boss at once; the
+  /// ink story reaches them one knot at a time, so each `start_encounter` id gets
+  /// its own world — the default party against that boss alone, on the gully map.
+  /// An id the ink never names stays unmodelled (None) rather than guessed at.
+  let bossEncounter (bossId: string) (seed: uint64) : World option =
+    let boss =
+      match bossId with
+      | "lady_anacondra" -> Some ladyAnacondra
+      | "lord_cobrahn" -> Some lordCobrahn
+      | "lord_pythas" -> Some lordPythas
+      | "lord_serpentis" -> Some lordSerpentis
+      | "mutanus" ->
+          // Dormant in the full dungeon, where a quest wave wakes him; the story's
+          // encounter knot is that awakening, so he arrives awake.
+          Some(fun id pos -> { mutanus id pos with Dormant = false })
+      | _ -> None
+
+    boss
+    |> Option.map (fun mk ->
+      let spots =
+        [ { X = 3; Y = 6 }; { X = 1; Y = 6 }; { X = 2; Y = 6 }; { X = 1; Y = 5 }; { X = 1; Y = 7 } ]
+
+      let entities =
+        List.map2 (fun (e: Entity) p -> { e with Pos = p }) (partyOf defaultRoster 24) spots
+        @ [ mk 6 { X = 7; Y = 6 } ]
+
+      { Tick = ticks 0
+        RestTicks = ticks 0
+        Grid = Grid.ofRows gullyMap
+        Entities = entities
+        Pending = []
+        Rng = Rng.streamsOf seed
+        PartyBuffs = partyBuffs
+        Quests = []
+        Forecast = Forecast.empty
+        TotemLedger = TotemLedger.empty
+        Log = [] })

@@ -256,6 +256,10 @@ type DispelType =
 type Aura =
   /// Druid's Slumber. Any hostile action wakes the target.
   | Sleeping of remaining: int<tick>
+  /// Vanish. The holder is unseen: `resolveTarget` will not settle on it until
+  /// the stealth runs out or the holder's own next attack lands. Taking damage
+  /// does not end it — attacking out of stealth is the vanilla opener model.
+  | Stealthed of remaining: int<tick>
   /// Serpent Form: extra physical damage, and no casting while shifted.
   | SerpentForm of remaining: int<tick> * bonusDamage: int
   /// A Druid form or a Warrior stance. Unlike every other aura this one has no
@@ -374,6 +378,20 @@ type Aura =
   /// number, because the payload moves both by the same 20% ("increasing the damage
   /// and mana cost of your Arcane Missiles spell by 20% for 8 sec", #51949).
   | Ruptured of remaining: int<tick> * damageBp: int
+  /// Water Shield: the Shaman's globes, and the second aura here with no clock —
+  /// `Shaped` is the first. It lasts until its charges are spent, so `advance` holds
+  /// it rather than ageing it and there is nothing to refresh: the shield goes up
+  /// full and comes off empty, and the mana each globe was holding is paid back when
+  /// a hit takes it. The two Improved Water Shield numbers ride on the aura rather
+  /// than being read off the talent because the talent's worth is proportional to
+  /// how many globes are *still standing* — only the aura knows that, and the regen
+  /// is recomputed from it every Tick.
+  | WaterShield of
+      charges: int *
+      maxCharges: int *
+      globeMana: int *
+      regenPerGlobeBp: int *
+      mp5: int
 
 /// Every case of `Aura` is matched in exactly one place — here. Everywhere else
 /// asks this module a question, so adding an aura breaks compilation in this
@@ -470,8 +488,11 @@ module Aura =
   let advance =
     function
     | Sleeping r when r > ticks 1 -> Some(Sleeping(r - ticks 1))
+    | Stealthed r when r > ticks 1 -> Some(Stealthed(r - ticks 1))
     | SerpentForm(r, b) when r > ticks 1 -> Some(SerpentForm(r - ticks 1, b))
     | Shaped _ as s -> Some s
+    // Water Shield has no expiry to age: its clock is its charges.
+    | WaterShield _ as s -> Some s
     | Stunned r when r > ticks 1 -> Some(Stunned(r - ticks 1))
     | Rooted r when r > ticks 1 -> Some(Rooted(r - ticks 1))
     | Polymorphed r when r > ticks 1 -> Some(Polymorphed(r - ticks 1))
@@ -507,6 +528,7 @@ module Aura =
   let describe =
     function
     | Sleeping r -> sprintf "sleep(%d)" r
+    | Stealthed r -> sprintf "stealth(%d)" r
     | SerpentForm(r, b) -> sprintf "serpent(%d,+%d)" r b
     | Shaped f -> sprintf "shaped(%s)" (Stances.name f)
     | Stunned r -> sprintf "stun(%d)" r
@@ -545,11 +567,13 @@ module Aura =
     | Ruptured(r, bp) -> sprintf "ruptured(%d,+%d)" r bp
     | Innervated(r, bp) -> sprintf "innervated(%d,x%d)" r bp
     | Invigorated(r, bp, n) -> sprintf "invigorated(%d,+%d,+%d)" r bp n
+    | WaterShield(c, mx, gm, bp, mp5) -> sprintf "watershield(%d/%d,%d,+%d,+%d)" c mx gm bp mp5
 
   /// The name a player sees, short enough to fit over a sprite.
   let label =
     function
     | Sleeping _ -> "SLEEP"
+    | Stealthed _ -> "STEALTH"
     | SerpentForm _ -> "SERPENT"
     | Shaped f -> (Stances.name f).ToUpperInvariant()
     | Stunned _ -> "STUN"
@@ -581,6 +605,7 @@ module Aura =
     | RecentlyCast _ -> "CASTING"
     | Innervated _ -> "INNERVATE"
     | Invigorated _ -> "BERSERK"
+    | WaterShield _ -> "WATER SHIELD"
 
   /// True when the aura helps its holder rather than hurting it.
   let isHelpful =
@@ -599,7 +624,11 @@ module Aura =
     | Hastened _
     | Casting _
     | Ruptured _
-    | Invigorated _ -> true
+    | Invigorated _
+    // The Shaman's own shield, and helpful for the reason the party windows above
+    // are: a `Magic` aura the cleaner does not recognise as a buff gets dispelled
+    // off its own party's Shaman.
+    | WaterShield _ -> true
     | _ -> false
 
   /// Which dispel takes this aura off. `Physical` answers "none of them" — see
@@ -628,7 +657,8 @@ module Aura =
     | Hastened _
     | Casting _
     | Ruptured _
-    | Invigorated _ -> Magic
+    | Invigorated _
+    | WaterShield _ -> Magic
     | DeadlyPoisoned _
     | Wounded _
     | Numbed _
@@ -640,12 +670,14 @@ module Aura =
     | Bleeding _
     | Lacerated _
     | Disarmed _
+    | Stealthed _
     | RecentlyCast _ -> Physical
 
   /// Ticks left before it falls off.
   let remaining =
     function
     | Sleeping r
+    | Stealthed r
     | Stunned r
     | Rooted r
     | Polymorphed r
@@ -677,8 +709,11 @@ module Aura =
     // A form has no clock: it lasts until it is shifted out of. Asking a `function`
     // that predates the form auras for its lifetime used to raise a match failure,
     // and the buff bar asks about every aura an entity carries, so a Druid in Tree
-    // of Life took the display down with it.
+    // of Life took the display down with it. Water Shield is the same shape — a
+    // clock made of charges rather than Ticks — for the same reason: the buff bar
+    // asks about it.
     | Shaped _ -> ticks System.Int32.MaxValue
+    | WaterShield _ -> ticks System.Int32.MaxValue
 
   /// A form is the shape a body is standing in rather than a buff with a clock.
   let isForm =
@@ -741,6 +776,14 @@ module Aura =
   let isSleeping =
     function
     | Sleeping _ -> true
+    | _ -> false
+
+  /// Vanish's untargetable window. Deliberately absent from `preventsActing`,
+  /// `preventsCasting` and `preventsMoving`: a stealthed body still acts and
+  /// moves — it is only invisible to hostile targeting.
+  let isStealthed =
+    function
+    | Stealthed _ -> true
     | _ -> false
 
   let isSerpentForm =
@@ -918,6 +961,8 @@ module Aura =
     | Casting _ -> 25
     | Ruptured _ -> 26
     | Invigorated _ -> 27
+    | WaterShield _ -> 30
+    | Stealthed _ -> 31
 
   /// Does casting `newer` overwrite `older`?
   let replaces (older: Aura) (newer: Aura) =
@@ -941,6 +986,14 @@ module Aura =
   /// different spells stack while the same spell only refreshes.
   let refresh (a: Aura) (auras: Aura list) =
     a :: (auras |> List.filter (fun x -> not (replaces x a)))
+
+  /// The Water Shield the holder is carrying, if any. Returned as the aura itself
+  /// rather than as its numbers because its four readers all want different ones:
+  /// the regeneration wants the globes and the two talent figures, a consumed globe
+  /// wants the mana it held, and Undertow wants the live count *and* the cap so it
+  /// can tell a shield it may top up from one it has to spend.
+  let waterShield (auras: Aura list) =
+    auras |> List.tryPick (function WaterShield _ as a -> Some a | _ -> None)
 
   /// Flat armour reduction from Sunder Armour, summed over auras.
   let armorReduction =
@@ -1121,6 +1174,11 @@ type Totem =
 /// the entity.
 type SummonSpec =
   { Name: string
+    /// What it is, for the rules that ask. A Beast is `CreatureType.polymorphable`
+    /// and a Demon is not, so a summoned body that hardcodes `Beast` is a body the
+    /// Mage can sheep — wrong for an Imp and wrong for a totem. It rides the spec
+    /// because the spec is the only place that knows what is being called.
+    CreatureType: CreatureType
     Health: int
     Armor: int
     /// Its own swing: damage range and ticks between swings. A totem has no
@@ -1174,6 +1232,14 @@ type Effect =
   /// was already doing, so it also stops a caster that had not started yet.
   | Silence of duration: int<tick>
   | Sleep of duration: int<tick>
+  /// Vanish: the caster's threat leaves every Hostile's table, and nothing can
+  /// settle on it for `duration` or until its own next attack. The sim's stand-in
+  /// for the vanilla leave-combat: `SimState.inCombat` is a world-level flag any
+  /// engaged hostile keeps raised, so one member cannot unilaterally drop out —
+  /// a wiped threat table plus an unseen body buys the same freedom.
+  /// shortcut: threat-wipe + untargetable models the per-member combat drop;
+  /// revisit if per-member combat ever matters on its own.
+  | Vanish of duration: int<tick>
   | Shapeshift of form: Form * duration: int<tick> * bonusDamage: int
   /// Enter a form and stay in it: no clock, no stack, and it replaces whatever
   /// form the caster was in. The state lives as a `Shaped` aura so that one
@@ -1212,6 +1278,12 @@ type Effect =
   | Resurrect of healthPct: int * manaPct: int
   | Stun of duration: int<tick>
   | Root of duration: int<tick>
+  /// A movement snare: the holder crosses tiles slower for `duration`, by
+  /// `slowBp` basis points (4000 = 40 % slower). The aura is `Crippled`, which
+  /// `SimTick.advanceMovement` already reads for its per-tile cost — this is
+  /// the effect kind that lets an ability apply it (Hamstring, Wing Clip,
+  /// Frostbolt's chill).
+  | Cripple of duration: int<tick> * slowBp: int
   | Polymorph of duration: int<tick>
   | HealOverTime of duration: int<tick> * healPerTick: int
   /// Sunder Armour: reduce the target's armour by a flat amount.
@@ -1264,6 +1336,16 @@ type Effect =
   /// `duration`, and take the points back when it lapses (Last Stand's shape). The
   /// aura, not this effect, owns the undo — see `Aura.Invigorated`.
   | Fortified of duration: int<tick> * healthBp: int
+  /// Water Shield: put `charges` globes up. Named for the verb rather than for the
+  /// aura it leaves behind, because `Aura` already has a `WaterShield` case and a
+  /// second union case of that name would be shadowed by whichever of the two the
+  /// compiler saw last at every match site. The count is the *row's* number rather
+  /// than the talent's — three base, nine with Stable Shields — because talents are
+  /// folded into a kit row before the row is built (`Content.withTalents`), so the
+  /// +6 has already been added by the time this case is written down. `globeMana` is
+  /// what each globe pays back when a hit takes it, and the last two are Improved
+  /// Water Shield's regeneration halves.
+  | RaiseShield of charges: int * globeMana: int * regenPerGlobeBp: int * mp5: int
   /// A Rogue's combo point on the actor, kept for the next finisher.
   | ComboPoint of count: int
   /// Spend the actor's combo points as physical damage: `min`-`max` at one
@@ -1365,6 +1447,20 @@ module Ability =
       AbilityGroup.Damage
     else
       AbilityGroup.Utility
+
+  /// Whether an ability hurts somebody. Tree of Life forbids these outright, and
+  /// this is `group`'s damage pair rather than a second list of names: the two
+  /// classifications would drift the first time a spell was added, and "files
+  /// under Damage" is already the file's one answer to "does this button hit
+  /// something". A control ability that happens to deal damage (Shield Bash)
+  /// groups as Utility and so is not damaging here either — which is right for
+  /// the tree, whose whole point is that a Druid in it is a healer and not a
+  /// caster with a nuke.
+  let isDamaging (a: Ability) =
+    match group a with
+    | AbilityGroup.Damage
+    | AbilityGroup.DamageOverTime -> true
+    | _ -> false
 
   /// Whether an ability brings a body back from the dead. That is the one thing
   /// that resolves against a corpse, and the one thing a dead member still casts.
@@ -1516,6 +1612,12 @@ type Traits =
   { CritBonusBp: int
     DodgeBonusBp: int
     ArmorBonus: int
+    /// Percent added to the gear's own armour before the flat bonuses land (Bear
+    /// Form's +180% from items = 18000), bp. The traits-side sibling of
+    /// `Talents.ItemArmorBp` — a form is a spec's passive rather than a talent
+    /// row — and the two fold together at the one site the gear's share passes
+    /// through (`Content.derive`).
+    ItemArmorBp: int
     BlockChanceBp: int
     BlockValue: int
     PushbackResistanceBp: int
@@ -1527,6 +1629,7 @@ module Traits =
     { CritBonusBp = 0
       DodgeBonusBp = 0
       ArmorBonus = 0
+      ItemArmorBp = 0
       BlockChanceBp = 0
       BlockValue = 0
       PushbackResistanceBp = 0
@@ -1626,9 +1729,32 @@ type Talents =
     /// target's `CreatureType` decides whether it pays at all — so every site
     /// that spends it also has to be holding the target.
     SlayingBp: int
-    /// Percent added to Intellect before the pools are derived (Ancestral
-    /// Knowledge, Divine Intellect), bp.
+    /// Percent added to Intellect before the pools are derived (Divine
+    /// Intellect), bp.
     IntellectBp: int
+    /// Percent added to *every* stat before the pools are derived (Ancestral
+    /// Knowledge, "the total value of all your stats", 5% at 5/5 = 500), bp.
+    /// `IntellectBp`'s stat-wide sibling, folded one step earlier so a build
+    /// could carry both without one hiding the other.
+    AllStatsBp: int
+    /// Percent added to Stamina before health is derived (Heart of the Wild's
+    /// Bear leg, +20% in Bear Form at 5/5 = 2000), bp.
+    StaminaBp: int
+    /// Percent added to Strength before attack power is derived (Heart of the
+    /// Wild's Cat leg, +20% in Cat Form at 5/5 = 2000), bp.
+    StrengthBp: int
+    /// Percent added to melee attack power after the stats have built it
+    /// (Predatory Strikes, +10% at 3/3 = 1000), bp. A second fold on the same
+    /// line rather than a share of `StrengthBp`, because the talent multiplies
+    /// the total — stats and party buffs both — and not the stat it came from.
+    AttackPowerBp: int
+    /// Percent added to the gear's own armour, before agility and the flat
+    /// bonuses land (Toughness, Thick Hide), bp. Folds with `Traits.ItemArmorBp`
+    /// at the gear's one construction site (`Content.derive`).
+    ItemArmorBp: int
+    /// Percent added to the shield's block value (Toughness's other half, +15%
+    /// at 5/5 = 1500), bp.
+    BlockValueBp: int
     /// Percent added to mana regeneration (Reflection, Meditation), bp.
     RegenBp: int
     /// Percent of a heal's mana cost handed back when that heal crits
@@ -1640,6 +1766,34 @@ type Talents =
     /// Percent one Healing Way stack adds to the next Healing Wave the target
     /// receives (18% at 3/3), bp. Stacks three times.
     HealingWayBp: int
+    /// Percent added to every *periodic* effect this character applies, heal or
+    /// damage (Genesis, 15% at 5/5 = 1500), bp. A third axis beside `HealDoneBp`
+    /// and `DamageDoneBp` rather than a share of either, because the talent says
+    /// "periodic": a Rejuvenation and a Regrowth's tail both gain it while the
+    /// Regrowth's up-front heal does not, and a Corruption gains it while a
+    /// Shadow Bolt does not. Read at application time at both the `HealOverTime`
+    /// and the `DamageOverTime` sites, for the same reason `damageBp` is: by the
+    /// time the aura ticks, its ability name is gone.
+    PeriodicBp: int
+    /// Percent added to Regrowth's periodic half when the target is already
+    /// carrying Rejuvenation (Preservation, 30% at 3/3 = 3000), bp.
+    ///
+    /// The one talent here whose value depends on an aura on *someone else*, so it
+    /// cannot be folded into the ability at construction the way `SpellTalent` is
+    /// — the target's buff list is not known until the cast resolves. Named after
+    /// the talent like `HealingWayBp`, since the field is that talent and not a
+    /// general axis.
+    ///
+    /// shortcut: read once, when the Regrowth aura is created. Vanilla re-checks
+    /// every tick, so a Rejuvenation that expires mid-Regrowth should drop the
+    /// bonus and one that lands mid-Regrowth should raise it. This model has no
+    /// per-tick re-derivation of a HoT's amount — the aura carries a number, not
+    /// a recipe (`Rejuvenation(remaining, healPerTick, source)`), and re-deriving
+    /// it would mean carrying the caster's talents on the aura. The ordering
+    /// matters in both directions, and the AI's own order (Rejuvenation is
+    /// cheapest-first, so it is up first) is the one that makes the shortcut
+    /// land on the intended case.
+    PreservationBp: int
     /// Percent of Spirit added to every heal as flat bonus healing (Spiritual
     /// Guidance), bp.
     SpiritToHealingBp: int
@@ -1672,6 +1826,24 @@ type Talents =
     /// a free spell when its next hit lands. A list because a build carries
     /// several and their order is the order they fire in.
     Procs: Proc list
+    /// Extra shield charges a talent hands the Shaman (Stable Shields' +6). Water
+    /// Shield's globe count is three base plus this, which is how the operator's
+    /// build carries nine; read when the kit row is built, not in combat.
+    ShieldCharges: int
+    /// Percent of the holder's mana regeneration each *live* Water Shield globe
+    /// adds (Improved Water Shield, 2% a globe at 1/1 = 200), bp. Keyed off the
+    /// charges standing at the time rather than off this field alone, which is the
+    /// whole talent: nine globes is +18% and one is +2%.
+    WaterShieldRegenBp: int
+    /// Flat mana Improved Water Shield restores per five seconds while Water Shield
+    /// is up (9). MP5 in the era's sense — it flows whether or not the Shaman just
+    /// cast, so it is not scaled by the five-second rule.
+    WaterShieldMp5: int
+    /// Percent chance a Healing Wave or Lesser Healing Wave restores a spent Water
+    /// Shield globe — and, at a full shield, spends one instead (Undertow, 50% at
+    /// 1/1 = 500), bp. The inversion is the talent, so both halves read this one
+    /// number.
+    UndertowBp: int
     /// Party-wide passives this build hands out rather than receives (Blessing of
     /// Kings). Unlike every other field here the effect lands on *other* members,
     /// so it is read when the party's passives are assembled and never by the
@@ -1689,22 +1861,40 @@ module Talents =
       CritBleedShareBp = 0
       SlayingBp = 0
       IntellectBp = 0
+      AllStatsBp = 0
+      StaminaBp = 0
+      StrengthBp = 0
+      AttackPowerBp = 0
+      ItemArmorBp = 0
+      BlockValueBp = 0
       RegenBp = 0
       ManaRefundOnCritBp = 0
       CritArmorBp = 0
       HealingWayBp = 0
+      PeriodicBp = 0
+      PreservationBp = 0
       SpiritToHealingBp = 0
       TotemEffectBp = 0
       HealthBp = 0
       PetArmorBp = 0
       PetDamageBp = 0
       PetApBp = 0
+      ShieldCharges = 0
+      WaterShieldRegenBp = 0
+      WaterShieldMp5 = 0
+      UndertowBp = 0
       Spells = []
       CooldownOff = []
       Procs = []
       PartyBuffs = [] }
 
   let spell (name: string) (t: Talents) = t.Spells |> List.tryFind (fun s -> s.Spell = name)
+
+  /// Percent this character's periodic effects are worth, in basis points. The
+  /// periodic twin of `healBp`/`damageBp`, and the only one of the three that has
+  /// no per-spell half: no tree names a talent that raises one DoT's ticks and not
+  /// another's.
+  let periodicBp (t: Talents) = 10000 + t.PeriodicBp
 
   /// The procs this build hangs off one event, in the order it lists them.
   let procsOf (ev: ProcEvent) (t: Talents) = t.Procs |> List.filter (fun p -> p.Event = ev)
@@ -1825,11 +2015,21 @@ type Entity =
     /// `MaxResource`; this exists for the talents that say "base".
     BaseResource: int
     ResourceRegenPerTick: int
+    /// The share of the Spirit rate that survives the five-second rule, in basis
+    /// points. Vanilla's Meditation and Reflection do not *add* to regeneration —
+    /// they let a slice of it keep flowing *while casting*, which for a caster with
+    /// no mp5 is otherwise nothing at all. Zero means the Spirit rate stops dead for
+    /// five seconds after a cast; 1500 means 15% of it carries on. It rides the
+    /// entity rather than `Talents` because `SimTick` holds the entity, not the sheet.
+    CombatRegenBp: int
     /// Mana, rage or energy. Rage is built by fighting and energy regenerates on
     /// its own clock, so the tick loop has to know which economy it is feeding.
     ResourceKind: ResourceKind
-    /// Rogue combo points, 0 to 5. Lost when the Rogue switches target, which is
-    /// what makes a finisher a decision rather than a formality.
+    /// Rogue and cat combo points, 0 to 5. Lost when the body switches target,
+    /// which is what makes a finisher a decision rather than a formality. The cat
+    /// shares the field rather than owning a second one: `SimCombat`'s `ComboPoint`
+    /// effect and its two finisher effects are resource-agnostic already, and only
+    /// the Rogue's loot table ever gated them.
     ComboPoints: int
     Abilities: Ability list
     AutoAttack: AutoAttack option
@@ -1859,6 +2059,13 @@ type Entity =
     /// Current armour, reduced by Sunder, raised by traits and agility. Mitigates
     /// physical damage only (Q2a), linear and capped at 75% (Q1a).
     Armor: int
+    /// The share of `Armor` that came from the gear list, before the 2-per-Agility
+    /// term and `Traits.ArmorBonus` were added. Kept because Tree of Life raises
+    /// "armor contribution from *items*" by 180%, and that word excludes the other
+    /// two terms: a Druid whose agility and traits were multiplied too would be
+    /// wearing a form that buffs its own stats. Monsters carry their whole body
+    /// armour here, since a mob has no gear list to separate it from.
+    ItemArmor: int
     ArmorClass: ArmorClass
     /// Full avoidance of a physical hit, agility-derived (Q4a).
     DodgeChanceBp: int
@@ -1976,6 +2183,127 @@ module Quest =
   let justCompleted (before: Quest list) (after: Quest list) : Quest list =
     List.zip before after |> List.filter (fun (b, a) -> not b.Done && a.Done) |> List.map snd
 
+/// The last few seconds of the fight in progress, which is all a fight-length
+/// forecast needs to be honest.
+///
+/// Damage is an exponentially weighted mean over per-Tick party damage, not a
+/// trailing sum. The sum was wrong exactly where the wings chain packs: a new pack
+/// made the remaining health jump while the window was still measuring the old one,
+/// so the rate read stale for a full window, and a window that happened to hold no
+/// damage read as zero dps — an infinite fight. The party's output is a property of
+/// the party, not of which pack it stands in, so the right prior is the one that
+/// carries across a pull boundary; only the health pool should move the forecast.
+/// An EWMA never resets to zero on a quiet Tick, and between pulls it decays on its
+/// own, so a short rest opens the next pull without a cold start.
+///
+/// The two series are deliberately different populations. Damage is every point
+/// the *party* took off a hostile, because that is what says how much fight is
+/// left. Burn is what one *healer* paid for everything that is not damage,
+/// because that is what it still owes the fight — charging the reserve for
+/// damage too would make the reserve grow every time the gate paid out, and the
+/// gate would strangle itself.
+type Forecast =
+  { /// Party damage per Tick as an exponentially weighted accumulator over
+    /// `ManaBudget.damageWindow` Ticks: the stored value is the mean multiplied by
+    /// that window, so the mean is `value / damageWindow`. Never reset by a pack
+    /// dying or a new one joining; it decays between pulls on its own.
+    PartyDamage: int
+    /// Ticks of party damage fed into the accumulator since the last wipe, saturating
+    /// at `ManaBudget.damageWindow`. The warm-up guard: for the first second the mean
+    /// is a prior, not a measurement.
+    DamageTicks: int
+    /// The hostiles the forecast was last priced against: the `Id` of every alive,
+    /// engaged hostile. Growth means a new pull has joined and the horizon really is
+    /// longer; shrinkage is attrition and must not touch the rate. Stored as the set
+    /// itself rather than a hash because the epoch below has to know *which* ids are
+    /// new.
+    EngagedHostiles: Set<EntityId>
+    /// Increments only when `EngagedHostiles` gains an id. A counter, not a reset
+    /// signal: it makes "a new pack joined" visible to `sim ttk` and to tests without
+    /// giving anything the power to clear the damage rate mid-pull.
+    EngagementEpoch: int
+    /// Mana each healer drew out of its own pool per Tick, net of the regeneration it
+    /// got back, as an exponentially weighted trailing accumulator over
+    /// `ManaBudget.burnWindow` Ticks: the stored value is the mean multiplied by that
+    /// window, so the mean is `value / burnWindow`. Signed \u2014 a healer topping its pool
+    /// up has a negative draw. Kept as one integer per healer rather than a list
+    /// because this window is twenty seconds and the tick loop cannot afford to walk a
+    /// 400-element list per Tick per healer.
+    HealerDrain: Map<EntityId, int>
+    /// Damage landed so far this Tick. `dealDamage` is the one funnel every
+    /// source goes through and it runs several times inside one Tick, so a hit
+    /// cannot be a sample; the Tick boundary is.
+    DamageThisTick: int
+    /// Non-damage mana paid so far this Tick, by healer.
+    BurnThisTick: Map<EntityId, int>
+    /// Mana a healer paid for damage this Tick. `settle` subtracts it out of the pool
+    /// drift, because the reserve must not charge for the one kind of spend the gate
+    /// itself authorises.
+    HealDamageThisTick: Map<EntityId, int> }
+
+/// The empty window a fresh World starts with. Lives beside the type rather than
+/// with the pricing in `SimState` because `Content` builds the opening World and
+/// compiles before it.
+module Forecast =
+  let empty: Forecast =
+    { PartyDamage = 0
+      DamageTicks = 0
+      EngagedHostiles = Set.empty
+      EngagementEpoch = 0
+      HealerDrain = Map.empty
+      DamageThisTick = 0
+      BurnThisTick = Map.empty
+      HealDamageThisTick = Map.empty }
+
+/// One totem's whole contribution to the run, counted where it is delivered. A
+/// totem pulse is silent — auras tick without a log line, and the log is the only
+/// event record `Attribution` reads — so the work the set does is invisible to
+/// every diagnostic that reads the log and has to be accumulated where it lands.
+/// One row per totem *name* rather than per dropped body: the interesting number
+/// is what the wing got out of the element, not which of its several drops did it.
+type TotemTally =
+  { /// Times the element was dropped, including a drop that replaced its own
+    /// standing totem.
+    Drops: int
+    /// Pulse applications: one per party member a pulse reached, once a pulse.
+    Pulses: int
+    /// Health a pulse actually delivered — deficit-capped, because overheal is
+    /// not delivery and the question is what the totem saved the healer.
+    HealthDelivered: int
+    /// Mana a pulse actually delivered, pool-capped the same way.
+    ManaDelivered: int
+    /// The distinct party members a pulse has reached, ever.
+    Reached: Set<EntityId> }
+
+/// The run's totem ledger. Lives on the World because the run is its scope:
+/// unlike `Forecast`, which one pull resets, this is never cleared — the wing
+/// spans one World and the question is what the whole wing got out of the set.
+module TotemLedger =
+  let zero: TotemTally =
+    { Drops = 0; Pulses = 0; HealthDelivered = 0; ManaDelivered = 0; Reached = Set.empty }
+
+  let empty: Map<string, TotemTally> = Map.empty
+
+  /// One more drop of `name`.
+  let drop (name: string) (ledger: Map<string, TotemTally>) =
+    ledger
+    |> Map.change name (fun t ->
+      let t = t |> Option.defaultValue zero
+      Some { t with Drops = t.Drops + 1 })
+
+  /// One more pulse of `name` against member `id`: the numbers are supplied by
+  /// the caller because only it knows which pulse landed what on this member.
+  let pulse (name: string) (id: EntityId) (health: int) (mana: int) (ledger: Map<string, TotemTally>) =
+    ledger
+    |> Map.change name (fun t ->
+      let t = t |> Option.defaultValue zero
+      Some
+        { t with
+            Pulses = t.Pulses + 1
+            HealthDelivered = t.HealthDelivered + health
+            ManaDelivered = t.ManaDelivered + mana
+            Reached = Set.add id t.Reached })
+
 type World =
   { Tick: int<tick>
     /// Ticks the party has spent continuously out of combat, reset the moment a
@@ -1997,7 +2325,14 @@ type World =
     /// the state; included in dumps because it is what a human reads.
     Log: string list
     /// The run's objectives, and with them its scripted encounters.
-    Quests: Quest list }
+    Quests: Quest list
+    /// What the fight in progress has been doing for the last few seconds. Read
+    /// by the healers' damage gate and by `sim ttk`; cleared between pulls, so
+    /// one pack's damage rate never prices the next one.
+    Forecast: Forecast
+    /// What the run's totems have delivered. Never cleared — the wing is one
+    /// World, and unlike the fight above there is nothing to reset between pulls.
+    TotemLedger: Map<string, TotemTally> }
 
 // ===========================================================================
 // Dungeon layout

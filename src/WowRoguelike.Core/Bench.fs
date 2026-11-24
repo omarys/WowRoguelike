@@ -12,14 +12,17 @@ module Bench =
   /// Drives the Party headlessly so benchmarks and golden replays have input.
   let autoPilot (w: World) : Command list = PartyAi.decide w
 
-  let runEncounter (seed: uint64) (maxTicks: int) : World =
+  let runWorld (w: World) (maxTicks: int) : World =
     let rec loop (w: World) (remaining: int) =
       if remaining <= 0 || not (SimState.continues w) then
         w
       else
         loop (SimTick.step (autoPilot w) w) (remaining - 1)
 
-    loop (Content.gully seed) maxTicks
+    loop w maxTicks
+
+  let runEncounter (seed: uint64) (maxTicks: int) : World =
+    runWorld (Content.gully seed) maxTicks
 
   /// One stable, integer-only line describing how an encounter ended. The
   /// snapshot test diffs these lines instead of a median, so that balance drift
@@ -97,6 +100,8 @@ module Bench =
       Rng = Rng.streamsOf seed
       PartyBuffs = []
       Quests = []
+      Forecast = Forecast.empty
+      TotemLedger = TotemLedger.empty
       Log = [] }
 
   // =========================================================================

@@ -22,8 +22,13 @@ module SimState =
   /// engaged hostiles against packs of 3 to 4.
   let aggroRadius = 2
 
-  /// Raptors pull their neighbours in rather than dying quietly.
-  let callForHelpRadius = 10
+  /// A hurt mob shouts, and what answers is what can hear it. Ten tiles was half
+  /// a stitched room -- the radius that made the first pull of the Wailing
+  /// Caverns the whole floor at once. Four tiles is the 20 yd of this file's
+  /// 40-yd-8-tile convention: it reaches the pack (which is what "pull their
+  /// neighbours in" means; the placement puts a pack's bodies within two tiles of
+  /// its anchor) and not the pack across the gap.
+  let callForHelpRadius = 4
 
   /// The threat margins. A unit takes aggro when it exceeds the current
   /// target's threat by 10% while within melee range of the mob, or 30% while
@@ -48,6 +53,34 @@ module SimState =
   /// in `outcome`, and puts totems in the heal pool and the formation.
   let aliveParty (w: World) =
     w.Entities |> List.filter (fun e -> e.Faction = Party && alive e && e.Totem.IsNone)
+
+  /// A Warlock's summoned demon. Read off the summon's *kind* rather than its name:
+  /// `SummonSpec.CreatureType` is copied onto the summoned entity when it is built
+  /// (`SimCombat`, the `Summon` branch), every hero is `CreatureType.Humanoid`
+  /// (`Content.heroStats`), and the only `Demon` spec in the roster is the Imp
+  /// (`Content.warlockDemon`). So a Party-faction body with this type is a demon
+  /// that somebody called, and nothing else can answer to the test.
+  ///
+  /// The Hunter's pet is the other summon and it is a `Beast`, which is the whole
+  /// distinction: a pet is a party member with abilities behind it and a Mend Pet
+  /// that can hold it up, while a demon is a damage cooldown its owner loses for
+  /// free. That is why one stays in the heal pool and this one does not.
+  let isSummonedDemon (e: Entity) = e.Faction = Party && e.CreatureType = CreatureType.Demon
+
+  /// The bodies a healer may spend mana on. `aliveParty` minus summoned demons.
+  ///
+  /// A healer's decision procedure prices every press against the hole it closes,
+  /// and a demon is a hole that cannot be closed: the Imp is a 420-health body at
+  /// level 24, so a full-rank heal lands almost entirely as overheal and a downrank
+  /// still clips. Measured on the Shaman it was 19 502 mana over 12 seeds for
+  /// 8 895 healing, 0.81 per point — the worst row in the ledger by construction,
+  /// because a 420-health pool caps a heal at 420 however cheaply the rank is bought.
+  /// Excluding the body is the only fix that does not require a heal cheaper than the
+  /// bottom of the level 1-60 ladder, which does not exist.
+  ///
+  /// Kept beside `aliveParty` rather than inline at the call sites so the healer's
+  /// decision and the metric that scores it cannot disagree about who was in the pool.
+  let healableParty (w: World) = aliveParty w |> List.filter (isSummonedDemon >> not)
 
   /// In combat while something hostile is engaged with the party. This is the
   /// same test the party uses to end a pull, and the one regeneration asks:
@@ -146,6 +179,16 @@ module SimState =
     |> List.exists (fun e ->
       alive e && e.Id <> self && e.Totem.IsNone && e.Pos = p && e.Destination.IsNone)
 
+  /// The strict version: a tile is occupied if any living body is standing on it,
+  /// whatever that body is doing. `claimedByOther` is a planning hint and lets a
+  /// mover keep its transit tile, which is right for choosing where to walk and
+  /// wrong for a write that moves a body without going through
+  /// `SimTick.advanceMovement` — a Charge or a summon placed on a mid-step body's
+  /// tile is two bodies on one square, and nothing downstream undoes it.
+  let occupiedByOther (w: World) (self: EntityId) (p: Pos) =
+    w.Entities
+    |> List.exists (fun e -> alive e && e.Id <> self && e.Totem.IsNone && e.Pos = p)
+
   /// A free tile to stand on next to `spot`, preferring the one nearest the mover.
   ///
   /// This exists because aiming A* at a tile somebody is standing on is a goal
@@ -169,6 +212,7 @@ module SimState =
   // -- auras ----------------------------------------------------------------
 
   let isSleeping (e: Entity) = e.Auras |> List.exists Aura.isSleeping
+  let isStealthed (e: Entity) = e.Auras |> List.exists Aura.isStealthed
 
   let isShifted (e: Entity) = e.Auras |> List.exists Aura.isSerpentForm
 
@@ -210,25 +254,34 @@ module SimState =
   /// Recompute a Hostile's aggression target from its threat table. The current
   /// target is only displaced by the 10% / 30% margins; with an empty table the
   /// mob simply notices the nearest Party member.
+  ///
+  /// A stealthed member is invisible here — threat table, nearest-noticed
+  /// fallback and even `ForcedTarget` all refuse it — which is the whole of what
+  /// Vanish buys.
   let resolveTarget (m: Entity) (w: World) : EntityId option =
-    match m.ForcedTarget |> Option.bind (aliveMember w) with
+    let seen =
+      aliveParty w |> List.filter (fun p -> not (isStealthed p))
+
+    let seenMember (id: EntityId) = seen |> List.tryFind (fun p -> p.Id = id)
+
+    match m.ForcedTarget |> Option.bind seenMember with
     | Some p -> Some p.Id
     | None ->
       let tracked =
-        aliveParty w
+        seen
         |> List.map (fun p -> p, threatOf p.Id m)
         |> List.filter (fun (_, t) -> t > 0)
 
       match tracked with
       | [] ->
-        aliveParty w
+        seen
         |> List.sortBy (fun p -> Pos.chebyshev m.Pos p.Pos)
         |> List.tryHead
         |> Option.map (fun p -> p.Id)
       | _ ->
         let top, topThreat = tracked |> List.maxBy snd
 
-        match m.Target |> Option.bind (aliveMember w) with
+        match m.Target |> Option.bind seenMember with
         | None -> Some top.Id
         | Some cur ->
           let curThreat = threatOf cur.Id m
@@ -329,6 +382,11 @@ module SimState =
             Auras = t.Auras |> List.filter (fun a -> not (Aura.endsOnHostileAction a)) })
       w
 
+  /// Vanish's stealth ends when its holder lands an attack of its own
+  /// (`SimCombat`, the damage sites). Taking damage does not end it.
+  let breakStealth (id: EntityId) (w: World) =
+    mapEntity id (fun e -> { e with Auras = e.Auras |> List.filter (fun a -> not (Aura.isStealthed a)) }) w
+
   /// Add threat to one Mob, scaled by the *generating* entity's multiplier.
   /// Only the Party generates threat; a Mob healing or hitting generates none.
   let addThreat (mobId: EntityId) (source: Entity) (amount: int) (w: World) =
@@ -366,3 +424,388 @@ module SimState =
   /// Name lookup for log messages.
   let internal nameOf (id: EntityId) (w: World) =
     tryEntity id w |> Option.map (fun e -> e.Name) |> Option.defaultValue "?"
+
+/// How long the fight has left, and how much mana that says a healer must keep.
+///
+/// The rule being implemented: a healer that finishes a pull at 90% mana had more
+/// to give, but how much more depends on how much longer it has to keep healing.
+/// A long pull is a pool to ration; the last heal-clock is free. So the budget is
+/// not a threshold on the pool — it is the pool minus the reserve that the fight's
+/// remaining length implies. A flat "cast above X% mana" cannot express that,
+/// because it answers a question about the present with no reference to the future:
+/// it spends while the pull is long and stops when the pull is nearly over, which is
+/// exactly backwards.
+///
+/// Cost per Tick is a handful of floats and two O(1) mean updates, and `sim healers`
+/// runs 30 seeds \u00d7 ~800 Ticks \u00d7 5 bodies inside the test suite, so nothing here is
+/// allowed to allocate a graph.
+  module ManaBudget =
+
+    /// Ticks of history the party's damage mean represents: four seconds.
+    ///
+    /// The party's own clocks set the floor. Its melee swings land on a 2.0\u20133.1 s clock
+    /// per body and its casts run 2.5\u20133.5 s, so a mean shorter than four seconds is at
+    /// the mercy of one landed or dodged swing: at three seconds a single body's hit is
+    /// a fifth of the history, which is the jitter the old trailing sum showed as a
+    /// 4 s \u2194 29 s forecast. Four seconds carries two full swing clocks, so every melee
+    /// body lands twice inside the mean, and it spans a complete cast so a caster's
+    /// contribution enters as a rate. It lags a real change in output by at most one
+    /// cast, and the measured `sim ttk 9` trace at 60 and 80 Ticks differed by under 1%
+    /// at the sampled Ticks, so the longer of the two is the better-smoothed choice.
+    let damageWindow = 80
+
+    /// Ticks a mean needs before it is allowed to answer: one second.
+    ///
+    /// Below this the estimate is a prior built from a handful of Ticks, which is
+    /// exactly the early-fight noise the mean exists to remove.
+    let minSamples = 20
+
+    /// The margin on the projected burn, in basis points: 25% on top.
+    ///
+    /// A heal that lands late is a death and one that lands early is only mana. The
+    /// forecast is a rate times a horizon and can be wrong in either factor, so the
+    /// rate carries the margin; the heal floor that used to be flat is now the scaled
+    /// `safety` in `plan`.
+    let safetyBp = 12500
+
+    /// Ticks of history the healer's draw is averaged over: twenty seconds.
+    ///
+    /// Deliberately not the party's three-second window. Damage lands continuously, so a
+    /// short window reads a rate; healing arrives in bursts with nothing between them, so
+    /// a short window mostly reads zero. Measured, `sim ttk 3` on seed 1: the healer's
+    /// draw per Tick at 20 s intervals came out 1.05, 3.33, 3.33, 4.38, 2.55, 0.00, 6.87,
+    /// 1.05, 0.00, 0.00 \u2014 the zeros are the seconds between the pulls and the 6.87 is
+    /// one burst, and multiplied by a 50-second horizon either one is a reserve off by an
+    /// order of magnitude. Twenty seconds is several heal cycles, which is the timescale
+    /// the healing *requirement* actually has.
+    ///
+    /// Stored as an exponentially weighted mean scaled by this window, updated in O(1).
+    let burnWindow = 400
+
+    let empty = Forecast.empty
+
+    /// Effective damage against a hostile. Overkill is not damage: the forecast
+    /// divides the health still standing by the rate it is coming off, so counting a
+    /// 200-point hit on a 5 hp corpse as 200 would claim the fight is forty times
+    /// shorter than it is, and shortening the forecast is the one direction that makes
+    /// the healers spend.
+    let recordDamage (amount: int) (w: World) =
+      if amount <= 0 then
+        w
+      else
+        let f = w.Forecast
+
+        { w with
+            Forecast = { f with DamageThisTick = f.DamageThisTick + amount } }
+
+    /// Mana a healer paid for something that is not damage.
+    let recordSpend (healer: EntityId) (amount: int) (w: World) =
+      if amount <= 0 then
+        w
+      else
+        let f = w.Forecast
+        let paid = f.BurnThisTick |> Map.tryFind healer |> Option.defaultValue 0
+
+        { w with
+            Forecast = { f with BurnThisTick = f.BurnThisTick |> Map.add healer (paid + amount) } }
+
+    /// Mana a healer paid for damage. Kept apart from `recordSpend` because `settle`
+    /// subtracts it back out of the pool drift it measures, and because it is the one
+    /// kind of spend the reserve must never charge for: if the mana the gate paid out
+    /// were charged to the reserve that licensed it, every payout would raise the bar
+    /// and the gate would strangle itself.
+    let recordDamageSpend (healer: EntityId) (amount: int) (w: World) =
+      if amount <= 0 then
+        w
+      else
+        let f = w.Forecast
+        let paid = f.HealDamageThisTick |> Map.tryFind healer |> Option.defaultValue 0
+
+        { w with
+            Forecast =
+              { f with HealDamageThisTick = f.HealDamageThisTick |> Map.add healer (paid + amount) } }
+
+    /// Close one Tick: move the accumulators into the means and clear them. Called
+    /// once at the end of `SimTick.step`, which hands over the World as the Tick found
+    /// it, because a Tick is the sample and a hit is not.
+    ///
+    /// The damage mean is an EWMA in O(1): `acc - acc / window + sample` would hold
+    /// `mean * window` at rest, but that subtraction truncates to zero for small
+    /// accumulators and the mean would never forget, so the decay multiplies first
+    /// (`acc * (window - 1) / window`) and reaches zero when nothing is hitting. That
+    /// decay replaces the old reset between pulls: a pack dying is attrition and must
+    /// not move the rate, a new pack joining only lengthens the health the same rate
+    /// divides into, and a rest fades the rate on its own instead of pretending the
+    /// party's damage fell to zero. A wipe is the one event that ends the run of pulls,
+    /// so that is the one event that clears the Forecast.
+    ///
+    /// The healer's sample is its **net drain**, not its gross spend: what the pool
+    /// actually lost to everything except damage. That is the quantity the reserve
+    /// needs, because mana regenerated during the fight pays part of the fight. Charging
+    /// the reserve for gross spend double-counts the regeneration and reserves about ten
+    /// pools for a one-pool fight, which is how the first cut of this policy ended up
+    /// refusing every damaging cast \u2014 measured, `healers 9`: the Priest's damage spend
+    /// fell 7%, its healing need rose 15% because the kills got slower, and it finished
+    /// the pull on *less* mana than before.
+    ///
+    /// `drain = (pool before - pool after) - damage spend`. The gross spend cancels out
+    /// of that identity, so no regeneration model is needed and the five-second rule,
+    /// the two-second server tick and the pool clipping at full are all accounted for by
+    /// measurement rather than by a second implementation of them.
+    let settle (before: World) (w: World) =
+      let engagedHostiles (w: World) =
+        w.Entities |> List.filter (fun e -> e.Faction = Hostile && alive e && e.Engaged)
+
+      if List.isEmpty (aliveParty w) then
+        { w with Forecast = Forecast.empty }
+      else
+        let f = w.Forecast
+
+        let healers =
+          w.Entities
+          |> List.filter (fun e -> e.Faction = Party && e.Role = Some Healer)
+          |> List.map (fun e -> e.Id)
+
+        let drainOf id =
+          match tryEntity id before, tryEntity id w with
+          | Some b, Some a ->
+            let damage = f.HealDamageThisTick |> Map.tryFind id |> Option.defaultValue 0
+            b.Resource - a.Resource - damage
+          | _ -> 0
+
+        // An exponentially weighted mean over `burnWindow`, in O(1) per healer:
+        // `acc - acc / burnWindow + sample` holds `mean * burnWindow` at rest, so a step
+        // change in the draw is assimilated over about twenty seconds and a single quiet
+        // second cannot erase it. A plain 400-element list would cost a truncation walk
+        // per Tick per healer, which the 30-seed test suite cannot afford.
+        let drain =
+          healers
+          |> List.fold (fun acc id ->
+            let past = acc |> Map.tryFind id |> Option.defaultValue 0
+            Map.add id (past - past / burnWindow + drainOf id) acc) f.HealerDrain
+
+        let damage =
+          (f.PartyDamage * (damageWindow - 1)) / damageWindow + f.DamageThisTick
+
+        // The engaged set is the pull's identity. Growth is a new pull joining the
+        // fight and earns a new epoch; shrinkage is a corpse and earns nothing. A
+        // subset test, not equality: a hostile dying must not look like a new pack.
+        let engaged = engagedHostiles w |> List.map (fun e -> e.Id) |> Set.ofList
+        let grew = not (Set.isSubset engaged f.EngagedHostiles)
+
+        { w with
+            Forecast =
+              { PartyDamage = damage
+                DamageTicks = min damageWindow (f.DamageTicks + 1)
+                EngagedHostiles = engaged
+                EngagementEpoch = (if grew then f.EngagementEpoch + 1 else f.EngagementEpoch)
+                HealerDrain = drain
+                DamageThisTick = 0
+                BurnThisTick = Map.empty
+                HealDamageThisTick = Map.empty } }
+
+    /// The hostiles the party is actually fighting. The engaged test is the one that
+    /// matters \u2014 `aliveHostiles` includes the room's sleepers, and a pull is one pack,
+    /// not a floor.
+    let private engagedHostiles (w: World) =
+      w.Entities |> List.filter (fun e -> e.Faction = Hostile && alive e && e.Engaged)
+
+    /// Damage still to do: every hostile the party is actually fighting, at the health
+    /// it has left.
+    let hostileHp (w: World) = engagedHostiles w |> List.sumBy (fun e -> e.Health)
+
+    /// The healer's own dearest heal, which is the margin's floor: whatever the
+    /// forecast gets wrong about the rate or the horizon, a healer holding this much can
+    /// always pay for one more real heal. It is also the entire reserve for a healer with
+    /// no history yet \u2014 the first second of a pull has no rate, and opening it with a
+    /// nuke because nothing has been observed is the one wrong answer.
+    let private oneHealCost (h: Entity) =
+      h.Abilities
+      |> List.filter (fun a ->
+        a.Effects
+        |> List.exists (function
+          | Heal _
+          | HealOverTime _ -> true
+          | _ -> false))
+      |> List.map (fun a -> a.ResourceCost)
+      |> function
+        | [] -> 0
+        | costs -> List.max costs
+
+    /// The clock a heal's mana must respect: the slowest heal the healer carries.
+    ///
+    /// A heal that finishes casting after the pull dies was never needed, so the last
+    /// slot in the reserve is worth one delivery time, not a whole heal. The slowest
+    /// cast is the one a late reserve would be too late for: the Priest's Heal is 3.0 s,
+    /// the Shaman's Healing Wave 3.0 s, the Paladin's Holy Light 2.5 s and the Druid's
+    /// Healing Touch 3.5 s. Instants are still spaced by the 1.5 s global cooldown the
+    /// sim charges, so a kit that is all Renew still has a non-zero delivery clock.
+    let private healDeliveryTicks (h: Entity) =
+      let slowest =
+        h.Abilities
+        |> List.filter (fun a ->
+          a.Effects
+          |> List.exists (function
+            | Heal _
+            | HealOverTime _ -> true
+            | _ -> false))
+        |> List.map (fun a -> a.CastTicks)
+        |> function
+          | [] -> ticks 0
+          | casts -> List.max casts
+
+      max (secTicks 1.5) slowest
+
+    /// Heals the margin caps at: two.
+    ///
+    /// Two is the floor for a long fight, not a fixed charge. One is not enough there,
+    /// and the measurement is why: the reserve is the only thing between a healer's last
+    /// damage cast and its last heal, and at 30 seeds with a one-heal margin the Priest
+    /// finished 4 pulls out of 30 on literally no mana and its `hps` fell 2.8% \u2014 over
+    /// the 2% the operator allows \u2014 because the healing it could not pay for was the
+    /// healing the pull needed at the moment it ended. But a fixed two-heal floor also
+    /// cannot shrink, and that condemned the endgame: at `ttk 4` it reserved 706 against
+    /// a pool of 500 while the draw term was ~10, so the gate refused damage with four
+    /// seconds left. `plan` therefore keeps `marginHeals` only while the horizon can
+    /// still deliver that many heals and drops the count as it falls.
+    let marginHeals = 2
+
+    /// Everything the gate decides on, in one record, so `sim ttk` prints the numbers
+    /// the gate used rather than a second derivation of them that can drift from it.
+    type DamagePlan =
+      { /// Effective hit points still standing in the pull.
+        HostileHp: int
+        /// Party damage per Tick from the EWMA, and the same per second.
+        DamagePerTick: float
+        Dps: float
+        /// Seconds the pull has left at the mean's own rate. `infinity` when there is
+        /// no rate to divide by, which the gate reads as "conserve".
+        SecondsToKill: float
+        /// Net mana the healer has been drawing from its own pool per Tick over the
+        /// window: gross non-damage spend less regeneration. Negative means it was
+        /// topping the pool up.
+        BurnPerTick: float
+        /// The margin: the heals that can still land before the pull dies, at the
+        /// healer's own dearest heal price. Shrinks with the horizon.
+        Safety: int
+        /// Mana the healer must still be able to spend: net drain \u00d7 horizon + margin.
+        Reserve: int
+        Pool: int
+        /// What is left over for damage. Negative means nothing is.
+        Budget: int
+        /// The pull's generation: increments when a new pack joins the engaged set.
+        /// Zero before the first engage; a shrink or a corpse does not move it.
+        EngagementEpoch: int
+        /// Ticks the forecast puts between here and the end of the pull.
+        TicksLeft: float
+        /// Ticks of party damage behind the forecast. Below `minSamples` every number
+        /// above is a prior, not a measurement.
+        Samples: int }
+
+    let plan (w: World) (h: Entity) : DamagePlan =
+      let f = w.Forecast
+      let samples = f.DamageTicks
+      let perSecond = float (secTicks 1.0)
+
+      // The accumulator holds `mean * damageWindow`, so dividing by the window is the
+      // mean. There is no per-sample division to normalise: the EWMA already carries
+      // its own history weight, and a fresh accumulator understates the rate (which
+      // reads as a longer fight, the conservative direction) until the warm-up ends.
+      let damagePerTick = float f.PartyDamage / float damageWindow
+
+      let dps = damagePerTick * perSecond
+      let hp = hostileHp w
+      let trusted = samples >= minSamples && damagePerTick > 0.0
+
+      let secondsToKill =
+        if hp <= 0 then
+          // Nothing is engaged: the pull is over and nothing is owed.
+          0.0
+        elif trusted then
+          float hp / dps
+        else
+          infinity
+
+      // Ten minutes caps the arithmetic on a pull the party cannot finish. Anything
+      // longer than that is "conserve forever" either way, and an uncapped float would
+      // overflow the int below.
+      let ticksLeft = min (600.0 * perSecond) (secondsToKill * perSecond)
+
+      let burnPerTick =
+        f.HealerDrain
+        |> Map.tryFind h.Id
+        |> Option.map (fun acc -> float acc / float burnWindow)
+        |> Option.defaultValue 0.0
+
+      // The margin is the heals that can still land before the pull dies, not a fixed
+      // pair. A heal takes `healDeliveryTicks` to arrive, so a horizon shorter than one
+      // cast has room for no heal at all and a horizon of two casts has room for one.
+      // This is the endgame fix: `2 x dearest heal` cannot shrink, which is what left a
+      // 706 reserve against a 500 pool at `ttk 4` while the draw term was ~10, and
+      // refused a Smite with four seconds left. `marginHeals` still caps a long pull.
+      let healsLeft =
+        if ticksLeft <= 0.0 then
+          0
+        else
+          min marginHeals (int (ticksLeft / float (healDeliveryTicks h)))
+
+      let safety = healsLeft * oneHealCost h
+
+      // A healer whose pool is drifting *up* owes the fight nothing, and a negative
+      // reserve would be a licence to spend mana it does not have. The signed value is
+      // kept in `BurnPerTick` because "topping up" is a different measurement from
+      // "breaking even" and `sim ttk` should say which one it saw.
+      let drawn = max 0.0 burnPerTick
+
+      let reserve =
+        // `trusted` and not the finiteness of `ticksLeft`: the ten-minute cap below is
+        // applied to an infinite `secondsToKill` too, so testing the capped value never
+        // fires. Measured, `sim ttk 2` before this: a Tick whose window held 19 samples
+        // and no measurable rate printed `ttk Infinity` beside `reserve 259`, i.e. the
+        // one case that must conserve was handing out the whole pool.
+        if not trusted then
+          // No rate: hold the whole pool. A healer that has never been observed
+          // spending has no idea what the fight will cost it, and the cheap error is to
+          // heal from full rather than to nuke from full.
+          h.MaxResource
+        else
+          int (drawn * ticksLeft * float safetyBp / 10000.0) + safety
+
+      { HostileHp = hp
+        DamagePerTick = damagePerTick
+        Dps = dps
+        SecondsToKill = secondsToKill
+        BurnPerTick = burnPerTick
+        Safety = safety
+        Reserve = reserve
+        Pool = h.Resource
+        Budget = h.Resource - reserve
+        EngagementEpoch = f.EngagementEpoch
+        TicksLeft = ticksLeft
+        Samples = samples }
+
+    /// The cheapest damaging spell the healer could press, which is the least the gate
+    /// has to allow before any damage can flow at all.
+    let cheapestDamage (h: Entity) =
+      h.Abilities
+      |> List.filter (fun a -> Ability.isDamaging a && a.ResourceCost > 0)
+      |> List.sortBy (fun a -> a.ResourceCost)
+      |> List.tryHead
+
+    /// The gate: a damaging spell may be paid for only out of what the reserve does not
+    /// claim. Long pull \u2192 the reserve exceeds the pool \u2192 no damage at all. Short pull
+    /// \u2192 the reserve shrinks to the heals that can still land \u2192 almost anything.
+    let maySpendOnDamage (w: World) (h: Entity) (cost: int) = (plan w h).Budget >= cost
+
+    /// Whether this healer may spend on damage at all, asked once for the whole
+    /// fallback rather than per spell.
+    ///
+    /// The fallback asks `rangedOrders` for the next thing to press, and `rangedOrders`
+    /// answers with a `MoveTo` when it is out of reach \u2014 so filtering its answer after
+    /// the fact still lets a refused healer walk towards the mob it may not hit. The
+    /// operator's rule is that a healer does not walk in for damage it cannot cast, so
+    /// the test goes before the call and a broke healer stands still.
+    let mayDamage (w: World) (h: Entity) =
+      match cheapestDamage h with
+      | Some a -> maySpendOnDamage w h a.ResourceCost
+      | None -> false

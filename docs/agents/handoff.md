@@ -33,6 +33,72 @@ SDK 8 and the pre-commit build hook dies on `WowRoguelike.slnx` (`domain.md` §4
 dotnet hook runs `mise exec -- dotnet …` for exactly that reason, so a hook never depends
 on which SDK the caller's PATH happens to resolve.
 
+## Where the work stands after the story, opener, packs and runners session
+
+The session that landed on top of the map-visual WIP (SM map extraction, the
+Game shell's `visual:wc` view, the ink story) wired four things end to end.
+Everything below is measured on the tree this session left, **384 passed, 0
+failed** (`dotnet test tests/WowRoguelike.Tests -c Release`), hooks green
+(`mise run hooks-run`), bench snapshot refreshed with `UPDATE_SNAPSHOTS=1`.
+
+**The story fights.** `start_encounter(boss_id)` no longer just logs:
+`Content.bossEncounter` maps each of the five ink ids to a real encounter (the
+party against that boss on the gully map), `Bench.runWorld` drives any world
+headlessly, `sim story` runs each fight deterministically on seed 1 and prints
+`Bench.summary`, and a wipe ends the story. Mutanus arrives *awake* — his
+`Dormant` flag belongs to the full dungeon's quest wave, and the story knot is
+that awakening.
+
+**The opener is a sequence, and the pull opens on it** (operator direction).
+Sap is 45 s; the pre-pull books one control per actor on distinct targets
+(Polymorph prioritising a caster, Hibernate on its vanilla Beast/Dragonkin set
+— `canControl` mirrors the engine's own refusals so an "is immune" never burns
+the opener); a caster out of range walks to the Tank's side while the pull is
+held; once a control has landed the Tank Charges the nearest *uncontrolled*
+focus, gated on the landing noticing nothing outside the focus's own cluster.
+Three gates had to close for that to work, each found by measurement: the
+damage lane opened the pack on the booking tick (Arcane Rupture beat the sheep
+to it), the Tank's `spot` walk bypassed the hold through `onTank`'s `Some f`
+arm, and `strikeTarget`'s pre-fight tie-break put the sleeper at the head of
+the pull — charging a sleeper is a refused cast. Survival on the stitched
+dungeon moved from first-deaths at 2125/1680/5280/1840 (seeds 1-4) to a run
+that reaches the Crag on every seed.
+
+**Packs, not scatter** (operator direction after `visual:wc`'s first pull). The
+stitched caverns were a room-quota scatter and `callForHelpRadius` was ten
+tiles — half a room — so the first pull of the gully was the whole floor at
+fifteen mobs. Now each room's sourced totals (`.pi/research/wc/mobs.md` §6,
+unchanged) stand in knots of ~4 around anchors ≥ 7 tiles apart, Anacondra with
+two guards (the `gullyAt` shape) and each boss alone, overflow on the farthest
+tile rather than dropped, and the radius is 4 — the 20 yd of this file's
+40-yd-8-tile convention. The first pull is 7; the biggest simultaneous pull
+anywhere is 12 (the Crag, the real dungeon's densest room too). **Seeds 1 and 3
+now clear the whole stitched dungeon** — `EncounterCleared`, five alive —
+where every earlier version wiped inside 3 000 ticks. One placement lesson is
+recorded in the code: a graded fallback (packs at 3 tiles) was tried and
+reverted — a knot that close fights as one 12-mob pull, while a far sparse
+line fights as rolling local segments, because a hurt mob only wakes its own
+4-tile neighbourhood.
+
+**Mobs flee, and the party stops them** (operator direction). A humanoid at a
+fifth of its health runs for the nearest un-engaged group (`SimTick`
+`mobDecisions`, "X flees toward Y"); the answer is `Effect.Cripple` (the
+`Crippled` aura `advanceMovement` already priced) carried by sourced rows —
+Hamstring (W9), Wing Clip (hunter.md), Frostbolt's chill (r3 6 s / r4 7 s
+direct), Frost Nova's 8 s root (M3, single-target by `shortcut:`) — plus the
+Rogue's Gouge/Blind and the Druid's Roots that were already there. `PartyAi`'s
+`antiFlee` presses the first available stopper on a runner, ranked hard stops
+before snares; Hamstring is the workhorse in measurement (112 cripples on the
+cleared seed-1 run). The Warlock's Curse of Exhaustion is booked in `TODO.md`
+unsourced rather than invented.
+
+Not landed, still open in `TODO.md`: the Hunter's freezing-trap pull (traps are
+not in the vocabulary), the Succubus (no demon bodies yet), a true stealthed
+Sap walk (the engine's proximity aggro does not know about stealth — a rogue
+walking to Sap range of a dense pack is noticed before the Sap lands), seeds
+2/4 of the stitched clear (per-seed geometry), and the visual shell still has
+no dialogue UI for the story.
+
 ## Remaining work
 
 Ordered by what unblocks what. Each row names the artifact that carries the detail instead
@@ -41,10 +107,10 @@ of repeating it.
 | # | Item | State |
 |---|---|---|
 | 1 | **The feral park is unresolved, and it is the only thing blocking the cat.** An operator direction (`m01837`) says not to test Bear, Cat or Moonkin; `7a12e52` unparked Bear and Cat anyway, so the direction is only half in force. There is now exactly **one** `Skip` in the suite (`Tests.fs:7412`, Moonkin — the "ten skipped tests" the direction refers to are gone). | needs the operator: does the park apply again now that both feral specs have builds? |
-| 2 | **The cat has a build and no behaviour.** No roster seat, so no bench row and no `sim runs`/`comps` cell; `PartyAi` has no cat branch, so it presses a Rogue ordering at a spec that spends combo points. `druid-feral.md` §10 carries the build; § *The cat's build landed unmeasured* below carries the two gaps. | blocked by 1 |
-| 3 | **Moonkin is the last parked spec** - the one `Skip`, `Talents.none`, build `oCaYYKFYJLDAB--FAAoAC` (Balance 39 / Resto 12), note `druid-moonkin.md`. **14 of its 19 points need an axis**, the worst ratio in the port, so it is a *consequence* of the axis queue rather than an item beside it. | needs an axis (14 of 19) |
-| 4 | **The axis queue is the port.** 62 of 177 talent spends are data edits; 107 need a model change. Expressible today: Hunter **51/51** (done), Mage 9/19, Priest 8/16, Paladin 8/17, Warlock 8/17, Druid (cat) 7/21, Warrior 6/18, Rogue 6/18, Shaman 1 landed (7 of 16 expressible). The eight recurring axes - self-resource grants, dispels, chain heals, stacking self-buffs, damage-taken debuffs, temporary health, per-stance threat, `Blocks` with a magnitude - each unlock talents in three or four classes, which is why § *The four blockers that decide the order* orders the work by axis and not by class. | pick the next one by multiplicity |
-| 5 | **The Warlock ends every arm at 99-100% mana.** Not a bug report and not yet explained: something in the class's spend path does not consume what the bars report. | unexplained |
+| 2 | **The cat has a build and no behaviour.** ~~No roster seat~~ — resolved since: the cat lane landed (`PartyAi.catOrders`), it has seat and melee-slot A/B rows in `docs/agents/handoff-healer-economy.md` §4, and the operator has ruled the melee cat carries no Tree form (contract test). The two gaps recorded in § *The cat's build landed unmeasured* below were closed with it. | ~~blocked by 1~~ done |
+| 3 | **Moonkin is the last parked spec** - the one `Skip`, `Talents.none`, build `oCaYYKFYJLDAB--FAAoAC` (Balance 39 / Resto 12), note `druid-moonkin.md`. **14 of its 19 points need an axis**, the worst ratio in the port, so it is a *consequence* of the axis queue rather than an item beside it. Measured since: it is the best fifth seat (see `handoff-healer-economy.md` §4). | needs an axis (14 of 19) |
+| 4 | **The axis queue is the port.** 62 of 177 talent spends are data edits; 107 need a model change. Expressible today: Hunter **51/51** (done), Mage 9/19, Priest 8/16, Paladin 8/17, Warlock 8/17, Druid (cat) 9/21, Warrior 7/18, Rogue 6/18, Shaman 2 landed (7 of 16 expressible). **A3 — the percent stat multiplier — is landed** (Warrior Toughness, feral Thick Hide / Heart of the Wild / Predatory Strikes, Shaman Ancestral Knowledge; see § *A3 is built* at the end of this file). The eight recurring axes - self-resource grants, dispels, chain heals, stacking self-buffs, damage-taken debuffs, temporary health, per-stance threat, `Blocks` with a magnitude - each unlock talents in three or four classes, which is why § *The four blockers that decide the order* orders the work by axis and not by class. | pick the next one by multiplicity |
+| 5 | **The Warlock ends every arm at 99-100% mana — explained: economy, not a defect.** Measured spend = casts × cost exactly (81.5 Shadow Bolts × 210 = 17,115 mana, the measured spend); the shared deduction path at `SimCombat.fs:750/771/778` works, and no talent zeroes costs (`withTalents` `Content.fs:4493` folds `costBp`; every Warlock talent line is cast-side or damage-side). The class is over-funded: income outruns a rotation of Shadow Bolt + Curse of Agony, so the lever, if it is ever wanted, is regen share or pool — not the spend path. Rotation notes: wing level casts SB + CoA (Corruption never — CoA's `dotOf` outranks it and both share one `Corrupted` bucket); level 60 flips to Immolate spam plus Nightfall instant SBs proc'd by CoA ticks; the Imp is 1-9% of logged damage; Fear is never cast. Full report: `.pi/research/octowow/warlock-mana.md`. | explained |
 
 What is *not* remaining: the three stale claims this file carried until `HEAD` are fixed in
 that commit - the "ten `Skip`ped tests" paragraph above, the "the Druid has two builds, not
@@ -478,6 +544,7 @@ only.
 | Composition ladder — 36 cells, one healer per class | re-measured after the totem fix: 32 cells clean, 4 cells with one seed parked, 0 wipes |
 | Corridor parks — a Tank whose next step is held by a settled ally now counts as stuck | fixed: 5 of 6 park seeds clear; graveyard 5 shuffles instead, below |
 | Blessing of Kings — `Talents.PartyBuffs`, a percentage column in `buffed` | implemented, tested, **−5.4% / −2.5%** clear time, above |
+| Combat animations in the graphical client — cast bars that fill and a caster pulse (state-driven), and a play-by-play layer over the log: floating damage/heal/tick numbers, melee slashes with ring flashes, projectiles for anything with room between the two ends, and control-verb captions (stuns, taunts, shifts, interrupts, afflicts, fizzles) | shipped in `src/WowRoguelike.Game/Program.fs`: `Fx`/`FxParse` module-level, `spawnFx` in `advance`, draw pass before the side panel; parser covers 85% of a real run's log (the unmatched is threat/combo-point spam, static by design); **`mise run visual:sm` runs all four SM wings back-to-back at median difficulty** (`--sm-tour` in the Game: no menu, `SimState.continues` decides a wing is over, final frame held 5 s with a CLEARED/WIPED heading, then the next wing; `mise run visual:wc` is the Wailing Caverns counterpart, `--wc-tour` through its three bands); Game builds 0/0, smoke-tested 12 s on `:0` (graveyard L33 ticking live) |
 
 ## Totems are scenery (changed after the above)
 
@@ -526,7 +593,8 @@ constraint.
 
 And the part worth knowing before the next session plans anything: **the rest of A1 is
 blocked by content, not by the vocabulary.** `domain.md` §"What is left of A1" has the
-table — no Bloodrage in the Warrior kit, no Crusader Strike or Holy Shock in the Paladin's,
+table — no Bloodrage in the Warrior kit, no Crusader Strike in the Paladin's
+(Holy Shock landed since — § "The Paladin package (m02387) is built" below),
 no source giving the Shaman's two numbers, and Moonkin parked. A8 (haste) and A9 (percent
 multipliers) were ranked second and third by the inventory and **no landed kit has a
 talent that would use either** — there is no Flurry, no Aspect of the Hawk, no Blade Rush
@@ -1374,6 +1442,161 @@ path noise.
   summary as evidence, then check the diff.
 - **Revert temporary probes**; `git status` should show only intended work when you
   stop.
+
+## A3 is built (the percent-stat axis), and the SM widening attempt is reverted
+
+**Axis A3 - the percent stat multiplier - landed and verified** (delegated worker,
+report re-verified from the tree: build 0 errors / 0 warnings, suite **365/365**
+- 360 prior + 5 new - with the bench snapshot regenerated by the suite's own
+update path and all 30 bench seeds still `EncounterCleared`):
+
+- `Domain.fs` - `Traits.ItemArmorBp` (`Domain.fs:1614`, the per-form gear-armour
+  percent), and six `Talents` fields with docs (`Domain.fs:1728-1751`):
+  `AllStatsBp`, `StaminaBp`, `StrengthBp`, `AttackPowerBp`, `ItemArmorBp`,
+  `BlockValueBp`.
+- `Content.derive` - all folds integer bp, applied before pool derivation:
+  `AllStatsBp` on every stat (`Content.fs:3848-3859`), `StaminaBp` in the health
+  pool (`:3864-3866`), `gearArmor = d.Armor * (10000 + traits.ItemArmorBp +
+  talents.ItemArmorBp) / 10000` (`:3907`), the Strength, BlockValue and
+  AttackPower folds (`:3911-3925`).
+- Talent rows, one note-citing comment each: Warrior Toughness (`:4183-4197`,
+  `ItemArmorBp = 1000` + `BlockValueBp = 1500`); Shaman Ancestral Knowledge
+  now `AllStatsBp = 500` (`:4084-4098`) - **resolves the recorded `shortcut:`
+  "narrowed to IntellectBp"**; feral Thick Hide / Heart of the Wild / Predatory
+  Strikes on the bear (`:5197-5223`) and HotW / PS on the cat (`:5247-5309`);
+  the Bear Form trait is now `{ Traits.none with ItemArmorBp = 18000 }`
+  (`:5437-5446`) - **resolves the recorded `shortcut:` "a per-spec armour
+  multiplier is a new field"**.
+- Tests: five new (one per talent, `Tests.fs:1461`, `:3553`, `:9734`, `:9750`,
+  `:9770`), four pins re-derived (`:1445` block value 8->9, `:2690` warrior
+  armour 8270->9076, `:3523-3548` shaman health/armour, `:9678-9731`
+  Berserk's bear arithmetic 774->876).
+- Not modelled, with reasons recorded in the spec: PS's Maul rider (the bear
+  kit is a bare `AbilityDef.kitAt` with no spell-line fold); HotW's Intellect
+  leg is data but output-inert under `FixedPool` (no feral spec derives mana).
+
+**The SM corridor widening was reverted.** The pass that opened every one-tile
+corridor to three made the wings read as Wailing Caverns with Scarlet mobs -
+the extraction's thin line weight *is* the Monastery layout, and the operator
+ruled the authentic map stands (`MapsScarlet.fs` has no `widen`, no `rawWing`;
+`scarletMonasteryAt` is a single grid again, `Content.fs:7460`). The raw-grid
+pattern is what it was before the attempt: graveyard 1-7 of 12 cleared with
+unresolved runs alive at the 24 000-tick limit (the one-wide-corridor jams
+diagnosed above - a `PartyAi` target-acquisition problem, not geometry),
+library 7-11 of 12, armory 10-12 of 12. One flag, deliberately not chased
+and now measured (25 seeds per cell, A3 landed): **the Paladin-as-healer roster
+wipes the graveyard 17 of 25** (`Warrior/Paladin/Mage/Rogue/Warlock`: cleared 6,
+wiped 17, unresolved 2, against the base roster's 16/5/4). No Paladin talent
+landed in A3 — and the diagnosis is now complete, recorded in
+`.pi/research/paladin-graveyard-wipe.md` (additive `autopsy` verb, 25 seeds per
+arm, four healer arms, outcomes reproduce `comps` exactly): **not A3, not mana,
+not interrupts — the burst window between casts.** In 16/17 wipes a Flash of
+Light (~123 hp, 1.5 s) was in flight at the first death (the tank in 12, the
+Imp in 5, 5-6 mobs alive in 11/17) while the healer sat at 100% hp; casts are
+not broken (~1 lost cast/run, ~10 pushbacks) and mana is fine (healSum 12905
+≥ priest's 11714), but the AI presses ~94 Flash to ~2 Holy Light per run, so
+the big heal effectively never happens — and the paladin is the only healer
+with zero between-cast coverage (no instant, no HoT, no shield,
+`Content.fs:4243`). The graveyard is uniquely the 4-mob pull + cleave wing
+(Sentry/Torturer cleave, radius-1). Secondary, real but not the wipe cause:
+Judgement's Range=1 keeps the healer adjacent 53% of ticks (priest 11%), ~12
+cleaves/run, self-damage up to 8024 in one seed (`isMeleeHealer`,
+`PartyAi.fs:940`). Ranked fixes in the report, NOT implemented: (1) AI burst
+policy — ≥4 mobs engaged + tank hurt → order Holy Light; (2) AI lane hygiene —
+gate melee-range nukes out of the Healer role; (3) kit — Holy Shock as the
+panic button, needing the either-target and proc-on-cast axes and an operator
+call on OctoWoW scope (ranks 2-4 UNVERIFIED in
+`.pi/research/octowow/paladin.md`). The graveyard's unresolved runs elsewhere
+sit at the 24 000-tick limit with the party alive (the corridor-jam pattern
+above); the library and armory are healthy on every roster (armory 22-25 of 25
+cleared, unresolved 0).
+
+## The Paladin package (m02387) is built — heal policy, cleave geometry, Holy Shock
+
+Operator directives, all landed and verified (worker `del_mwnw1agg_f9ba`, timed out
+on its final self-review launch **after the work was done** — suite green, comps
+complete; parent re-verified every site):
+
+1. **Heal policy** (`PartyAi.fs:778-817`, `paladinDirect`): one formula, no tank
+   special-case — Holy Light when `deficit × 10000 ≥ shareBp × hlRef` where `shareBp`
+   is the operator's `max(0.80 − 0.25 × (attackers − 1), 0.05)` and `hlRef` the
+   talented Holy Light heal; Flash of Light below it, so "Flash for minor damage"
+   falls out.
+2. **Cleave geometry**: enemy cleave is a 90° front cone — the cleaver's three
+   forward tiles toward its target (`SimCombat.fs:1330-1364`); player cleave stays
+   a full circle by explicit operator ruling (`:891`). Melee positioning: only the
+   tank stands in the arc; Rogue/cat/melee-stepping healers seek the behind tile
+   (`behind`/`behindOf`/`behindSpot`, `PartyAi.fs:302-332`), with a wall/pack
+corridor fallback the map overhaul's tank pull-back is specced to attack.
+3. **Holy Shock** (`holyShockRanks`, `Content.fs:831`): one rank, L30, instant,
+   Range 8, 150 mana / 30 s CD (both `shortcut:`-marked UNVERIFIED), heal-only per
+   the operator's m02401 ruling, Healing Light's `HealBp 1200` rides it. **Divine
+   Favor is deleted from the kit, not retuned** — OctoWoW's Divine Favor is a
+   passive Holy-Shock crit talent of the same name; keeping the old 1.12-style
+   guaranteed-crit row would leave two Divine Favours live (`SureCrit` now only
+   Priest Inner Focus). Illumination deliberately nerfed `ManaRefundOnCritBp`
+   10000 → 6000 (OctoWoW refunds 60%); Holy Power 3/3 `CritBp 600` actually wired
+   where the old comment claimed 5/5 with no record.
+
+Suite **370/370** (365 + 5 new: threshold formula, front-arc cone, Holy Shock
+heal/cooldown/rider), bench snapshot regenerated by the suite's own path.
+Comps, 25 seeds: paladin graveyard **wiped 9/25 (from 17/25)**, library 13
+cleared / 4 wiped (base 10/7), armory 21/4 (base 22/3); base arm unchanged
+(graveyard 16/25, armory 22/25, unresolved shares as before the package).
+Caveat for the next measure: base-library sits at 10 cleared / 7 wiped / 8
+unresolved — within its historical range, but the cleave/positioning change
+touched every roster's geometry, so the map overhaul's re-measure arbitrates.
+
+## Movement ruling (m02573) and the map overhaul — the deepest movement bug, closed
+
+Operator ruling, verbatim (m02573): "Characters can occupy the same tile as long as
+they are in motion. That tile can't be the destination for two entities, but one can
+be there and another can pass through it, on its way to another location."
+
+Root cause of the freeze (worker del_mwo7s881_62uk, verified): `separateStacked`
+teleports bodies with direct `Pos` writes and leaves `Destination` untouched, so a
+pushed body can end up mid-step into *its own tile* (degenerate claim). In-flight
+destinations claim nothing (`claimedByOther` is settles-only), so two bodies can
+commit the same destination cross-tick; the loser of the `yields` race keeps its
+contested step forever and never re-plans. Warrior (degenerate claim on (165,101))
+plus Imp (real step into (163,101)) froze for 20,000 ticks — and this was the true
+cause of the campaign's "alive at the 24,000-tick limit" unresolved runs, not
+corridor geometry (the SM widening attempt is reverted, see above).
+
+Fix in `src/WowRoguelike.Core/SimTick.fs`: contested-step resolution under the
+ruling — the loser drops its claim the same tick, `advanceGoals` re-plans
+immediately; degenerate claims are discarded on sight. Tests: three hermetic
+contention regressions plus the updated no-stacking contract test; suite
+**375/375**.
+
+Comps (36 rows, 25 seeds each, zero row regressions): unresolved
+**138 -> 3** — graveyard 9->0, library 36->0, armory 93->3 (the armory
+Paladin/Shaman row is 22/25: three ordinary slow fights, zero degenerate claims in
+all 25 end states). The exact seed that froze at tick 12500 now clears at 17874.
+
+Also landed by the same worker: extractor widened with a pinch invariant and
+MapsScarlet regenerated, tank pull-back AI, `visual:sm` / `visual:wc` tour plumbing
+in mise. Nothing committed (HEAD `61062e8`, all work in the tree).
+
+Art: the operator supplied correctly-cut named sprites under
+`images/Tilesets/sprites/<Dungeon>/` (13 folders). Decisions locked: WC terrain =
+its own 8 tiles; SM terrain = borrowed Shadowfang Keep gothic walls + Stockade
+cobble floor (the Scarlet sheet has no tiles — only dioramas); hero art stays on
+`sprites/classes/*`. Art wiring LANDED and parent-verified (worker del_mwocdbyu_y7o9,
+report /tmp/art-wiring-report.md): WC terrain = its own 8 resampled tiles;
+SM terrain = Shadowfang gothic/dark/courtyard walls + Stockade cobble (+cobweb)
+floors; creatures bind through a new `creatureCuts` name->sprite map plus
+`cloneBase` (trailing-number strip) inside `Program.fs`'s existing `spriteKey`;
+heroes untouched. The Release-Assets copy bug is fixed — art lives in
+`src/WowRoguelike.Game/Assets/` and the fsproj glob carries it to the Release bin
+(41 new PNGs verified there). Proof: an `[art]` console report at every
+entry/browse start — SM 4 wings 0 unbound, 0 residual blind-slice slots; WC live
+tour all wired names resolve; suite 375/375; all builds 0/0. Parent re-verified
+build + bindings. LEFT FOR THE OPERATOR: 5 WC names have no supplied cut and still
+render placeholder orbs — Deviate Lasher, Evolving Ectoplasm, Nightmare Ectoplasm,
+Skum, Verdan the Everliving (two of them are WC bosses). Taste calls unreviewed by
+eye: terrain hash ratios, cobweb density, Scarlet Tracking Hound wearing the ghoul
+cut; `tiles/scarlet-*` leftovers and unused SM mob slot files not deleted.
 
 ## Suggested skills
 
