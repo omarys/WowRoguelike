@@ -891,16 +891,15 @@ module SimTick =
             let updated = stepTowardWithClaims claims e g acc
 
             if not (obj.ReferenceEquals(updated, e)) then
+              acc <- mapEntity e.Id (fun _ -> updated) acc
+
               if e.Destination.IsNone && updated.Destination.IsSome then
                 let (EntityId idInt) = e.Id
 
                 if not (claims.Release(idInt, e.Pos)) then
-                  acc <- mapEntity e.Id (fun _ -> updated) acc
                   claims.PopulateClaimed(acc)
-                else
-                  acc <- mapEntity e.Id (fun _ -> updated) acc
-              else
-                acc <- mapEntity e.Id (fun _ -> updated) acc
+              elif e.Destination.IsSome && updated.Destination.IsNone then
+                claims.PopulateClaimed(acc)
 
       acc
 
