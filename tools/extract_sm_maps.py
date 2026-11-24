@@ -197,14 +197,14 @@ def build_armory():
 
     # 2. Training Courtyard (rectangular cloister + inner training yard)
     c.fill(21, 104, 24, 108)   # 4-wide south gate
-    c.fill(18, 87, 34, 104)    # Outer courtyard cloister
+    c.fill(18, 87, 35, 104)    # Outer courtyard cloister
     # Inner yard framing pillars/low walls with wide 4-tile openings on all 4 sides
-    c.wall(22, 91, 30, 100)
-    c.fill(24, 93, 28, 98)     # Walkable grassy training yard
-    c.fill(25, 91, 27, 92)     # North opening
-    c.fill(25, 99, 27, 100)    # South opening
-    c.fill(22, 94, 23, 97)     # West opening
-    c.fill(29, 94, 30, 97)     # East opening
+    c.wall(22, 91, 31, 100)
+    c.fill(24, 93, 29, 98)     # Walkable grassy training yard
+    c.fill(25, 91, 28, 92)     # North opening (4-wide)
+    c.fill(25, 99, 28, 100)    # South opening (4-wide)
+    c.fill(22, 94, 23, 97)     # West opening (4-wide)
+    c.fill(30, 94, 31, 97)     # East opening (4-wide)
 
     # 3. North Staircase & Vestibule into Armory Hall 1
     c.fill(26, 82, 29, 87)     # 4-wide stairs north
@@ -228,24 +228,26 @@ def build_armory():
     c.wall(39, 44, 40, 45)     # South central pillar
 
     # 7. Northwest Guardroom & Long Upper Corridor running east to Herod's Arena
-    c.fill(29, 31, 31, 34)     # 4-wide west doorway from Armory Hall 2
-    c.fill(24, 30, 29, 36)     # NW Guardroom
-    c.fill(25, 20, 28, 30)     # 4-wide north passage
-    c.fill(25, 20, 52, 23)     # Long straight eastbound hallway
+    c.fill(28, 31, 31, 34)     # 4-wide west doorway from Armory Hall 2 (2-tile stone wall at x=29..30)
+    c.fill(23, 30, 28, 36)     # NW Guardroom
+    c.fill(24, 20, 27, 30)     # 4-wide north passage
+    c.fill(24, 20, 52, 23)     # Long straight eastbound hallway
 
-    # 8. Herod's Circular Arena (top-right grand rotunda)
-    c.fill(45, 17, 48, 20)     # 4-wide grand arena archway
-    c.circle(46.5, 10.0, 8.8)
+    # 8. Herod's Circular Arena (top-right grand rotunda, 2-tile archway wall at y=18..19)
+    c.fill(45, 16, 48, 20)     # 4-wide grand arena archway
+    c.circle(46.5, 9.5, 8.2)
 
     return c.rows()
 
 
 def build_cathedral():
-    """Faithful to images/Maps/ScarletMonastery/cathedral.jpg (68x116)."""
-    c = Canvas(68, 116)
+    """Faithful to images/Maps/ScarletMonastery/cathedral.jpg (68x117)."""
+    c = Canvas(68, 117)
 
     # 1. South entry corridor running west to the Lower Courtyard gate
-    c.fill(31, 111, 58, 114)
+    # 5 tiles tall (y=111..115) so the party's 5x5 roominess anchor stays in
+    # the south entry vestibule instead of jumping north into the Lower Courtyard.
+    c.fill(31, 111, 58, 115)
 
     # 2. Lower Courtyard with central Reflecting Pool
     c.fill(32, 107, 35, 111)   # 4-wide south gate
@@ -289,16 +291,17 @@ def build_cathedral():
     c.wall(41, 19, 42, 20)     # East sanctuary pillar
 
     # 9. Northwest & Northeast Side Chambers (including Fairbanks's Secret Chamber)
+    # 2-tile masonry walls between chambers, sanctum, and transepts; 4-wide doorways.
     # NW chambers
-    c.fill(3, 14, 9, 19)
-    c.fill(5, 19, 7, 21)       # 3-wide doorway
-    c.fill(11, 14, 16, 19)
-    c.fill(12, 19, 14, 21)     # 3-wide doorway
+    c.fill(2, 13, 8, 18)
+    c.fill(4, 18, 7, 21)       # 4-wide doorway
+    c.fill(11, 13, 16, 18)
+    c.fill(12, 18, 15, 21)     # 4-wide doorway
     # NE chambers (Fairbanks's secret chamber)
-    c.fill(51, 14, 56, 19)
-    c.fill(53, 19, 55, 21)     # 3-wide doorway
-    c.fill(58, 14, 64, 19)
-    c.fill(60, 19, 62, 21)     # 3-wide doorway
+    c.fill(51, 13, 56, 18)
+    c.fill(52, 18, 55, 21)     # 4-wide doorway
+    c.fill(59, 13, 65, 18)
+    c.fill(60, 18, 63, 21)     # 4-wide doorway
 
     # 10. Whitemane's Circular Apse / Sanctum (top center)
     c.fill(32, 11, 35, 14)     # 4-wide passage behind high altar
@@ -348,6 +351,21 @@ def pinch_count(grid):
     return sum(1 for y in range(h) for x in range(w) if is_pinch(grid, x, y))
 
 
+def thin_wall_count(grid):
+    """Count interior 1-tile-thick walls separating floor on opposite orthogonal sides."""
+    w, h = len(grid[0]), len(grid)
+    count = 0
+    for y in range(1, h - 1):
+        for x in range(1, w - 1):
+            if grid[y][x] != "#":
+                continue
+            if (grid[y][x - 1] == "." and grid[y][x + 1] == ".") or (
+                grid[y - 1][x] == "." and grid[y + 1][x] == "."
+            ):
+                count += 1
+    return count
+
+
 def crop(grid):
     w, h = len(grid[0]), len(grid)
     pts = [(x, y) for y in range(h) for x in range(w) if grid[y][x] == "."]
@@ -373,11 +391,13 @@ def main():
         comps = components(grid)
         floor = sum(r.count(".") for r in grid)
         pinches = pinch_count(grid)
+        thin_walls = thin_wall_count(grid)
         assert len(comps) == 1, f"{name}: expected 1 connected component, got {len(comps)}"
         assert pinches == 0, f"{name}: found {pinches} 1-wide pinches"
+        assert thin_walls == 0, f"{name}: found {thin_walls} 1-tile-thick interior walls"
         assert floor > 500, f"{name}: expected > 500 floor tiles, got {floor}"
         print(
-            f"{name}: {len(grid[0])}x{len(grid)} floor={floor} comps={len(comps)} pinch={pinches}",
+            f"{name}: {len(grid[0])}x{len(grid)} floor={floor} comps={len(comps)} pinch={pinches} thin={thin_walls}",
             file=sys.stderr,
         )
         body = "\n        ".join(f'"{r}"' for r in grid)
