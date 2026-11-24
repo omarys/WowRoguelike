@@ -1,5 +1,9 @@
 namespace WowRoguelike.Core
 
+open System
+open System.Collections.Generic
+open System.Runtime.CompilerServices
+
 /// A binary min-heap, array-backed, hand-rolled.
 ///
 /// This exists to be measured against `System.Collections.Generic.PriorityQueue`
@@ -12,67 +16,115 @@ namespace WowRoguelike.Core
 /// BCL heap at n=100000 — more than the whole Map/Set removal that preceded it.
 type MinHeap<'p, 'v when 'p: comparison>() =
 
-  let priorities = ResizeArray<'p>()
-  let values = ResizeArray<'v>()
+  let comparer = Comparer<'p>.Default
+  let mutable priorities = Array.zeroCreate<'p> 16
+  let mutable values = Array.zeroCreate<'v> 16
+  let mutable count = 0
 
-  /// Both arrays must move together, or priorities stop describing the values.
-  let swap (i: int) (j: int) =
-    let priority = priorities.[i]
-    priorities.[i] <- priorities.[j]
-    priorities.[j] <- priority
-    let value = values.[i]
-    values.[i] <- values.[j]
-    values.[j] <- value
+  let grow () =
+    let nextCap = priorities.Length * 2
+    let nextP = Array.zeroCreate<'p> nextCap
+    let nextV = Array.zeroCreate<'v> nextCap
+    Array.Copy(priorities, nextP, count)
+    Array.Copy(values, nextV, count)
+    priorities <- nextP
+    values <- nextV
 
-  member _.Count = priorities.Count
-  member _.IsEmpty = priorities.Count = 0
+  member _.Count = count
+  member _.IsEmpty = count = 0
+
+  member _.Clear() =
+    if count > 0 then
+      if RuntimeHelpers.IsReferenceOrContainsReferences<'p>() then
+        Array.Clear(priorities, 0, count)
+
+      if RuntimeHelpers.IsReferenceOrContainsReferences<'v>() then
+        Array.Clear(values, 0, count)
+
+      count <- 0
 
   member _.Push(priority: 'p, value: 'v) =
-    priorities.Add priority
-    values.Add value
+    if count = priorities.Length then
+      grow ()
 
-    let mutable i = priorities.Count - 1
-    let mutable climbing = true
+    let mutable i = count
+    count <- count + 1
+    let ps = priorities
+    let vs = values
 
-    while climbing && i > 0 do
-      let parent = (i - 1) / 2
+    while i > 0 do
+      let parent = (i - 1) >>> 1
+      let parentP = ps.[parent]
 
-      if priorities.[i] < priorities.[parent] then
-        swap i parent
+      if comparer.Compare(priority, parentP) < 0 then
+        ps.[i] <- parentP
+        vs.[i] <- vs.[parent]
         i <- parent
       else
-        climbing <- false
+        ps.[i] <- priority
+        vs.[i] <- value
+        i <- -1
 
-  member _.Pop() : ('p * 'v) option =
-    if priorities.Count = 0 then
-      None
+    if i = 0 then
+      ps.[0] <- priority
+      vs.[0] <- value
+
+  member _.TryPop(priority: outref<'p>, value: outref<'v>) : bool =
+    if count = 0 then
+      false
     else
-      let topPriority = priorities.[0]
-      let topValue = values.[0]
-      let last = priorities.Count - 1
-      priorities.[0] <- priorities.[last]
-      values.[0] <- values.[last]
-      priorities.RemoveAt last
-      values.RemoveAt last
+      let ps = priorities
+      let vs = values
+      priority <- ps.[0]
+      value <- vs.[0]
+      let last = count - 1
+      count <- last
 
-      let mutable i = 0
-      let mutable sinking = true
+      if last > 0 then
+        let moveP = ps.[last]
+        let moveV = vs.[last]
+        let mutable i = 0
+        let mutable sinking = true
 
-      while sinking do
-        let left = 2 * i + 1
-        let right = 2 * i + 2
-        let mutable best = i
+        while sinking do
+          let left = (i <<< 1) + 1
 
-        if left < priorities.Count && priorities.[left] < priorities.[best] then
-          best <- left
+          if left >= last then
+            sinking <- false
+          else
+            let mutable best = i
+            let mutable bestP = moveP
+            let leftP = ps.[left]
 
-        if right < priorities.Count && priorities.[right] < priorities.[best] then
-          best <- right
+            if comparer.Compare(leftP, bestP) < 0 then
+              best <- left
+              bestP <- leftP
 
-        if best = i then
-          sinking <- false
-        else
-          swap i best
-          i <- best
+            let right = left + 1
 
-      Some(topPriority, topValue)
+            if right < last then
+              let rightP = ps.[right]
+
+              if comparer.Compare(rightP, bestP) < 0 then
+                best <- right
+
+            if best = i then
+              sinking <- false
+            else
+              ps.[i] <- ps.[best]
+              vs.[i] <- vs.[best]
+              i <- best
+
+        ps.[i] <- moveP
+        vs.[i] <- moveV
+
+      true
+
+  member this.Pop() : ('p * 'v) option =
+    let mutable p = Unchecked.defaultof<'p>
+    let mutable v = Unchecked.defaultof<'v>
+
+    if this.TryPop(&p, &v) then
+      Some(p, v)
+    else
+      None

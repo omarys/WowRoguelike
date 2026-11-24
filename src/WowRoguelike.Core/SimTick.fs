@@ -8,6 +8,139 @@ open WowRoguelike.Core.SimCombat
 /// sees the same post-damage world.
 module SimTick =
 
+  open System.Collections.Generic
+
+  /// Thread-local generation-stamped flat tile occupancy table, turning
+  /// `claimedByOther` from an O(N) entity-list scan into an O(1) array lookup.
+  type private TileClaims() =
+    let mutable tileStamp = Array.zeroCreate<int> 0
+    let mutable tileOwner = Array.zeroCreate<int> 0
+    let mutable stamp = 0
+    let mutable width = 0
+    let mutable height = 0
+
+    [<System.ThreadStatic; DefaultValue>]
+    static val mutable private instance: TileClaims
+
+    static member Get() =
+      let s = TileClaims.instance
+
+      if obj.ReferenceEquals(s, null) then
+        let fresh = TileClaims()
+        TileClaims.instance <- fresh
+        fresh
+      else
+        s
+
+    member _.Begin(g: Grid) =
+      let size = g.Width * g.Height
+      width <- g.Width
+      height <- g.Height
+
+      if tileStamp.Length < size then
+        let cap = max size (max 256 (tileStamp.Length * 2))
+        tileStamp <- Array.zeroCreate<int> cap
+        tileOwner <- Array.zeroCreate<int> cap
+        stamp <- 1
+      elif stamp = System.Int32.MaxValue then
+        System.Array.Clear(tileStamp, 0, tileStamp.Length)
+        stamp <- 1
+      else
+        stamp <- stamp + 1
+
+    member _.PopulateClaimed(w: World) =
+      let g = w.Grid
+      let size = g.Width * g.Height
+      width <- g.Width
+      height <- g.Height
+
+      if tileStamp.Length < size then
+        let cap = max size (max 256 (tileStamp.Length * 2))
+        tileStamp <- Array.zeroCreate<int> cap
+        tileOwner <- Array.zeroCreate<int> cap
+        stamp <- 1
+      elif stamp = System.Int32.MaxValue then
+        System.Array.Clear(tileStamp, 0, tileStamp.Length)
+        stamp <- 1
+      else
+        stamp <- stamp + 1
+
+      let curStamp = stamp
+      let wWidth = width
+      let wHeight = height
+      let ts = tileStamp
+      let to' = tileOwner
+
+      for e in w.Entities do
+        if e.Health > 0 && e.Totem.IsNone && e.Destination.IsNone then
+          let px = e.Pos.X
+          let py = e.Pos.Y
+
+          if px >= 0 && py >= 0 && px < wWidth && py < wHeight then
+            let idx = py * wWidth + px
+            let (EntityId idInt) = e.Id
+
+            if ts.[idx] <> curStamp then
+              ts.[idx] <- curStamp
+              to'.[idx] <- idInt
+            elif to'.[idx] <> idInt then
+              to'.[idx] <- System.Int32.MinValue
+
+    member _.IsClaimedByOtherIdx(selfIdInt: int, idx: int) =
+      tileStamp.[idx] = stamp && tileOwner.[idx] <> selfIdInt
+
+    member _.IsClaimedByOtherPos(selfIdInt: int, p: Pos) =
+      p.X >= 0
+      && p.Y >= 0
+      && p.X < width
+      && p.Y < height
+      && (let idx = p.Y * width + p.X in tileStamp.[idx] = stamp && tileOwner.[idx] <> selfIdInt)
+
+    /// Remove `selfIdInt` from its tile when it begins moving (Destination becomes Some).
+    /// Returns false if multiple entities shared the tile and a full repopulate is needed.
+    member _.Release(selfIdInt: int, p: Pos) =
+      if p.X >= 0 && p.Y >= 0 && p.X < width && p.Y < height then
+        let idx = p.Y * width + p.X
+
+        if tileStamp.[idx] = stamp then
+          if tileOwner.[idx] = selfIdInt then
+            tileStamp.[idx] <- 0
+            true
+          else
+            false
+        else
+          true
+      else
+        true
+
+    /// Fast O(N) check whether any two alive non-totem entities share a tile.
+    member this.HasAnyStacked(w: World) =
+      this.Begin(w.Grid)
+      let curStamp = stamp
+      let wWidth = width
+      let wHeight = height
+      let ts = tileStamp
+      let mutable stacked = false
+      let mutable cur = w.Entities
+
+      while not stacked && not (List.isEmpty cur) do
+        let e = cur.Head
+        cur <- cur.Tail
+
+        if e.Health > 0 && e.Totem.IsNone then
+          let px = e.Pos.X
+          let py = e.Pos.Y
+
+          if px >= 0 && py >= 0 && px < wWidth && py < wHeight then
+            let idx = py * wWidth + px
+
+            if ts.[idx] = curStamp then
+              stacked <- true
+            else
+              ts.[idx] <- curStamp
+
+      stacked
+
 
   // =========================================================================
   // Per-tick phases
@@ -16,48 +149,55 @@ module SimTick =
   /// Auras age, and anything that runs out falls off. The ageing rule for each
   /// kind lives in `Aura.advance`, which is the one place that matches every case.
   let advanceAuras (w: World) =
-    mapAll
-      (fun e ->
-        let auras = e.Auras |> List.choose Aura.advance
-
-        // Berserk's health half is taken back here, and only here: the maximum is a
-        // field on the body, so the one place every aura's lifetime ends is the one
-        // place that can subtract what the aura granted. Health clamps to the
-        // shrunken maximum — that clamp is the whole "after the effect ends, the
-        // health is lost" clause, and it is what stops the cooldown being a heal.
-        let lapsed =
-          e.Auras
-          |> List.tryPick (function
-            | Invigorated(_, _, granted) -> Some granted
-            | _ -> None)
-
-        let holds =
-          auras
-          |> List.exists (function
-            | Invigorated _ -> true
-            | _ -> false)
-
-        match lapsed with
-        | Some granted when not holds ->
-          let maximum = e.MaxHealth - granted
-          { e with Auras = auras; MaxHealth = maximum; Health = min e.Health maximum }
-        | _ -> { e with Auras = auras })
+    if not (w.Entities |> List.exists (fun e -> not e.Auras.IsEmpty)) then
       w
+    else
+      mapAll
+        (fun e ->
+          if e.Auras.IsEmpty then
+            e
+          else
+            let auras = e.Auras |> List.choose Aura.advance
+
+            let lapsed =
+              e.Auras
+              |> List.tryPick (function
+                | Invigorated(_, _, granted) -> Some granted
+                | _ -> None)
+
+            match lapsed with
+            | Some granted ->
+              let holds =
+                auras
+                |> List.exists (function
+                  | Invigorated _ -> true
+                  | _ -> false)
+
+              if not holds then
+                let maximum = e.MaxHealth - granted
+                { e with Auras = auras; MaxHealth = maximum; Health = min e.Health maximum }
+              else
+                { e with Auras = auras }
+            | None -> { e with Auras = auras })
+        w
 
   /// Summoned things live on their owner's clock: a totem runs out of time, and a
   /// pet dies when the Hunter that called it does. Neither can be modelled as an
   /// aura, because both are entities that hostiles can attack.
   let advanceSummons (w: World) =
-    mapAll
-      (fun e ->
-        match e.Owner, e.ExpiresInTicks with
-        | None, _ -> e
-        | Some owner, _ when not (tryEntity owner w |> Option.exists alive) ->
-          { e with Health = 0 }
-        | _, Some left when left <= ticks 1 -> { e with Health = 0 }
-        | _, Some left -> { e with ExpiresInTicks = Some(left - ticks 1) }
-        | _, None -> e)
+    if not (w.Entities |> List.exists (fun e -> e.Owner.IsSome || e.ExpiresInTicks.IsSome)) then
       w
+    else
+      mapAll
+        (fun e ->
+          match e.Owner, e.ExpiresInTicks with
+          | None, _ -> e
+          | Some owner, _ when not (tryEntity owner w |> Option.exists alive) ->
+            { e with Health = 0 }
+          | _, Some left when left <= ticks 1 -> { e with Health = 0 }
+          | _, Some left -> { e with ExpiresInTicks = Some(left - ticks 1) }
+          | _, None -> e)
+        w
 
   /// A totem works on the party from the tile it stands on: the two that hand out
   /// a number do it on their own clock, and the two that give a boon keep an aura
@@ -65,11 +205,10 @@ module SimTick =
   /// after the totem dies or the member walks out of range — which is why a totem
   /// needs no cleanup pass of its own.
   let advanceTotems (w: World) =
-    let totems = w.Entities |> List.filter (fun e -> alive e && e.Totem.IsSome)
-
-    if List.isEmpty totems then
+    if not (w.Entities |> List.exists (fun e -> alive e && e.Totem.IsSome)) then
       w
     else
+      let totems = w.Entities |> List.filter (fun e -> alive e && e.Totem.IsSome)
       let party = aliveParty w
 
       let apply (w: World) (t: Entity) (e: Entity) =
@@ -203,58 +342,80 @@ module SimTick =
   let advanceAuraHealing (w: World) =
     (w, w.Entities)
     ||> List.fold (fun w e ->
-      if not (alive e) then
+      if not (alive e) || e.Auras.IsEmpty then
         w
       else
-        let firing = e.Auras |> List.filter Aura.firesThisTick
-        let flat = firing |> List.sumBy Aura.flatHealPerTick
-        let pctBp = firing |> List.sumBy Aura.maxHealthHealBpPerTick
-        let heal = flat + (e.MaxHealth * pctBp / 10000)
-        // Wound Poison cuts heals over time as well as casts; they are paid for
-        // by the same healer, so they meet the same reduction.
-        let cut = e.Auras |> List.sumBy Aura.healingReceivedReductionBp
-        let heal = heal * max 0 (10000 - cut) / 10000
+        let mutable anyFiring = false
+        let mutable flat = 0
+        let mutable pctBp = 0
 
-        if heal <= 0 then
+        for a in e.Auras do
+          if Aura.firesThisTick a then
+            anyFiring <- true
+            flat <- flat + Aura.flatHealPerTick a
+            pctBp <- pctBp + Aura.maxHealthHealBpPerTick a
+
+        if not anyFiring then
           w
         else
-          let health = min e.MaxHealth (e.Health + heal)
-          let w = mapEntity e.Id (fun x -> { x with Health = health }) w
-          bookHotTick w e firing heal (health - e.Health))
+          let heal = flat + (e.MaxHealth * pctBp / 10000)
+
+          if heal <= 0 then
+            w
+          else
+            let cut = e.Auras |> List.sumBy Aura.healingReceivedReductionBp
+            let heal = heal * max 0 (10000 - cut) / 10000
+
+            if heal <= 0 then
+              w
+            else
+              let firing = e.Auras |> List.filter Aura.firesThisTick
+              let health = min e.MaxHealth (e.Health + heal)
+              let w = mapEntity e.Id (fun x -> { x with Health = health }) w
+              bookHotTick w e firing heal (health - e.Health))
 
   /// Damage-over-time ticks down once a second, applied unmitigated. It routes
   /// through dealDamage so the target wakes and, if it dies, drops its orders.
-  ///
-  /// The tick then offers the *applier* its own event, once per aura that fired:
-  /// Nightfall rolls per tick of a Corruption, not per burning target per second,
-  /// and it rolls on the caster because the damage lands on the target. A dot
-  /// applied by nobody (`caster = None`, which is every mob's) offers nothing.
   let advanceAuraDamage (w: World) =
-    let ticking (e: Entity) = e.Auras |> List.filter Aura.firesThisTick
+    let mutable burning: (Entity * int) list = []
 
-    let perTick (e: Entity) =
-      ticking e |> List.sumBy (fun a -> Aura.flatDamagePerTick a + Aura.poisonTick a)
+    for e in w.Entities do
+      if alive e && not e.Auras.IsEmpty then
+        let mutable dmg = 0
 
-    let burning = w.Entities |> List.filter (fun e -> alive e && perTick e > 0)
+        for a in e.Auras do
+          if Aura.firesThisTick a then
+            dmg <- dmg + Aura.flatDamagePerTick a + Aura.poisonTick a
 
-    let w = (w, burning) ||> List.fold (fun w e -> dealDamage e.Id (perTick e) w)
+        if dmg > 0 then
+          burning <- (e, dmg) :: burning
 
-    // After the damage, so a tick that kills still ticks: the last tick of a
-    // Corruption is a tick. `burning` is the pre-damage list on purpose.
-    (w, burning)
-    ||> List.fold (fun w e ->
-      (w, ticking e |> List.choose Aura.dotCaster)
-      ||> List.fold (fun w caster -> SimCombat.procOn OnDoTTick caster w))
+    if burning.IsEmpty then
+      w
+    else
+      let burning = List.rev burning
+      let w = (w, burning) ||> List.fold (fun w (e, dmg) -> dealDamage e.Id dmg w)
+
+      (w, burning)
+      ||> List.fold (fun w (e, _) ->
+        (w, e.Auras |> List.choose (fun a -> if Aura.firesThisTick a then Aura.dotCaster a else None))
+        ||> List.fold (fun w caster -> SimCombat.procOn OnDoTTick caster w))
 
   let advanceCooldowns (w: World) =
-    mapAll
-      (fun e ->
-        { e with
-            Cooldowns =
-              e.Cooldowns
-              |> Map.map (fun _ r -> r - ticks 1)
-              |> Map.filter (fun _ r -> r > ticks 0) })
+    if not (w.Entities |> List.exists (fun e -> not e.Cooldowns.IsEmpty)) then
       w
+    else
+      mapAll
+        (fun e ->
+          if e.Cooldowns.IsEmpty then
+            e
+          else
+            { e with
+                Cooldowns =
+                  e.Cooldowns
+                  |> Map.map (fun _ r -> r - ticks 1)
+                  |> Map.filter (fun _ r -> r > ticks 0) })
+        w
 
   /// Resource accumulates. Mob regeneration is zero, and that is the entire
   /// reason a fight can now end: a Druid of the Fang can afford four Healing
@@ -263,80 +424,79 @@ module SimTick =
   /// one point every other Tick, whatever his Spirit or the content says.
   let advanceResource (w: World) =
     let energyTick = w.Tick % ticks 2 = ticks 0
+    let manaTick = w.Tick % Content.manaRegenTicks = ticks 0
+    let mp5Tick = w.Tick % secTicks 5.0 = ticks 0
 
     mapAll
       (fun e ->
         if not (alive e) then
           e
         else
+          let hasAuras = not e.Auras.IsEmpty
+
           let gain =
-            // The regen multiplier both clocks read: Innervate's five times and
-            // Berserk's doubling are one aura, because both are a statement about
-            // how fast the bar refills. Energy pays `base + base * bp / 10000` and
-            // not `base * (10000 + bp) / 10000`, which is the same arithmetic until
-            // the base is one point: a floored 1.5x of one rounds back to one and a
-            // cooldown would do nothing at all. +100% lands on a whole second point
-            // and so is the one bonus a one-point clock can carry.
-            let boon =
-              e.Auras
-              |> List.tryPick (function
-                | Innervated(_, bp) -> Some bp
-                | _ -> None)
-              |> Option.defaultValue 0
-
             match e.ResourceKind with
-            | Energy -> if energyTick then 1 + 1 * boon / 10000 else 0
-            | Mana ->
-              // Vanilla regenerates mana on a two-second server tick, and the
-              // five-second rule suspends the Spirit part of it *entirely*: spending
-              // mana costs a caster its whole Spirit rate, not a fraction of it. What
-              // keeps flowing is the share `CombatRegenBp` names — Meditation and
-              // Reflection, which exist precisely because the default is nothing.
-              // `.pi/research/ranks/mage.md`: "spending mana suspends regeneration for
-              // 5 s; only MP5-from-gear and the Mage Armor combat-regen percentage …
-              // keep flowing".
-              //
-              // This used to be `rate - 1` on a flat per-Tick rate, which made the
-              // rule cost a fifth of the pool flow and left those talents with
-              // nothing to buy — they multiplied the rate at all times instead.
-              let fresh =
-                e.Auras
-                |> List.exists (function
-                  | RecentlyCast _ -> true
-                  | _ -> false)
-
-              let rate =
-                if w.Tick % Content.manaRegenTicks <> ticks 0 then 0
-                elif fresh then e.ResourceRegenPerTick * e.CombatRegenBp / 10000
-                else e.ResourceRegenPerTick
-
-              // Improved Water Shield: every globe still standing is another two per
-              // cent of the Shaman's regeneration, and nine globes is +18%. The count
-              // is read off the aura rather than off the talent, which is the whole
-              // point of the talent — a shield three hits from empty is worth a sixth
-              // of what a full one is, and a talented Shaman with no shield at all
-              // gets nothing.
-              let globes, shieldMp5 =
-                match Aura.waterShield e.Auras with
-                | Some(WaterShield(charges, _, _, bp, mp5)) -> charges * bp, mp5
-                | _ -> 0, 0
-
-              // The flat half is MP5 in the era's sense: it flows whether or not the
-              // Shaman just cast, so it is added on its own five-second clock rather
-              // than through the two-second regeneration tick it would otherwise be
-              // truncated by (nine fifths of a tick is three and a bit).
-              let steady = if w.Tick % secTicks 5.0 = ticks 0 then shieldMp5 else 0
-
-              rate * (10000 + boon + globes) / 10000 + steady
             | Rage -> 0
+            | Energy ->
+              if not energyTick then
+                0
+              else
+                let boon =
+                  if not hasAuras then
+                    0
+                  else
+                    e.Auras
+                    |> List.tryPick (function
+                      | Innervated(_, bp) -> Some bp
+                      | _ -> None)
+                    |> Option.defaultValue 0
 
-          // Viper Sting is paid out of the pool, once a second like every other
-          // periodic aura. Regen is added first so the sting cuts what the target
-          // actually has, not what it would have had.
+                1 + 1 * boon / 10000
+            | Mana ->
+              if not manaTick && not mp5Tick then
+                0
+              elif not hasAuras then
+                if manaTick then e.ResourceRegenPerTick else 0
+              else
+                let mutable boon = 0
+                let mutable fresh = false
+                let mutable globes = 0
+                let mutable shieldMp5 = 0
+
+                for a in e.Auras do
+                  match a with
+                  | Innervated(_, bp) when boon = 0 -> boon <- bp
+                  | RecentlyCast _ -> fresh <- true
+                  | WaterShield(charges, _, _, bp, mp5) when globes = 0 && shieldMp5 = 0 ->
+                    globes <- charges * bp
+                    shieldMp5 <- mp5
+                  | _ -> ()
+
+                let rate =
+                  if not manaTick then 0
+                  elif fresh then e.ResourceRegenPerTick * e.CombatRegenBp / 10000
+                  else e.ResourceRegenPerTick
+
+                let steady = if mp5Tick then shieldMp5 else 0
+                rate * (10000 + boon + globes) / 10000 + steady
+
           let drain =
-            e.Auras |> List.filter Aura.firesThisTick |> List.sumBy Aura.flatDrainPerTick
+            if not hasAuras then
+              0
+            else
+              let mutable d = 0
 
-          { e with Resource = max 0 (min e.MaxResource (e.Resource + gain) - drain) })
+              for a in e.Auras do
+                if Aura.firesThisTick a then
+                  d <- d + Aura.flatDrainPerTick a
+
+              d
+
+          if gain = 0 && drain = 0 then
+            e
+          else
+            let nextRes = max 0 (min e.MaxResource (e.Resource + gain) - drain)
+            if nextRes = e.Resource then e else { e with Resource = nextRes })
       w
 
   /// Out of combat the party rests. This is not a trickle: it is **five seconds of
@@ -457,224 +617,245 @@ module SimTick =
         |> mapEntity blocker (fun b -> { b with Pos = from }))
 
   let private separateStacked (w: World) =
-    let _, entities =
-      (([], []), w.Entities)
-      ||> List.fold (fun (taken, acc) e ->
+    if not ((TileClaims.Get()).HasAnyStacked(w)) then
+      w
+    else
+      let taken = HashSet<Pos>()
+      let mutable acc = []
+
+      for e in w.Entities do
         if not (alive e) || e.Totem.IsSome then
-          // A totem takes no space and never gives ground: leave it where it was
-          // summoned and let bodies share its tile.
-          taken, e :: acc
+          acc <- e :: acc
         else
           let spot =
-            if List.contains e.Pos taken then
-              Path.neighbours (fun p -> Grid.isFloor w.Grid p && not (List.contains p taken)) e.Pos
+            if taken.Contains e.Pos then
+              Path.neighbours (fun p -> Grid.isFloor w.Grid p && not (taken.Contains p)) e.Pos
               |> List.sortBy (fun p -> p.X, p.Y)
               |> List.tryHead
               |> Option.defaultValue e.Pos
             else
               e.Pos
 
-          spot :: taken, { e with Pos = spot } :: acc)
+          taken.Add spot |> ignore
+          acc <- (if spot = e.Pos then e else { e with Pos = spot }) :: acc
 
-    { w with Entities = List.rev entities }
+      { w with Entities = List.rev acc }
 
-  /// A step that ends where the body already stands is not a step: it is the
-  /// residue of a push (`separateStacked`, a trade) that moved a body onto the
-  /// very tile it had claimed. Left pending it never completes — the body is
-  /// "arriving" at a tile it occupies — and while it waits it out-races anyone
-  /// else who asks for that tile. Measured: `armory` seed 1, tick 12500 — the
-  /// Warrior pushed onto its own destination at (165,101) while the Imp claimed
-  /// the same tile from (164,101); each held the other's tile through
-  /// `stoodStill`, and the pair stood still for the rest of the run. The claim
-  /// is dropped and the body settles, which frees the tile for exactly one
-  /// claimant; a standing Goal re-plans from the tile the body is on.
   let private settleArrived (w: World) =
-    mapAll
-      (fun e ->
-        if
-          alive e
-          && e.Totem.IsNone
-          && e.Destination = Some e.Pos
-        then
-          { e with
-              Destination = None
-              MoveTicksLeft = ticks 0
-              MoveTicksTotal = ticks 0
-              StallTicks = ticks 0 }
-        else
-          e)
+    if not (w.Entities |> List.exists (fun e -> alive e && e.Totem.IsNone && e.Destination = Some e.Pos)) then
       w
-
-  let advanceMovement (w: World) =
-    // Movement ruling: a tile may be one body's destination, never two, and a
-    // body in motion may be passed through. Every contention is resolved the
-    // moment it happens — the lower EntityId lands, the loser re-plans — so no
-    // two bodies can end up waiting on each other's tiles.
-    let stepRefusalLimit = ticks 3
-    let w = settleArrived w
-
-    // A body that is going nowhere holds its tile; a body that is itself stepping
-    // through does not. Two members may share a tile in passing, which is what lets
-    // a corridor carry traffic in both directions, but nobody settles onto someone
-    // who has stopped — that one keeps its route and waits the tick.
-    // `held` is every tile a body will still be standing on when this tick ends:
-    // a body with no destination, or one whose step does not complete now
-    // (`MoveTicksLeft > 1` is exactly the case that only decrements). A body whose
-    // step lands this tick is vacating, so its tile can be taken. A totem is not a
-    // body: it holds nothing and nobody has to walk around it.
-    //
-    // It used to be "any body with no destination", which let a mover settle onto
-    // a body that was mid-step and still three ticks from leaving. `separateStacked`
-    // cannot always undo that: in a one-tile corridor there is no free neighbour to
-    // push to, so the two stayed on the same square.
-    let heldAtStart =
-      w.Entities
-      |> List.filter (fun e ->
-        alive e
-        && e.Totem.IsNone
-        && (e.Destination.IsNone || e.MoveTicksLeft > ticks 1))
-      |> List.map (fun e -> e.Pos)
-      |> Set.ofList
-
-    // Settle who is left standing where, because a step is not made by asking for it.
-    // The snapshot above is only the first guess at `held`: it calls every body whose
-    // step is due this Tick "vacating", but a due step can be refused — the ground it
-    // asked for is `held` (`Set.contains dest held`, below), or two movers asked for
-    // the same square and this one lost the race (`yields`) — and a body that cannot
-    // move at all never leaves either. A refused body is still on its tile, so its
-    // tile must be `held` for everyone else. Reading only the snapshot is what let a
-    // Deviate Ravager step onto a Rogue at tick 28 of `dungeon 2` seed 1: the Rogue's
-    // step was due, so its tile looked free, but its destination was the parked Druid
-    // of the Fang's tile and its step was refused. Growing `held` can only refuse more
-    // steps, so the fixpoint is monotone and settles in at most one round per body.
-    let rec settleHeld (held: Set<Pos>) =
-      // Two movers can land on the same free tile on the same Tick: both are mid-step,
-      // so neither of their tiles reads as `held`, and each destination is legal on its
-      // own. This was the second half of the same bug — a Druid of the Fang and a
-      // Deviate Ravager stepped onto one square together at tick 20 of `dungeon 2`, and
-      // `separateStacked` could only report it. The earlier body in the list lands and
-      // the later one waits the Tick, exactly as it would for a body that had stopped
-      // there; the list is the world's own order, so replay is unaffected.
-      let landings =
-        w.Entities
-        |> List.choose (fun e ->
-          match e.Destination with
-          | Some d when
+    else
+      mapAll
+        (fun e ->
+          if
             alive e
             && e.Totem.IsNone
-            && canMove e
-            && e.MoveTicksLeft <= ticks 1
-            && not (Set.contains d held)
-            ->
-            Some(d, e.Id)
-          | _ -> None)
-
-      let yields =
-        // One tile, one destination: the lower EntityId takes it — the outcome
-        // depends on nothing, not list order and not who planned first.
-        let firstToLand =
-          landings
-          |> List.groupBy fst
-          |> List.map (fun (_, claims) -> claims |> List.minBy snd)
-          |> Map.ofList
-
-        landings
-        |> List.filter (fun (tile, id) -> Map.tryFind tile firstToLand <> Some id)
-        |> List.map snd
-        |> Set.ofList
-
-      // Who actually landed this pass, for `swapStep`: those bodies are mid-motion, not
-      // parked, however settled their new state looks.
-      let landedNow =
-        landings
-        |> List.filter (fun (_, id) -> not (Set.contains id yields))
-        |> List.map snd
-        |> Set.ofList
-
-      // A body whose step was due and did not happen: refused, out-raced, or unable to
-      // move. It stays where it started this Tick, so it holds that tile.
-      let stoodStill =
-        w.Entities
-        |> List.filter (fun e ->
-          alive e
-          && e.Totem.IsNone
-          && e.Destination.IsSome
-          && e.MoveTicksLeft <= ticks 1
-          && not (Set.contains e.Id landedNow))
-        |> List.map (fun e -> e.Pos)
-        |> Set.ofList
-
-      let grown = Set.union held stoodStill
-
-      if grown.Count = held.Count then
-        held, yields, landedNow
-      else
-        settleHeld grown
-
-    let held, yields, landedNow = settleHeld heldAtStart
-
-    mapAll
-      (fun e ->
-        if not (alive e) then
-          e
-        elif not (canMove e) then
-          if e.Auras |> List.exists Aura.preventsActing then
-            // Incapacitated: drop everything, it will not resume.
+            && e.Destination = Some e.Pos
+          then
             { e with
-                Goal = None
-                Path = []
-                StallTicks = ticks 0
                 Destination = None
-                MoveTicksLeft = ticks 0 }
+                MoveTicksLeft = ticks 0
+                MoveTicksTotal = ticks 0
+                StallTicks = ticks 0 }
           else
-            // Rooted: hold position and resume when the root ends.
-            e
-        else
-          match e.Destination with
-          | None -> e
-          | Some dest ->
-            let e = { e with Casting = None }
+            e)
+        w
 
-            if e.MoveTicksLeft > ticks 1 then
-              { e with MoveTicksLeft = e.MoveTicksLeft - ticks 1 }
-            elif Set.contains e.Id yields then
-              // Out-raced for the tile: the claim goes back and the loser
-              // re-plans, which is the whole of the destination rule — one tile,
-              // one destination, and the loser never waits on the winner.
+  let advanceMovement (w: World) =
+    let mutable anyMoving = false
+    let mutable anyIncapacitated = false
+
+    for e in w.Entities do
+      if alive e then
+        if e.Destination.IsSome then
+          anyMoving <- true
+        elif not e.Auras.IsEmpty && not (canMove e) && (e.Auras |> List.exists Aura.preventsActing) then
+          if e.Goal.IsSome || not e.Path.IsEmpty || e.StallTicks <> ticks 0 || e.MoveTicksLeft <> ticks 0 then
+            anyIncapacitated <- true
+
+    if not anyMoving && not anyIncapacitated then
+      separateStacked w
+    else
+      let stepRefusalLimit = ticks 3
+      let w = settleArrived w
+
+      let held = HashSet<Pos>()
+      let dueMovers = ResizeArray<Entity>()
+
+      for e in w.Entities do
+        if alive e && e.Totem.IsNone then
+          if e.Destination.IsNone || e.MoveTicksLeft > ticks 1 then
+            held.Add e.Pos |> ignore
+          else
+            dueMovers.Add e
+
+      let firstToLand = Dictionary<Pos, EntityId>()
+      let yields = HashSet<EntityId>()
+      let landedNow = HashSet<EntityId>()
+
+      let mutable changed = true
+
+      while changed do
+        firstToLand.Clear()
+        yields.Clear()
+        landedNow.Clear()
+
+        for i = 0 to dueMovers.Count - 1 do
+          let e = dueMovers.[i]
+
+          if canMove e then
+            let d = e.Destination.Value
+
+            if not (held.Contains d) then
+              match firstToLand.TryGetValue d with
+              | true, prevId ->
+                if e.Id < prevId then
+                  yields.Add prevId |> ignore
+                  firstToLand.[d] <- e.Id
+                else
+                  yields.Add e.Id |> ignore
+              | false, _ -> firstToLand.[d] <- e.Id
+
+        for kv in firstToLand do
+          landedNow.Add kv.Value |> ignore
+
+        let beforeCount = held.Count
+
+        for i = 0 to dueMovers.Count - 1 do
+          let e = dueMovers.[i]
+
+          if not (landedNow.Contains e.Id) then
+            held.Add e.Pos |> ignore
+
+        changed <- held.Count <> beforeCount
+
+      let landedSet =
+        if landedNow.Count = 0 then Set.empty else Set.ofSeq landedNow
+
+      mapAll
+        (fun e ->
+          if not (alive e) then
+            e
+          elif not (canMove e) then
+            if e.Auras |> List.exists Aura.preventsActing then
               { e with
-                  Destination = None
+                  Goal = None
                   Path = []
-                  MoveTicksLeft = ticks 0
-                  MoveTicksTotal = ticks 0 }
-            elif Set.contains dest held then
-              // Refused by a settled body: ordinary congestion, so the claim is
-              // kept for a few Ticks — but not indefinitely. After
-              // `stepRefusalLimit` consecutive refusals it goes back, and the
-              // counter doubles as the backoff pacing the re-search, which is
-              // what makes mutual waiting impossible.
-              if e.StallTicks >= stepRefusalLimit then
+                  StallTicks = ticks 0
+                  Destination = None
+                  MoveTicksLeft = ticks 0 }
+            else
+              e
+          else
+            match e.Destination with
+            | None -> e
+            | Some dest ->
+              let e = if e.Casting.IsSome then { e with Casting = None } else e
+
+              if e.MoveTicksLeft > ticks 1 then
+                { e with MoveTicksLeft = e.MoveTicksLeft - ticks 1 }
+              elif yields.Contains e.Id then
                 { e with
                     Destination = None
                     Path = []
                     MoveTicksLeft = ticks 0
                     MoveTicksTotal = ticks 0 }
+              elif held.Contains dest then
+                if e.StallTicks >= stepRefusalLimit then
+                  { e with
+                      Destination = None
+                      Path = []
+                      MoveTicksLeft = ticks 0
+                      MoveTicksTotal = ticks 0 }
+                else
+                  { e with StallTicks = e.StallTicks + ticks 1 }
               else
-                { e with StallTicks = e.StallTicks + ticks 1 }
-            else
-              { e with
-                  Pos = dest
-                  Destination = None
-                  MoveTicksLeft = ticks 0
-                  MoveTicksTotal = ticks 0
-                  StallTicks = ticks 0 })
-      w
-    |> separateStacked
-    |> swapStep landedNow
+                { e with
+                    Pos = dest
+                    Destination = None
+                    MoveTicksLeft = ticks 0
+                    MoveTicksTotal = ticks 0
+                    StallTicks = ticks 0 })
+        w
+      |> separateStacked
+      |> swapStep landedSet
 
+
+  /// Begin stepping toward a goal, using a pre-populated O(1) tile claims table.
+  let private stepTowardWithClaims (claims: TileClaims) (e: Entity) (dest: Pos) (w: World) : Entity =
+    if e.Pos = dest then
+      { e with
+          Goal = None
+          Destination = None
+          Path = []
+          StallTicks = ticks 0 }
+    elif e.Destination.IsSome then
+      e
+    elif e.StallTicks > ticks 0 then
+      { e with StallTicks = e.StallTicks - ticks 1 }
+    else
+      let (EntityId selfIdInt) = e.Id
+      let takenPos p = claims.IsClaimedByOtherPos(selfIdInt, p)
+
+      let planned =
+        match e.Path with
+        | next :: _ when takenPos next -> []
+        | kept -> kept
+
+      let route =
+        let found =
+          if List.isEmpty planned then
+            (Path.astarByIndex w.Grid (fun idx -> claims.IsClaimedByOtherIdx(selfIdInt, idx)) e.Pos dest).Path
+          else
+            planned
+
+        // Relaxed fallback: stationary tiles are passable. Since `taken` only
+        // includes `Destination.IsNone` (stationary) entities, `taken && not stationary`
+        // is identically false.
+        if List.isEmpty found then
+          (Path.astarByIndex w.Grid (fun _ -> false) e.Pos dest).Path
+        else
+          found
+
+      match route with
+      | [] ->
+        { e with
+            Path = []
+            StallTicks = pathRetryBackoff }
+      | next :: rest ->
+        let nextTaken = takenPos next
+
+        let aSettledAlly =
+          nextTaken
+          && (w.Entities
+              |> List.exists (fun o ->
+                alive o
+                && o.Id <> e.Id
+                && o.Faction = Party
+                && o.Totem.IsNone
+                && o.Role <> Some Tank
+                && o.Pos = next
+                && o.Destination.IsNone))
+
+        if nextTaken && not aSettledAlly then
+          { e with
+              Path = []
+              StallTicks = pathRetryBackoff }
+        else
+          let slow =
+            if e.Auras.IsEmpty then 0 else e.Auras |> List.sumBy Aura.movementSlowBp
+
+          let step = e.MoveTicksPerTile * (10000 + slow) / 10000
+
+          { e with
+              Path = rest
+              Destination = Some next
+              MoveTicksLeft = step
+              MoveTicksTotal = step
+              StallTicks = ticks 0 }
 
   /// Begin stepping toward a goal. A* plans the route once and the entity walks
   /// it, re-planning only when the route runs out or its next step is taken.
-  /// Re-planning for every mover on every tick is the expensive way to do this.
   let stepToward (e: Entity) (dest: Pos) (w: World) : Entity =
     if e.Pos = dest then
       { e with
@@ -685,127 +866,75 @@ module SimTick =
     elif e.Destination.IsSome then
       e
     elif e.StallTicks > ticks 0 then
-      // A previous attempt at this goal found no route. Waiting is what makes a
-      // doomed search cost one search per backoff instead of one per tick.
       { e with StallTicks = e.StallTicks - ticks 1 }
     else
-      // Walls are A*'s business, not the blocker's.
-      let taken p = claimedByOther w e.Id p
-
-      // A route whose next step is now occupied is stale: drop it and replan.
-      let planned =
-        match e.Path with
-        | next :: _ when taken next -> []
-        | kept -> kept
-
-      let route =
-        let found =
-          if List.isEmpty planned then
-            (Path.astar w.Grid taken e.Pos dest).Path
-          else
-            planned
-
-        // Five abreast claim every tile of a corridor at once, so the claim-aware
-        // route fails while the claim-free one succeeds — and because none of them
-        // steps, none ever frees a tile. Retrying with a *stationary* ally's tile
-        // passable hands the mover the free prefix of a route, which is enough:
-        // one body moves, its tile frees, and the queue drains. The step below
-        // still has to clear `taken`, so the relaxed search can never put two
-        // bodies on one tile. A body already stepping into a tile still reserves
-        // it — that claim is about to become real.
-        let stationary p =
-          w.Entities
-          |> List.exists (fun o -> alive o && o.Id <> e.Id && o.Pos = p && o.Destination.IsNone)
-
-        if List.isEmpty found then
-          (Path.astar w.Grid (fun p -> taken p && not (stationary p)) e.Pos dest).Path
-        else
-          found
-
-      match route with
-      | [] ->
-        { e with
-            Path = []
-            StallTicks = pathRetryBackoff }
-      | next :: rest ->
-        // A settled Party body on the next step is not a reason to throw the route
-        // away: it will trade tiles with the mover when the step lands (`swapStep`
-        // in `advanceMovement`), which is the only way a one-wide corridor lets its
-        // leader past an ally that has no order to move. Anything else — a hostile,
-        // or a body mid-step — still means the route is stale.
-        let aSettledAlly =
-          w.Entities
-          |> List.exists (fun o ->
-            alive o
-            && o.Id <> e.Id
-            && o.Faction = Party
-            && o.Totem.IsNone
-            && o.Role <> Some Tank
-            && o.Pos = next
-            && o.Destination.IsNone)
-
-        if taken next && not aSettledAlly then
-          { e with
-              Path = []
-              StallTicks = pathRetryBackoff }
-        else
-          // Crippling Poison raises the cost of the next tile. Seeded here because
-          // this is the one place the per-tile cost is read; an existing step in
-          // progress keeps the length it started with.
-          let slow = e.Auras |> List.sumBy Aura.movementSlowBp
-          let step = e.MoveTicksPerTile * (10000 + slow) / 10000
-
-          { e with
-              Path = rest
-              Destination = Some next
-              MoveTicksLeft = step
-              MoveTicksTotal = step
-              StallTicks = ticks 0 }
+      let claims = TileClaims.Get()
+      claims.PopulateClaimed(w)
+      stepTowardWithClaims claims e dest w
 
   /// Stepped as a fold rather than a map, so two entities cannot claim the same
   /// tile in one tick.
   let advanceGoals (w: World) =
-    w.Entities
-    |> List.fold
-      (fun (acc: World) e ->
-        if not (canMove e) then
-          acc
-        else
-          match e.Goal with
-          | None -> acc
-          | Some g ->
-            let cur = acc.Entities |> List.find (fun x -> x.Id = e.Id)
-            mapEntity e.Id (fun _ -> stepToward cur g acc) acc)
+    if not (w.Entities |> List.exists (fun e -> e.Goal.IsSome && canMove e)) then
       w
+    else
+      let claims = TileClaims.Get()
+      claims.PopulateClaimed(w)
+
+      let mutable acc = w
+
+      for e in w.Entities do
+        if canMove e then
+          match e.Goal with
+          | None -> ()
+          | Some g ->
+            let updated = stepTowardWithClaims claims e g acc
+
+            if not (obj.ReferenceEquals(updated, e)) then
+              if e.Destination.IsNone && updated.Destination.IsSome then
+                let (EntityId idInt) = e.Id
+
+                if not (claims.Release(idInt, e.Pos)) then
+                  acc <- mapEntity e.Id (fun _ -> updated) acc
+                  claims.PopulateClaimed(acc)
+                else
+                  acc <- mapEntity e.Id (fun _ -> updated) acc
+              else
+                acc <- mapEntity e.Id (fun _ -> updated) acc
+
+      acc
 
   /// Casts tick down, then the ones that finished resolve against the world as
   /// it stands after every cast has advanced.
   let advanceCasts (w: World) =
-    let completing =
-      w.Entities
-      |> List.choose (fun e ->
-        match e.Casting with
-        | Some c when alive e && c.Remaining <= ticks 1 -> Some(e.Id, c)
-        | _ -> None)
-
-    let w =
-      mapAll
-        (fun e ->
+    if not (w.Entities |> List.exists (fun e -> e.Casting.IsSome)) then
+      w
+    else
+      let completing =
+        w.Entities
+        |> List.choose (fun e ->
           match e.Casting with
-          | Some c when c.Remaining > ticks 0 ->
-            { e with Casting = Some { c with Remaining = c.Remaining - ticks 1 } }
-          | _ -> e)
-        w
+          | Some c when alive e && c.Remaining <= ticks 1 -> Some(e.Id, c)
+          | _ -> None)
 
-    (w, completing)
-    ||> List.fold (fun w (actorId, c) ->
-      let w = mapEntity actorId (fun e -> { e with Casting = None }) w
+      let w =
+        mapAll
+          (fun e ->
+            match e.Casting with
+            | Some c when c.Remaining > ticks 0 ->
+              { e with Casting = Some { c with Remaining = c.Remaining - ticks 1 } }
+            | _ -> e)
+          w
 
-      match tryEntity c.Target w with
-      | Some t when alive t || Ability.resurrects c.Ability -> resolveAbility actorId c.Target c.Ability w
-      | _ ->
-        w
-        |> logLine (sprintf "%s's %s fizzles (target gone)" (nameOf actorId w) c.Ability.Name))
+      (w, completing)
+      ||> List.fold (fun w (actorId, c) ->
+        let w = mapEntity actorId (fun e -> { e with Casting = None }) w
+
+        match tryEntity c.Target w with
+        | Some t when alive t || Ability.resurrects c.Ability -> resolveAbility actorId c.Target c.Ability w
+        | _ ->
+          w
+          |> logLine (sprintf "%s's %s fizzles (target gone)" (nameOf actorId w) c.Ability.Name))
 
   /// The name a white swing answers to in `Talents.damageBp`. A swing has no
   /// ability row to key off, so it is one fixed name for every class: a tree that
@@ -818,58 +947,80 @@ module SimTick =
   /// Everyone with a swing timer swings. Party auto-attack only engages Mobs
   /// that are already in the fight, so nobody pulls by accident.
   let advanceSwings (w: World) =
-    let attackers =
-      w.Entities
-      |> List.filter (fun e ->
-        canAct e && e.AutoAttack.IsSome && not (e.Auras |> List.exists Aura.disablesAttack))
+    let readyAttackers = ResizeArray<Entity * bool * bool>()
+    let mutable anyNonReady = false
 
-    (w, attackers)
-    ||> List.fold (fun w e ->
+    for e in w.Entities do
+      if canAct e && e.AutoAttack.IsSome && (e.Auras.IsEmpty || not (e.Auras |> List.exists Aura.disablesAttack)) then
+        let attack = e.AutoAttack.Value
+        let offHandTicks = max (ticks 2) (attack.Ticks * 3 / 5)
+        let mainReady = e.SwingTicksLeft <= ticks 1
+        let offReady = e.OffHand && w.Tick % offHandTicks = ticks 0
+
+        if mainReady || offReady then
+          readyAttackers.Add(e, mainReady, offReady)
+        else
+          anyNonReady <- true
+
+    // Batch-decrement all non-ready attackers in one single pass instead of N mapEntity rebuilds.
+    let w =
+      if not anyNonReady then
+        w
+      else
+        mapAll
+          (fun e ->
+            if
+              canAct e
+              && e.AutoAttack.IsSome
+              && (e.Auras.IsEmpty || not (e.Auras |> List.exists Aura.disablesAttack))
+            then
+              let attack = e.AutoAttack.Value
+              let offHandTicks = max (ticks 2) (attack.Ticks * 3 / 5)
+              let mainReady = e.SwingTicksLeft <= ticks 1
+              let offReady = e.OffHand && w.Tick % offHandTicks = ticks 0
+
+              if not mainReady && not offReady then
+                { e with SwingTicksLeft = e.SwingTicksLeft - ticks 1 }
+              else
+                e
+            else
+              e)
+          w
+
+    let mutable acc = w
+
+    for i = 0 to readyAttackers.Count - 1 do
+      let e, mainReady, offReady = readyAttackers.[i]
       let attack = e.AutoAttack.Value
 
       let target =
         if e.Faction = Party then
-          aliveHostiles w
-          |> List.filter (fun t -> t.Engaged && canReach attack.Range e t w)
-          |> List.sortBy (fun t -> Pos.chebyshev e.Pos t.Pos)
-          |> List.tryHead
+          let mutable bestDist = System.Int32.MaxValue
+          let mutable bestTarget: Entity option = None
+
+          for t in acc.Entities do
+            if t.Faction = Hostile && t.Health > 0 && not t.Dormant && t.Engaged && canReach attack.Range e t acc then
+              let d = Pos.chebyshev e.Pos t.Pos
+              if d < bestDist then
+                bestDist <- d
+                bestTarget <- Some t
+
+          bestTarget
         else
-          currentTarget e w |> Option.filter (fun t -> canReach attack.Range e t w)
+          currentTarget e acc |> Option.filter (fun t -> canReach attack.Range e t acc)
 
-      // Extra physical damage from Serpent Form lands on every swing.
-      let bonus = serpentBonus e
+      let bonus = if e.Auras.IsEmpty then 0 else serpentBonus e
 
-      // The off-hand weapon is the fast one — vanilla's 1.5s dagger against a 2.6s
-      // main hand — so it lands more often for half the damage each time. 3/5 of the
-      // main interval is that ratio, and the clock is the world tick rather than a
-      // per-entity timer so nothing new has to be carried in the entity: the rate is
-      // what matters, and the Rogue is the only dual-wielder in the content.
-      let offHandTicks = max (ticks 2) (attack.Ticks * 3 / 5)
+      let w =
+        if mainReady then
+          mapEntity e.Id (fun x -> { x with SwingTicksLeft = AutoAttack.cadence attack e.Auras }) acc
+        else
+          mapEntity e.Id (fun x -> { x with SwingTicksLeft = x.SwingTicksLeft - ticks 1 }) acc
 
-      // Each hand keeps its own clock. The main hand is the entity's swing timer;
-      // the off-hand's is the world tick modulo its own (faster) interval, so it
-      // lands independently of the main hand instead of riding along with it.
-      let mainReady = e.SwingTicksLeft <= ticks 1
-      let offReady = e.OffHand && w.Tick % offHandTicks = ticks 0
-
-      if not mainReady && not offReady then
-        mapEntity e.Id (fun x -> { x with SwingTicksLeft = x.SwingTicksLeft - ticks 1 }) w
-      else
-        let w =
-          if mainReady then
-            // The interval is re-read on every reset, so a haste buff that lands
-            // mid-swing shortens the *next* swing rather than retroactively
-            // speeding up the one in flight — the timer already spent is spent.
-            mapEntity e.Id (fun x -> { x with SwingTicksLeft = AutoAttack.cadence attack e.Auras }) w
-          else
-            mapEntity e.Id (fun x -> { x with SwingTicksLeft = x.SwingTicksLeft - ticks 1 }) w
-
+      acc <-
         match target with
         | None -> w
         | Some t ->
-          // Two blades, two poisons: the main hand carries the situation's choice
-          // and the off hand the best different one. Decided once per swing so both
-          // hands meet the same situation.
           let mainPoison, offPoison =
             if SimCombat.carriesPoison e then
               SimCombat.poisonPlan t (aliveHostiles w)
@@ -881,15 +1032,9 @@ module SimTick =
               w
             else
               let rolled, w = rollRange attack.Min attack.Max w
-              // The tree's share of a white swing, on the same principle as the
-              // weapon-strike path in `SimCombat.resolveAbility`: one multiply, and a
-              // character with no talents multiplies by 10000. Serpent Form's bonus is
-              // added after it, being the form's damage rather than the weapon's.
               let total =
                 (rolled + e.MeleeDamageBonus) * Talents.damageBp swingName e.Talents / 10000 + bonus
 
-              // The auto-attack runs the same attack table every physical special does,
-              // so a mob dodges both identically.
               let total, crit, w = SimCombat.meleeStrike e t.Id total 0 None w
 
               w
@@ -911,25 +1056,16 @@ module SimTick =
                   SimCombat.poisonHit e mainPoison t.Id w
                 else
                   w
-              // "After firing": only a timer with range on it. Rolled once per
-              // landed shot, so a miss or a dodge is not a chance to proc.
               |> fun w ->
                 if total > 0 && attack.Range > 1 then
                   SimCombat.procOn OnShot e.Id w
                 else
                   w
 
-          // Half the damage, but it gets there more often: the off-hand swings on
-          // its own faster cadence rather than riding the main hand. shortcut: it
-          // rolls the main-hand table, so it misses 5% rather than vanilla's 24% —
-          // worth about 6% of a Rogue's damage; give `meleeStrike` a miss-penalty
-          // parameter if that matters.
           if not offReady then
             w
           else
             let rolled, w = rollRange attack.Min attack.Max w
-            // The off hand takes the same tree's share: a talent that raises white
-            // damage raises both hands.
             let offRoll =
               (rolled + e.MeleeDamageBonus) * Talents.damageBp swingName e.Talents / 10000 + bonus
 
@@ -953,285 +1089,347 @@ module SimTick =
               if offHand > 0 && SimCombat.carriesPoison e then
                 SimCombat.poisonHit e offPoison t.Id w
               else
-                w)
+                w
+
+    acc
 
   /// Recompute every Hostile's aggression target, honoring the margins and
   /// clearing a Taunt whose taunter has died.
   let retarget (w: World) =
+    let party = aliveParty w
+    let seen = party |> List.filter (fun p -> not (isStealthed p))
+
+    let isAlivePartyId (id: EntityId) =
+      let rec loop (xs: Entity list) =
+        match xs with
+        | [] -> false
+        | p :: rest -> if p.Id = id then true else loop rest
+
+      loop party
+
     mapAll
       (fun e ->
         if e.Faction <> Hostile || not (alive e) || e.Dormant then
           e
         elif not e.Engaged then
-          { e with
-              Target = None
-              ForcedTarget = None }
+          if e.Target.IsNone && e.ForcedTarget.IsNone then
+            e
+          else
+            { e with
+                Target = None
+                ForcedTarget = None }
         else
           let forced =
-            e.ForcedTarget |> Option.filter (fun id -> aliveMember w id |> Option.isSome)
+            match e.ForcedTarget with
+            | Some id when isAlivePartyId id -> e.ForcedTarget
+            | _ -> None
 
-          let withForced = { e with ForcedTarget = forced }
-          { withForced with Target = resolveTarget withForced w })
+          let withForced =
+            if forced = e.ForcedTarget then e else { e with ForcedTarget = forced }
+
+          let nextTarget = resolveTargetWithSeen withForced seen
+
+          if nextTarget = withForced.Target then
+            withForced
+          else
+            { withForced with Target = nextTarget })
       w
 
   /// Mobs decide. Ability priority is expressed by effect shape, so the caster
   /// rotation reads heal → renew → slumber → bolt → serpent form.
-  ///
-  /// Every shape a hostile kit actually ships has to be named here or the ability
-  /// is content the sim never fires: until `SpellDamage`, `HealOverTime` and
-  /// `Polymorph` were added, a Fireball, a mob's Renew and Arcanist Doan's
-  /// Polymorph were all data with no reader, and the only damage a caster mob ever
-  /// dealt was its auto-attack.
   let mobDecisions (w: World) =
-    let acting = w.Entities |> List.filter (fun e -> e.Faction = Hostile && not e.Dormant && canAct e)
+    let claims = TileClaims.Get()
+    claims.PopulateClaimed(w)
+    let mutable claimsDirty = false
+    let mutable party = aliveParty w
+    let mutable partyDirty = false
+    let mutable acc = w
 
-    (w, acting)
-    ||> List.fold (fun w m ->
-      // Proximity aggro: a Mob notices the Party before any threat exists — and
-      // only what it can actually see, so a pack in the next room stays asleep
-      // until the Party walks in (Q: aggro through walls is not a pull mechanic).
-      let noticed =
-        aliveParty w
-        |> List.exists (fun p ->
-          Pos.chebyshev m.Pos p.Pos <= aggroRadius && Path.lineOfSight w.Grid m.Pos p.Pos)
+    let inline ensureParty () =
+      if partyDirty then
+        party <- aliveParty acc
+        partyDirty <- false
 
-      let w, m =
-        if not m.Engaged && noticed then
-          let w =
-            w
-            |> mapEntity m.Id (fun x -> { x with Engaged = true })
-            |> logLine (sprintf "%s notices the party" m.Name)
+      party
 
-          let m' = tryEntity m.Id w |> Option.defaultValue m
-          // Give it a target immediately, so it is not idle for a tick.
-          mapEntity m.Id (fun x -> { x with Target = resolveTarget x w }) w,
-          { m' with Target = resolveTarget m' w }
-        else
-          w, m
+    let inline ensureClaims () =
+      if claimsDirty then
+        claims.PopulateClaimed(acc)
+        claimsDirty <- false
 
-      if not m.Engaged then
-        w
-      else
-        match currentTarget m w with
-        | None -> w
-        | Some target ->
-          let ready (a: Ability) =
-            (m.Cooldowns |> Map.tryFind a.Name |> Option.defaultValue (ticks 0)) <= ticks 0
-            && canAfford m a
+      claims
 
-          // Prefer a ready one, so two control spells on the same Mob take turns
-          // instead of the first match starving the second.
-          let byEffect (pred: Effect -> bool) =
-            let matching =
-              m.Abilities |> List.filter (fun a -> List.exists pred a.Effects)
+    for m0 in w.Entities do
+      if m0.Faction = Hostile && not m0.Dormant && canAct m0 then
+        let pList = ensureParty ()
 
-            matching |> List.tryFind ready |> Option.orElse (List.tryHead matching)
+        let m =
+          if not m0.Engaged then
+            let noticed =
+              pList
+              |> List.exists (fun p ->
+                Pos.chebyshev m0.Pos p.Pos <= aggroRadius && Path.lineOfSight acc.Grid m0.Pos p.Pos)
 
-          let healAbility = byEffect (function Heal _ -> true | _ -> false)
-          let sleepAbility = byEffect (function Sleep _ -> true | _ -> false)
-          let damageAbility = byEffect (function Damage _ -> true | _ -> false)
+            if noticed then
+              let w1 =
+                acc
+                |> mapEntity m0.Id (fun x -> { x with Engaged = true })
+                |> logLine (sprintf "%s notices the party" m0.Name)
 
-          /// A hostile caster's bolt: Fireball, Frostbolt, Smite, Flame Spike,
-          /// Immolate. Separate from `Damage` because a spell is not mitigated by
-          /// armour and does not roll against dodge, and because a mob that has
-          /// both should spend its cast rather than its swing.
-          let spellAbility =
-            byEffect (function SpellDamage _ -> true | _ -> false)
+              let m' = tryEntity m0.Id w1 |> Option.defaultValue { m0 with Engaged = true }
+              let targetId = resolveTarget m' w1
+              acc <- mapEntity m0.Id (fun x -> { x with Target = targetId }) w1
+              { m' with Target = targetId }
+            else
+              m0
+          else
+            m0
 
-          /// Renew: a heal-over-time on a friendly mob. The AI has no way to
-          /// value a HoT over a heal, so this only fires when the direct heal is
-          /// on cooldown or the mob has none — which is exactly when a Chaplain
-          /// or an Adept would use it.
-          let renewAbility =
-            byEffect (function HealOverTime _ -> true | _ -> false)
+        if m.Engaged then
+          let targetOpt =
+            let findInParty (id: EntityId) =
+              let rec loop (xs: Entity list) =
+                match xs with
+                | [] -> None
+                | p :: rest -> if p.Id = id then Some p else loop rest
 
-          /// Polymorph. A control spell like Sleep, and it shares Sleep's
-          /// one-at-a-time rule: two polymorphs on one pack is a pack that never
-          /// fights back at all.
-          let polymorphAbility =
-            byEffect (function Polymorph _ -> true | _ -> false)
+              loop pList
 
-          let shiftAbility =
-            byEffect (function Shapeshift(Serpent, _, _) -> true | _ -> false)
+            match m.ForcedTarget |> Option.bind findInParty with
+            | Some p -> Some p
+            | None -> m.Target |> Option.bind findInParty
 
-          let areaAbility =
-            byEffect (function AreaDamage _ -> true | _ -> false)
+          match targetOpt with
+          | None -> ()
+          | Some target ->
+            let ready (a: Ability) =
+              (if m.Cooldowns.IsEmpty then
+                 true
+               else
+                 (m.Cooldowns |> Map.tryFind a.Name |> Option.defaultValue (ticks 0)) <= ticks 0)
+              && canAfford m a
 
-          let stunAbility =
-            byEffect (function Stun _ -> true | _ -> false)
+            let byEffect (pred: Effect -> bool) =
+              let mutable firstMatch: Ability option = None
+              let mutable readyMatch: Ability option = None
+              let mutable cur = m.Abilities
 
-          // Only one Party member may be slept at a time.
-          let anyoneAsleep = aliveParty w |> List.exists isSleeping
+              while readyMatch.IsNone && not (List.isEmpty cur) do
+                let a = cur.Head
+                cur <- cur.Tail
 
-          let anyonePolymorphed =
-            aliveParty w |> List.exists (fun p -> p.Auras |> List.exists (function Polymorphed _ -> true | _ -> false))
+                if List.exists pred a.Effects then
+                  if firstMatch.IsNone then
+                    firstMatch <- Some a
 
-          let choice =
-            [ healAbility
-              |> Option.filter (fun a -> ready a && canCast m)
-              |> Option.bind (fun a -> usableTarget m a w |> Option.map (fun t -> a, t))
+                  if ready a then
+                    readyMatch <- Some a
 
-              // A HoT goes on an ally that is already hurt, after the direct heal
-              // has had its chance: a mob that heals and renews on the same tick
-              // should heal, because the heal saves the body this tick.
-              renewAbility
-              |> Option.filter (fun a -> ready a && canCast m)
-              |> Option.bind (fun a -> usableTarget m a w |> Option.map (fun t -> a, t))
+              match readyMatch with
+              | Some _ -> readyMatch
+              | None -> firstMatch
 
-              // Area damage and stuns are aimed at the current target and only
-              // when it is in reach, so a clap is never cast at nothing.
-              areaAbility
-              |> Option.filter (fun a -> ready a && canCast m && canReach a.Range m target w)
-              |> Option.map (fun a -> a, target.Id)
-
-              stunAbility
-              |> Option.filter (fun a -> ready a && canCast m && canReach a.Range m target w)
-              |> Option.map (fun a -> a, target.Id)
-
-              sleepAbility
-              |> Option.filter (fun a -> ready a && canCast m && not anyoneAsleep)
-              |> Option.bind (fun a -> usableTarget m a w |> Option.map (fun t -> a, t))
-
-              polymorphAbility
-              |> Option.filter (fun a ->
-                ready a && canCast m && not anyonePolymorphed && canReach a.Range m target w)
-              |> Option.map (fun a -> a, target.Id)
-
-              // The bolt before the swing: a caster mob's damage is its spell.
-              spellAbility
-              |> Option.filter (fun a -> ready a && canCast m && canReach a.Range m target w)
-              |> Option.map (fun a -> a, target.Id)
-
-              damageAbility
-              |> Option.filter (fun a ->
-                ready a && canCast m && canReach a.Range m target w)
-              |> Option.map (fun a -> a, target.Id)
-
-              // Shift only once the target has closed to melee.
-              shiftAbility
-              |> Option.filter (fun a -> ready a && not (isShifted m) && inMelee m target)
-              |> Option.map (fun a -> a, m.Id) ]
-            |> List.tryPick id
-
-          match choice with
-          | Some(ability, targetId) ->
-            // Committed to an action: stand still and stop planning.
-            startOrResolve m targetId ability w
-            |> mapEntity m.Id (fun e ->
-              { e with
-                  Goal = None
-                  Path = []
-                  StallTicks = ticks 0 })
-          | None ->
-            // The flee (operator direction): a humanoid at a fifth of its health
-            // breaks for the next un-engaged group instead of dying quietly --
-            // and what answers is the party's snares, not its damage. The runner
-            // keeps its target, so it is still "in the fight"; only its feet
-            // change. Standing next to an un-engaged ally already counts as
-            // arrived: it plants there, and the pack it fetched is the one the
-            // party walks into next.
-            let fleeTo =
-              if
-                m.CreatureType = CreatureType.Humanoid
-                && SimState.healthPct m <= 20
-                && SimState.canAct m
-              then
-                w.Entities
-                |> List.filter (fun e ->
-                  e.Faction = Hostile
-                  && SimState.alive e
-                  && not e.Dormant
-                  && not e.Engaged
-                  && e.Id <> m.Id)
-                |> List.sortBy (fun e -> Pos.chebyshev m.Pos e.Pos)
-                |> List.tryFind (fun e -> Pos.chebyshev m.Pos e.Pos > 3)
-              else
+            let choice =
+              if m.Abilities.IsEmpty then
                 None
+              else
+                let mCanCast = canCast m
 
-            let arrived =
-              w.Entities
-              |> List.exists (fun e ->
-                e.Faction = Hostile
-                && SimState.alive e
-                && not e.Dormant
-                && not e.Engaged
-                && e.Id <> m.Id
-                && Pos.chebyshev m.Pos e.Pos <= 2)
+                let mutable picked: (Ability * EntityId) option = None
 
-            match fleeTo with
-            | Some ally when not arrived ->
-              match SimState.approachTile m ally.Pos w with
-              | Some spot when spot <> m.Pos ->
-                w
+                if mCanCast then
+                  match byEffect (function Heal _ -> true | _ -> false) with
+                  | Some a when ready a ->
+                    picked <- usableTarget m a acc |> Option.map (fun t -> a, t)
+                  | _ -> ()
+
+                  if picked.IsNone then
+                    match byEffect (function HealOverTime _ -> true | _ -> false) with
+                    | Some a when ready a ->
+                      picked <- usableTarget m a acc |> Option.map (fun t -> a, t)
+                    | _ -> ()
+
+                  if picked.IsNone then
+                    match byEffect (function AreaDamage _ -> true | _ -> false) with
+                    | Some a when ready a && canReach a.Range m target acc ->
+                      picked <- Some(a, target.Id)
+                    | _ -> ()
+
+                  if picked.IsNone then
+                    match byEffect (function Stun _ -> true | _ -> false) with
+                    | Some a when ready a && canReach a.Range m target acc ->
+                      picked <- Some(a, target.Id)
+                    | _ -> ()
+
+                  if picked.IsNone then
+                    match byEffect (function Sleep _ -> true | _ -> false) with
+                    | Some a when ready a && not (pList |> List.exists isSleeping) ->
+                      picked <- usableTarget m a acc |> Option.map (fun t -> a, t)
+                    | _ -> ()
+
+                  if picked.IsNone then
+                    match byEffect (function Polymorph _ -> true | _ -> false) with
+                    | Some a when
+                      ready a
+                      && canReach a.Range m target acc
+                      && not (pList |> List.exists (fun p -> p.Auras |> List.exists (function Polymorphed _ -> true | _ -> false)))
+                      ->
+                      picked <- Some(a, target.Id)
+                    | _ -> ()
+
+                  if picked.IsNone then
+                    match byEffect (function SpellDamage _ -> true | _ -> false) with
+                    | Some a when ready a && canReach a.Range m target acc ->
+                      picked <- Some(a, target.Id)
+                    | _ -> ()
+
+                  if picked.IsNone then
+                    match byEffect (function Damage _ -> true | _ -> false) with
+                    | Some a when ready a && canReach a.Range m target acc ->
+                      picked <- Some(a, target.Id)
+                    | _ -> ()
+
+                if picked.IsNone then
+                  match byEffect (function Shapeshift(Serpent, _, _) -> true | _ -> false) with
+                  | Some a when ready a && not (isShifted m) && inMelee m target ->
+                    picked <- Some(a, m.Id)
+                  | _ -> ()
+
+                picked
+
+            match choice with
+            | Some(ability, targetId) ->
+              acc <-
+                startOrResolve m targetId ability acc
                 |> mapEntity m.Id (fun e ->
-                  if e.Goal = Some spot then
+                  if e.Goal.IsNone && e.Path.IsEmpty && e.StallTicks = ticks 0 then
                     e
                   else
-                    { e with
-                        Goal = Some spot
-                        Path = []
-                        StallTicks = ticks 0 })
-                |> fun w -> w |> logLine (sprintf "%s flees toward %s" m.Name ally.Name)
-              | _ ->
-                  mapEntity
-                    m.Id
-                    (fun e ->
-                      { e with
-                          Goal = None
-                          Path = []
-                          StallTicks = ticks 0 })
-                    w
-            | _ ->
-            if inMelee m target then
-              // Already in reach; no reason to move.
-              mapEntity
-                m.Id
-                (fun e ->
-                  { e with
-                      Goal = None
-                      Path = []
-                      StallTicks = ticks 0 })
-                w
-            else
-              // Close on a tile beside the target, never on the target's own
-              // tile, which it is standing on and which is therefore usually
-              // unreachable. Keep the tile it is already heading for while that
-              // stays valid, so a target shifting by one tile does not throw away
-              // a planned route and replan from scratch.
-              let keep =
-                match m.Goal with
-                | Some g when
-                  Pos.chebyshev g target.Pos <= 1
-                  && Grid.isFloor w.Grid g
-                  && not (claimedByOther w m.Id g)
-                  ->
-                  Some g
-                | _ -> None
-
-              match keep |> Option.orElse (approachTile m target.Pos w) with
-              | Some spot ->
-                mapEntity
-                  m.Id
-                  (fun e ->
-                    if e.Goal = Some spot then
-                      e
-                    else
-                      { e with
-                          Goal = Some spot
-                          Path = []
-                          StallTicks = ticks 0 })
-                  w
-              | None ->
-                // Nowhere to stand beside it; hold rather than pay for a search
-                // that cannot succeed.
-                mapEntity
-                  m.Id
-                  (fun e ->
                     { e with
                         Goal = None
                         Path = []
                         StallTicks = ticks 0 })
-                  w)
+
+              partyDirty <- true
+              claimsDirty <- true
+            | None ->
+              let (EntityId selfIdInt) = m.Id
+              let c = ensureClaims ()
+
+              let fleeTo =
+                if
+                  m.CreatureType = CreatureType.Humanoid
+                  && SimState.healthPct m <= 20
+                  && SimState.canAct m
+                then
+                  let mutable arrived = false
+                  let mutable bestDist = System.Int32.MaxValue
+                  let mutable bestAlly: Entity option = None
+
+                  for e in acc.Entities do
+                    if
+                      e.Faction = Hostile
+                      && e.Health > 0
+                      && not e.Dormant
+                      && not e.Engaged
+                      && e.Id <> m.Id
+                    then
+                      let d = Pos.chebyshev m.Pos e.Pos
+
+                      if d <= 2 then
+                        arrived <- true
+                      elif d > 3 && d < bestDist then
+                        bestDist <- d
+                        bestAlly <- Some e
+
+                  if arrived then None else bestAlly
+                else
+                  None
+
+              match fleeTo with
+              | Some ally ->
+                match SimState.approachTileWith m.Pos ally.Pos acc.Grid (fun _ _ idx -> c.IsClaimedByOtherIdx(selfIdInt, idx)) with
+                | Some spot when spot <> m.Pos ->
+                  acc <-
+                    acc
+                    |> mapEntity m.Id (fun e ->
+                      if e.Goal = Some spot then
+                        e
+                      else
+                        { e with
+                            Goal = Some spot
+                            Path = []
+                            StallTicks = ticks 0 })
+                    |> logLine (sprintf "%s flees toward %s" m.Name ally.Name)
+                | _ ->
+                  if m.Goal.IsSome || not m.Path.IsEmpty || m.StallTicks <> ticks 0 then
+                    acc <-
+                      mapEntity
+                        m.Id
+                        (fun e ->
+                          { e with
+                              Goal = None
+                              Path = []
+                              StallTicks = ticks 0 })
+                        acc
+              | None ->
+                if inMelee m target then
+                  if m.Goal.IsSome || not m.Path.IsEmpty || m.StallTicks <> ticks 0 then
+                    acc <-
+                      mapEntity
+                        m.Id
+                        (fun e ->
+                          { e with
+                              Goal = None
+                              Path = []
+                              StallTicks = ticks 0 })
+                        acc
+                else
+                  let keep =
+                    match m.Goal with
+                    | Some g when
+                      Pos.chebyshev g target.Pos <= 1
+                      && Grid.isFloor acc.Grid g
+                      && not (c.IsClaimedByOtherPos(selfIdInt, g))
+                      ->
+                      Some g
+                    | _ -> None
+
+                  let spotOpt =
+                    match keep with
+                    | Some _ -> keep
+                    | None ->
+                      SimState.approachTileWith
+                        m.Pos
+                        target.Pos
+                        acc.Grid
+                        (fun _ _ idx -> c.IsClaimedByOtherIdx(selfIdInt, idx))
+
+                  match spotOpt with
+                  | Some spot ->
+                    if m.Goal <> Some spot then
+                      acc <-
+                        mapEntity
+                          m.Id
+                          (fun e ->
+                            { e with
+                                Goal = Some spot
+                                Path = []
+                                StallTicks = ticks 0 })
+                          acc
+                  | None ->
+                    if m.Goal.IsSome || not m.Path.IsEmpty || m.StallTicks <> ticks 0 then
+                      acc <-
+                        mapEntity
+                          m.Id
+                          (fun e ->
+                            { e with
+                                Goal = None
+                                Path = []
+                                StallTicks = ticks 0 })
+                          acc
+
+    acc
 
   /// A Mob that drops too low calls its neighbours in.
   let callForHelp (w: World) =
@@ -1244,24 +1442,27 @@ module SimTick =
         && not e.HasCalledForHelp
         && e.CallForHelpBelowHealthPct |> Option.exists (fun p -> healthPct e <= p))
 
-    (w, callers)
-    ||> List.fold (fun w c ->
-      let neighbours =
-        w.Entities
-        |> List.filter (fun e ->
-          e.Faction = Hostile
-          && alive e
-          && not e.Engaged
-          && Pos.chebyshev c.Pos e.Pos <= callForHelpRadius)
+    if callers.IsEmpty then
+      w
+    else
+      (w, callers)
+      ||> List.fold (fun w c ->
+        let neighbours =
+          w.Entities
+          |> List.filter (fun e ->
+            e.Faction = Hostile
+            && alive e
+            && not e.Engaged
+            && Pos.chebyshev c.Pos e.Pos <= callForHelpRadius)
 
-      let w =
-        (w, neighbours)
-        ||> List.fold (fun w n ->
-          w
-          |> mapEntity n.Id (fun e -> { e with Engaged = true })
-          |> logLine (sprintf "%s calls for help, %s answers" c.Name n.Name))
+        let w =
+          (w, neighbours)
+          ||> List.fold (fun w n ->
+            w
+            |> mapEntity n.Id (fun e -> { e with Engaged = true })
+            |> logLine (sprintf "%s calls for help, %s answers" c.Name n.Name))
 
-      mapEntity c.Id (fun e -> { e with HasCalledForHelp = true }) w)
+        mapEntity c.Id (fun e -> { e with HasCalledForHelp = true }) w)
 
   // =========================================================================
   // The tick
@@ -1270,16 +1471,20 @@ module SimTick =
   /// One Tick. Phases are ordered so player intent lands before the world reacts
   /// to it, and so everything acting in a tick sees the same post-damage world.
   let step (incoming: Command list) (w0: World) : World =
-    let w =
-      { w0 with
-          Tick = w0.Tick + ticks 1
-          Pending = w0.Pending @ incoming }
+    let nextTick = w0.Tick + ticks 1
 
-    let due, later = w.Pending |> List.partition (fun c -> c.ApplyAt <= w.Tick)
-    let w = { w with Pending = later }
+    let w, due =
+      if w0.Pending.IsEmpty && incoming.IsEmpty then
+        { w0 with Tick = nextTick }, []
+      else
+        let pending = if w0.Pending.IsEmpty then incoming elif incoming.IsEmpty then w0.Pending else w0.Pending @ incoming
+        let due, later = pending |> List.partition (fun c -> c.ApplyAt <= nextTick)
+        { w0 with Tick = nextTick; Pending = later }, due
+
+    let w =
+      if due.IsEmpty then w else (w, due) ||> List.fold (fun w c -> applyCommand c w)
 
     w
-    |> fun w -> (w, due) ||> List.fold (fun w c -> applyCommand c w)
     |> advanceCooldowns
     |> advanceRegen
     |> advanceSummons
@@ -1294,13 +1499,7 @@ module SimTick =
     |> retarget
     |> mobDecisions
     |> advanceGoals
-    // The forecast's two accumulators are per Tick and the windows are the history of
-    // them, so this closes the Tick: everything that landed above is in the sum before
-    // it becomes a sample. It runs before `encounterReset`, which is the last word on
-    // whether the pull is still on.
     |> SimState.ManaBudget.settle w0
-    // Last, so it sees the fight as the tick left it: the wipe that ended the pull
-    // has to have happened before the room can be told to forget it.
     |> SimState.encounterReset
 
   /// Run `n` Ticks with no new input.

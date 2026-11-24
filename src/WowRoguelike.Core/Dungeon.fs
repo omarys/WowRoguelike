@@ -50,24 +50,54 @@ module Dungeon =
   /// prove the layout is connected. One algorithm, and the second use is an
   /// assertion about the first.
   let floodFill (g: Grid) (start: Pos) : int[] =
-    let distances = Array.create (g.Width * g.Height) -1
-    let index (p: Pos) = p.Y * g.Width + p.X
-    let queue = System.Collections.Generic.Queue<Pos>()
+    let width = g.Width
+    let height = g.Height
+    let walls = g.Walls
+    let size = width * height
+    let distances = Array.create size -1
 
     if Grid.isFloor g start then
-      distances.[index start] <- 0
-      queue.Enqueue start
+      let queue = Array.zeroCreate<int> size
+      let startIdx = start.Y * width + start.X
+      distances.[startIdx] <- 0
+      queue.[0] <- startIdx
+      let mutable head = 0
+      let mutable tail = 1
 
-    while queue.Count > 0 do
-      let p = queue.Dequeue()
-      let next = distances.[index p] + 1
+      while head < tail do
+        let cur = queue.[head]
+        head <- head + 1
+        let next = distances.[cur] + 1
+        let cx = cur % width
+        let cy = cur / width
 
-      for (dx, dy) in [ (-1, 0); (1, 0); (0, -1); (0, 1) ] do
-        let q = Pos.move dx dy p
+        if cx > 0 then
+          let idx = cur - 1
+          if not walls.[idx] && distances.[idx] < 0 then
+            distances.[idx] <- next
+            queue.[tail] <- idx
+            tail <- tail + 1
 
-        if Grid.isFloor g q && distances.[index q] < 0 then
-          distances.[index q] <- next
-          queue.Enqueue q
+        if cx + 1 < width then
+          let idx = cur + 1
+          if not walls.[idx] && distances.[idx] < 0 then
+            distances.[idx] <- next
+            queue.[tail] <- idx
+            tail <- tail + 1
+
+        if cy > 0 then
+          let idx = cur - width
+          if not walls.[idx] && distances.[idx] < 0 then
+            distances.[idx] <- next
+            queue.[tail] <- idx
+            tail <- tail + 1
+
+        if cy + 1 < height then
+          let idx = cur + width
+          if not walls.[idx] && distances.[idx] < 0 then
+            distances.[idx] <- next
+            queue.[tail] <- idx
+            tail <- tail + 1
 
     distances
 
@@ -76,10 +106,17 @@ module Dungeon =
   /// rather than regenerate-until-connected, which turns a bug into a hang.
   let isConnected (g: Grid) (start: Pos) =
     let distances = floodFill g start
+    let walls = g.Walls
+    let mutable ok = true
+    let mutable i = 0
 
-    Grid.tiles g
-    |> Seq.filter (Grid.isFloor g)
-    |> Seq.forall (fun p -> distances.[p.Y * g.Width + p.X] >= 0)
+    while ok && i < walls.Length do
+      if not walls.[i] && distances.[i] < 0 then
+        ok <- false
+
+      i <- i + 1
+
+    ok
 
   let private carveCorridor (g: Grid) (from: Pos) (target: Pos) =
     // Centred on the path, not offset from it: the band has to straddle the line

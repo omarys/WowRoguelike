@@ -97,7 +97,7 @@ module private FxParse =
 
   let private compiled =
     (damage @ shouts)
-    |> List.map (fun (kind, pattern) -> kind, Regex pattern)
+    |> List.map (fun (kind, pattern) -> kind, Regex(pattern, RegexOptions.Compiled))
     |> Array.ofList
 
   let tryParse (line: string) : (string * string * string * int) option =
@@ -753,16 +753,15 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
     tex
 
   let drawText (text: string) (x: int) (y: int) (colour: Color) =
-    text.ToUpperInvariant()
-    |> Seq.iteri (fun i c ->
-      let code = int c - 32
+    for i = 0 to text.Length - 1 do
+      let code = int (Char.ToUpperInvariant text.[i]) - 32
 
       if code >= 0 && code < 95 then
         spriteBatch.Draw(
           fontTex,
           Rectangle(x + i * cellW, y, glyphW * fontScale, glyphH * fontScale),
           Rectangle(code * cellW, 0, glyphW * fontScale, glyphH * fontScale),
-          colour))
+          colour)
 
   /// Text with a 1px drop shadow, for labels over the textured board.
   let drawTextShadow (text: string) (x: int) (y: int) (colour: Color) =
@@ -1130,17 +1129,14 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
   /// rather than assumed.
   let mutable menu = Menu.PickDungeon 0
 
-  /// Keys already down last frame, so a held key does not scroll at frame rate.
-  let mutable heldKeys = Set.empty<Keys>
+  /// Keyboard state from last frame, so a held key does not scroll at frame rate.
+  let mutable prevKeyboard = Keyboard.GetState()
 
   let pressed (keyboard: KeyboardState) (key: Keys) =
-    keyboard.IsKeyDown key && not (heldKeys.Contains key)
+    keyboard.IsKeyDown key && not (prevKeyboard.IsKeyDown key)
 
   let rememberKeys (keyboard: KeyboardState) =
-    heldKeys <-
-      [ for key in Enum.GetValues<Keys>() do
-          if keyboard.IsKeyDown key then key ]
-      |> Set.ofList
+    prevKeyboard <- keyboard
 
   let startEntry (index: int) (band: int) =
     let entry = menuItems |> List.item index
@@ -1521,8 +1517,10 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
           // Rock with no floor beside it is deep inside the wall: shade it so
           // the cave edge reads.
           let exposed =
-            [ -1, 0; 1, 0; 0, -1; 0, 1 ]
-            |> List.exists (fun (dx, dy) -> Grid.isFloor world.Grid { X = x + dx; Y = y + dy })
+            Grid.isFloor world.Grid { X = x - 1; Y = y }
+            || Grid.isFloor world.Grid { X = x + 1; Y = y }
+            || Grid.isFloor world.Grid { X = x; Y = y - 1 }
+            || Grid.isFloor world.Grid { X = x; Y = y + 1 }
 
           // The wall variety cell joins on a fraction of the tiles, by hash,
           // so the swap does not line up with any room edge. Deep wall mass

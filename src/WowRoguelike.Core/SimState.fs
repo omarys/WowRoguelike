@@ -45,9 +45,34 @@ module SimState =
   // Queries
   // =========================================================================
 
-  let tryEntity (id: EntityId) (w: World) = w.Entities |> List.tryFind (fun e -> e.Id = id)
+  let tryEntity (id: EntityId) (w: World) =
+    let rec loop (xs: Entity list) =
+      match xs with
+      | [] -> None
+      | e :: rest -> if e.Id = id then Some e else loop rest
+
+    loop w.Entities
 
   let alive (e: Entity) = e.Health > 0
+
+  let internal hasAliveParty (w: World) =
+    let rec loop (xs: Entity list) =
+      match xs with
+      | [] -> false
+      | e :: rest ->
+        if e.Faction = Party && e.Health > 0 && e.Totem.IsNone then true else loop rest
+
+    loop w.Entities
+
+  let internal hasAliveHostile (w: World) =
+    let rec loop (xs: Entity list) =
+      match xs with
+      | [] -> false
+      | e :: rest ->
+        if e.Faction = Hostile && e.Health > 0 && not e.Dormant then true else loop rest
+
+    loop w.Entities
+
   /// The heroes. A totem is faction Party so that mobs can hit it, but it is not
   /// a party member: counting one here lets a live totem answer for a dead party
   /// in `outcome`, and puts totems in the heal pool and the formation.
@@ -112,8 +137,8 @@ module SimState =
           Log = List.rev (finished |> List.collect (fun q -> q.Lines)) @ w.Log }
 
   let outcome (w: World) =
-    if List.isEmpty (aliveHostiles w) then EncounterCleared
-    elif List.isEmpty (aliveParty w) then PartyWiped
+    if not (hasAliveHostile w) then EncounterCleared
+    elif not (hasAliveParty w) then PartyWiped
     else Running
 
   /// A corpse on the floor that can still bring itself back. Reincarnation is
@@ -133,7 +158,7 @@ module SimState =
   /// `continues` true until the caller's tick cap — a run that cannot end,
   /// spending its remaining ticks on a party with nothing to order.
   let resurrectionPending (w: World) =
-    not (List.isEmpty (aliveHostiles w))
+    hasAliveHostile w
     && w.Entities
        |> List.exists (fun e ->
          e.Faction = Party
@@ -175,9 +200,16 @@ module SimState =
   /// stops a two-wide corridor from refusing to carry traffic both ways. A totem
   /// claims nothing at all: it is scenery the party may stand on.
   let claimedByOther (w: World) (self: EntityId) (p: Pos) =
-    w.Entities
-    |> List.exists (fun e ->
-      alive e && e.Id <> self && e.Totem.IsNone && e.Pos = p && e.Destination.IsNone)
+    let rec loop (xs: Entity list) =
+      match xs with
+      | [] -> false
+      | e :: rest ->
+        if e.Health > 0 && e.Id <> self && e.Totem.IsNone && e.Pos = p && e.Destination.IsNone then
+          true
+        else
+          loop rest
+
+    loop w.Entities
 
   /// The strict version: a tile is occupied if any living body is standing on it,
   /// whatever that body is doing. `claimedByOther` is a planning hint and lets a
@@ -186,25 +218,67 @@ module SimState =
   /// `SimTick.advanceMovement` — a Charge or a summon placed on a mid-step body's
   /// tile is two bodies on one square, and nothing downstream undoes it.
   let occupiedByOther (w: World) (self: EntityId) (p: Pos) =
-    w.Entities
-    |> List.exists (fun e -> alive e && e.Id <> self && e.Totem.IsNone && e.Pos = p)
+    let rec loop (xs: Entity list) =
+      match xs with
+      | [] -> false
+      | e :: rest ->
+        if e.Health > 0 && e.Id <> self && e.Totem.IsNone && e.Pos = p then
+          true
+        else
+          loop rest
+
+    loop w.Entities
+
+  /// Zero-allocation helper for `approachTile` that preserves exact `Path.neighbours`
+  /// row-major tie-breaking order.
+  let internal approachTileWith (moverPos: Pos) (spot: Pos) (g: Grid) (isBlocked: int -> int -> int -> bool) : Pos option =
+    let width = g.Width
+    let height = g.Height
+    let walls = g.Walls
+    let sx = spot.X
+    let sy = spot.Y
+
+    let inline passable x y =
+      if x >= 0 && y >= 0 && x < width && y < height then
+        let idx = y * width + x
+        not walls.[idx] && not (isBlocked x y idx)
+      else
+        false
+
+    let okN = passable sx (sy - 1)
+    let okS = passable sx (sy + 1)
+    let okW = passable (sx - 1) sy
+    let okE = passable (sx + 1) sy
+
+    let mutable bestDist = System.Int32.MaxValue
+    let mutable bestX = 0
+    let mutable bestY = 0
+
+    let inline consider x y =
+      let d = max (abs (moverPos.X - x)) (abs (moverPos.Y - y))
+      if d < bestDist then
+        bestDist <- d
+        bestX <- x
+        bestY <- y
+
+    // Exact row-major (-1..1, -1..1) order matching Path.neighbours + stable List.sortBy.
+    if okW && okN && passable (sx - 1) (sy - 1) then consider (sx - 1) (sy - 1)
+    if okN then consider sx (sy - 1)
+    if okE && okN && passable (sx + 1) (sy - 1) then consider (sx + 1) (sy - 1)
+    if okW then consider (sx - 1) sy
+    if okE then consider (sx + 1) sy
+    if okW && okS && passable (sx - 1) (sy + 1) then consider (sx - 1) (sy + 1)
+    if okS then consider sx (sy + 1)
+    if okE && okS && passable (sx + 1) (sy + 1) then consider (sx + 1) (sy + 1)
+
+    if bestDist = System.Int32.MaxValue then
+      None
+    else
+      Some { X = bestX; Y = bestY }
 
   /// A free tile to stand on next to `spot`, preferring the one nearest the mover.
-  ///
-  /// This exists because aiming A* at a tile somebody is standing on is a goal
-  /// that usually cannot be reached: the goal tile itself is allowed, but the
-  /// corner rule blocks the diagonals around it, so once a Party clusters against
-  /// a wall there is no route at all. A* then expands the whole reachable
-  /// component before failing, and the failure repeats every tick (task 16).
-  ///
-  /// `Path.neighbours` applies the same corner rule, so a tile it returns is one
-  /// the mover can genuinely step onto.
   let approachTile (mover: Entity) (spot: Pos) (w: World) : Pos option =
-    Path.neighbours
-      (fun p -> Grid.isFloor w.Grid p && not (claimedByOther w mover.Id p))
-      spot
-    |> List.sortBy (fun p -> Pos.chebyshev mover.Pos p)
-    |> List.tryHead
+    approachTileWith mover.Pos spot w.Grid (fun x y _ -> claimedByOther w mover.Id { X = x; Y = y })
 
   /// How long to wait before retrying a goal that produced no route.
   let pathRetryBackoff = secTicks 1.0
@@ -249,7 +323,81 @@ module SimState =
     m.Threat |> Map.tryFind id |> Option.defaultValue 0
 
   let internal aliveMember (w: World) (id: EntityId) =
-    aliveParty w |> List.tryFind (fun p -> p.Id = id)
+    let rec loop (xs: Entity list) =
+      match xs with
+      | [] -> None
+      | e :: rest ->
+        if e.Id = id then
+          if e.Faction = Party && e.Health > 0 && e.Totem.IsNone then Some e else None
+        else
+          loop rest
+
+    loop w.Entities
+
+  let internal resolveTargetWithSeen (m: Entity) (seen: Entity list) : EntityId option =
+    match seen with
+    | [] -> None
+    | _ ->
+      let mutable forcedFound = false
+      let mutable forcedId = EntityId 0
+      let mutable hasTop = false
+      let mutable topEntity = Unchecked.defaultof<Entity>
+      let mutable topThreat = 0
+      let mutable curFound = false
+      let mutable curEntity = Unchecked.defaultof<Entity>
+      let mutable nearestDist = System.Int32.MaxValue
+      let mutable nearestId = EntityId 0
+
+      let hasForced = m.ForcedTarget.IsSome
+      let forcedTargetVal = if hasForced then m.ForcedTarget.Value else EntityId 0
+      let hasCur = m.Target.IsSome
+      let curTargetVal = if hasCur then m.Target.Value else EntityId 0
+      let hasThreat = not m.Threat.IsEmpty
+
+      let rec scan (xs: Entity list) =
+        match xs with
+        | [] -> ()
+        | p :: rest ->
+          if hasForced && p.Id = forcedTargetVal then
+            forcedFound <- true
+            forcedId <- p.Id
+          else
+            if hasCur && p.Id = curTargetVal then
+              curFound <- true
+              curEntity <- p
+
+            if hasThreat then
+              let t = threatOf p.Id m
+              if t > 0 && (not hasTop || t > topThreat) then
+                hasTop <- true
+                topEntity <- p
+                topThreat <- t
+
+            if not hasTop then
+              let d = Pos.chebyshev m.Pos p.Pos
+              if d < nearestDist then
+                nearestDist <- d
+                nearestId <- p.Id
+
+            scan rest
+
+      scan seen
+
+      if forcedFound then
+        Some forcedId
+      elif not hasTop then
+        if nearestDist = System.Int32.MaxValue then None else Some nearestId
+      elif not curFound then
+        Some topEntity.Id
+      else
+        let curThreat = threatOf curEntity.Id m
+        // The margin depends on whether the *challenger* is in melee range.
+        let margin = if inMelee m topEntity then meleeMarginBp else rangedMarginBp
+        // Compare by cross-multiplication, so this stays integer.
+        if topThreat * 10000 > curThreat * (10000 + margin) then
+          Some topEntity.Id
+        else
+          Some curEntity.Id
 
   /// Recompute a Hostile's aggression target from its threat table. The current
   /// target is only displaced by the 10% / 30% margins; with an empty table the
@@ -262,36 +410,7 @@ module SimState =
     let seen =
       aliveParty w |> List.filter (fun p -> not (isStealthed p))
 
-    let seenMember (id: EntityId) = seen |> List.tryFind (fun p -> p.Id = id)
-
-    match m.ForcedTarget |> Option.bind seenMember with
-    | Some p -> Some p.Id
-    | None ->
-      let tracked =
-        seen
-        |> List.map (fun p -> p, threatOf p.Id m)
-        |> List.filter (fun (_, t) -> t > 0)
-
-      match tracked with
-      | [] ->
-        seen
-        |> List.sortBy (fun p -> Pos.chebyshev m.Pos p.Pos)
-        |> List.tryHead
-        |> Option.map (fun p -> p.Id)
-      | _ ->
-        let top, topThreat = tracked |> List.maxBy snd
-
-        match m.Target |> Option.bind seenMember with
-        | None -> Some top.Id
-        | Some cur ->
-          let curThreat = threatOf cur.Id m
-          // The margin depends on whether the *challenger* is in melee range.
-          let margin = if inMelee m top then meleeMarginBp else rangedMarginBp
-          // Compare by cross-multiplication, so this stays integer.
-          if topThreat * 10000 > curThreat * (10000 + margin) then
-            Some top.Id
-          else
-            Some cur.Id
+    resolveTargetWithSeen m seen
 
   let currentTarget (m: Entity) (w: World) : Entity option =
     match m.ForcedTarget |> Option.bind (aliveMember w) with
@@ -330,8 +449,47 @@ module SimState =
   let logLine (line: string) (w: World) = { w with Log = line :: w.Log }
 
   let mapEntity (id: EntityId) (f: Entity -> Entity) (w: World) =
-    { w with
-        Entities = w.Entities |> List.map (fun e -> if e.Id = id then f e else e) }
+    let mutable cur = w.Entities
+    let mutable idx = 0
+    let mutable found = false
+    let mutable target = Unchecked.defaultof<Entity>
+    let mutable tail = []
+
+    while not found && not (List.isEmpty cur) do
+      let head = cur.Head
+      let next = cur.Tail
+
+      if head.Id = id then
+        found <- true
+        target <- head
+        tail <- next
+      else
+        idx <- idx + 1
+        cur <- next
+
+    if not found then
+      w
+    else
+      let updated = f target
+
+      if obj.ReferenceEquals(updated, target) then
+        w
+      elif idx = 0 then
+        { w with Entities = updated :: tail }
+      else
+        let prefix = Array.zeroCreate<Entity> idx
+        let mutable p = w.Entities
+
+        for i = 0 to idx - 1 do
+          prefix.[i] <- p.Head
+          p <- p.Tail
+
+        let mutable acc = updated :: tail
+
+        for i = idx - 1 downto 0 do
+          acc <- prefix.[i] :: acc
+
+        { w with Entities = acc }
 
   let mapAll (f: Entity -> Entity) (w: World) = { w with Entities = w.Entities |> List.map f }
 
@@ -344,7 +502,7 @@ module SimState =
   /// shortcut: mobs teleport home instead of running; give them a walk if evade has
   /// to be visible on screen.
   let encounterReset (w: World) : World =
-    if not (List.isEmpty (aliveParty w)) || not (resurrectionPending w) then
+    if hasAliveParty w || not (resurrectionPending w) then
       w
     else
       mapAll
@@ -553,45 +711,52 @@ module SimState =
     /// the two-second server tick and the pool clipping at full are all accounted for by
     /// measurement rather than by a second implementation of them.
     let settle (before: World) (w: World) =
-      let engagedHostiles (w: World) =
-        w.Entities |> List.filter (fun e -> e.Faction = Hostile && alive e && e.Engaged)
-
-      if List.isEmpty (aliveParty w) then
+      if not (hasAliveParty w) then
         { w with Forecast = Forecast.empty }
       else
         let f = w.Forecast
+        let mutable drain = f.HealerDrain
+        let mutable engagedCount = 0
+        let mutable allInPrev = true
+        let prevEngaged = f.EngagedHostiles
+        let hasHealDmg = not f.HealDamageThisTick.IsEmpty
 
-        let healers =
-          w.Entities
-          |> List.filter (fun e -> e.Faction = Party && e.Role = Some Healer)
-          |> List.map (fun e -> e.Id)
+        for e in w.Entities do
+          if e.Faction = Party && e.Role = Some Healer then
+            let d =
+              match tryEntity e.Id before with
+              | Some b ->
+                let damage =
+                  if hasHealDmg then
+                    f.HealDamageThisTick |> Map.tryFind e.Id |> Option.defaultValue 0
+                  else
+                    0
 
-        let drainOf id =
-          match tryEntity id before, tryEntity id w with
-          | Some b, Some a ->
-            let damage = f.HealDamageThisTick |> Map.tryFind id |> Option.defaultValue 0
-            b.Resource - a.Resource - damage
-          | _ -> 0
+                b.Resource - e.Resource - damage
+              | None -> 0
 
-        // An exponentially weighted mean over `burnWindow`, in O(1) per healer:
-        // `acc - acc / burnWindow + sample` holds `mean * burnWindow` at rest, so a step
-        // change in the draw is assimilated over about twenty seconds and a single quiet
-        // second cannot erase it. A plain 400-element list would cost a truncation walk
-        // per Tick per healer, which the 30-seed test suite cannot afford.
-        let drain =
-          healers
-          |> List.fold (fun acc id ->
-            let past = acc |> Map.tryFind id |> Option.defaultValue 0
-            Map.add id (past - past / burnWindow + drainOf id) acc) f.HealerDrain
+            let past = drain |> Map.tryFind e.Id |> Option.defaultValue 0
+            let next = past - past / burnWindow + d
+            drain <- Map.add e.Id next drain
+          elif e.Faction = Hostile && e.Health > 0 && e.Engaged then
+            engagedCount <- engagedCount + 1
+            if allInPrev && not (Set.contains e.Id prevEngaged) then
+              allInPrev <- false
 
         let damage =
           (f.PartyDamage * (damageWindow - 1)) / damageWindow + f.DamageThisTick
 
-        // The engaged set is the pull's identity. Growth is a new pull joining the
-        // fight and earns a new epoch; shrinkage is a corpse and earns nothing. A
-        // subset test, not equality: a hostile dying must not look like a new pack.
-        let engaged = engagedHostiles w |> List.map (fun e -> e.Id) |> Set.ofList
-        let grew = not (Set.isSubset engaged f.EngagedHostiles)
+        // Fast path: if the engaged set is identical to last tick's, reuse it
+        // without allocating a new Set (saves O(N log N) per tick at scale).
+        let engaged, grew =
+          if allInPrev && engagedCount = prevEngaged.Count then
+            prevEngaged, false
+          else
+            let mutable s = Set.empty
+            for e in w.Entities do
+              if e.Faction = Hostile && e.Health > 0 && e.Engaged then
+                s <- Set.add e.Id s
+            s, not allInPrev
 
         { w with
             Forecast =

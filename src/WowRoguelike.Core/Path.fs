@@ -85,18 +85,66 @@ module Path =
   [<Literal>]
   let private nodeBudget = 1200
 
+  /// Per-thread reusable scratch buffers for A*/Dijkstra, generation-stamped so
+  /// each search starts in O(1) with zero array allocations.
+  type private SearchScratch() =
+    let mutable seenStamp = Array.zeroCreate<int> 0
+    let mutable closedStamp = Array.zeroCreate<int> 0
+    let mutable best = Array.zeroCreate<int> 0
+    let mutable cameFrom = Array.zeroCreate<int> 0
+    let mutable stamp = 0
+    let openList = MinHeap<int, int>()
+
+    member _.Acquire(size: int) =
+      if seenStamp.Length < size then
+        let cap = max size (max 256 (seenStamp.Length * 2))
+        seenStamp <- Array.zeroCreate<int> cap
+        closedStamp <- Array.zeroCreate<int> cap
+        best <- Array.zeroCreate<int> cap
+        cameFrom <- Array.zeroCreate<int> cap
+        stamp <- 1
+      elif stamp = System.Int32.MaxValue then
+        System.Array.Clear(seenStamp, 0, seenStamp.Length)
+        System.Array.Clear(closedStamp, 0, closedStamp.Length)
+        stamp <- 1
+      else
+        stamp <- stamp + 1
+
+      openList.Clear()
+      stamp, seenStamp, closedStamp, best, cameFrom, openList
+
+    [<System.ThreadStatic; DefaultValue>]
+    static val mutable private instance: SearchScratch
+
+    static member Get() =
+      let s = SearchScratch.instance
+
+      if obj.ReferenceEquals(s, null) then
+        let fresh = SearchScratch()
+        SearchScratch.instance <- fresh
+        fresh
+      else
+        s
+
+  let private getScratch () = SearchScratch.Get()
+
+  let inline private octileXY (ax: int) (ay: int) (bx: int) (by: int) =
+    let dx = abs (ax - bx)
+    let dy = abs (ay - by)
+    let hi = if dx >= dy then dx else dy
+    let lo = if dx >= dy then dy else dx
+    Straight * hi + (Diagonal - Straight) * lo
+
   /// The one search. A* and Dijkstra differ only in the heuristic, which is why
   /// they are the same function.
   ///
-  /// State is three flat arrays indexed by tile rather than a Map and a Set keyed
-  /// by Pos. The grid is already a flat array, so this removes a persistent-map
-  /// lookup and its allocation from every relaxation — which at roughly nine
-  /// microseconds per expansion was the dominant cost of a long search (task 13).
+  /// State lives in generation-stamped flat arrays in a thread-local scratch
+  /// buffer, avoiding O(W*H) allocation and initialization on every call.
   let private searchWith
     (budget: int)
-    (heuristic: Pos -> Pos -> int)
+    (useOctile: bool)
     (g: Grid)
-    (blocked: (Pos -> bool))
+    (blockedIdx: int -> int -> int -> bool)
     (start: Pos)
     (goal: Pos)
     : Result =
@@ -105,61 +153,111 @@ module Path =
         Expanded = 0
         Truncated = false }
     else
-      // The goal may be occupied by whatever is standing on it, so it is exempt
-      // from the blocker — but it must still be a floor tile. Exempting it from
-      // the floor check as well let a move order path an entity into a wall.
-      let passable p = Grid.isFloor g p && (p = goal || not (blocked p))
-
       let width = g.Width
-      let index (p: Pos) = p.Y * width + p.X
-      let goalIndex = index goal
+      let height = g.Height
+      let walls = g.Walls
+      let goalX = goal.X
+      let goalY = goal.Y
+      let goalIndex = goalY * width + goalX
+      let startIndex = start.Y * width + start.X
 
-      let best = Array.create (width * g.Height) System.Int32.MaxValue
-      let cameFrom = Array.create (width * g.Height) -1
-      let closed = Array.create (width * g.Height) false
+      let stamp, seenStamp, closedStamp, best, cameFrom, openList =
+        (getScratch ()).Acquire(width * height)
 
-      // Priority is the estimated total cost; the value is the tile index.
-      let openList = MinHeap<int, int>()
-      best.[index start] <- 0
-      openList.Push(heuristic start goal, index start)
+      let startH = if useOctile then octileXY start.X start.Y goalX goalY else 0
+      seenStamp.[startIndex] <- stamp
+      best.[startIndex] <- 0
+      cameFrom.[startIndex] <- -1
+      openList.Push(startH, startIndex)
 
       let mutable expanded = 0
       let mutable found = false
-      let mutable closest = index start
-      let mutable closestH = heuristic start goal
+      let mutable closest = startIndex
+      let mutable closestH = startH
+      let mutable poppedPriority = 0
+      let mutable current = 0
 
-      while not found && not openList.IsEmpty && expanded < budget do
-        match openList.Pop() with
-        | None -> ()
-        | Some(_, current) ->
-          if closed.[current] then
-            // A stale entry: a shorter route to this tile was already expanded.
-            ()
-          elif current = goalIndex then
-            found <- true
-          else
-            closed.[current] <- true
-            expanded <- expanded + 1
-            let currentPos = { X = current % width; Y = current / width }
-            let gCurrent = best.[current]
-            let h = heuristic currentPos goal
+      let inline isPassable (x: int) (y: int) (idx: int) =
+        x >= 0
+        && y >= 0
+        && x < width
+        && y < height
+        && not walls.[idx]
+        && ((x = goalX && y = goalY) || not (blockedIdx x y idx))
 
-            if h < closestH then
-              closestH <- h
-              closest <- current
+      let inline relax (nx: int) (ny: int) (nIndex: int) (gNext: int) (cur: int) =
+        if closedStamp.[nIndex] <> stamp then
+          if seenStamp.[nIndex] <> stamp || gNext < best.[nIndex] then
+            seenStamp.[nIndex] <- stamp
+            best.[nIndex] <- gNext
+            cameFrom.[nIndex] <- cur
+            let hNext = if useOctile then octileXY nx ny goalX goalY else 0
+            openList.Push(gNext + hNext, nIndex)
 
-            for n in neighbours passable currentPos do
-              let nIndex = index n
+      while not found && expanded < budget && openList.TryPop(&poppedPriority, &current) do
+        if closedStamp.[current] = stamp then
+          ()
+        elif current = goalIndex then
+          found <- true
+        else
+          closedStamp.[current] <- stamp
+          expanded <- expanded + 1
+          let cx = current % width
+          let cy = current / width
+          let gCurrent = best.[current]
+          let h = if useOctile then octileXY cx cy goalX goalY else 0
 
-              if not closed.[nIndex] then
-                let tentative = gCurrent + stepCost currentPos n
+          if h < closestH then
+            closestH <- h
+            closest <- current
 
-                if tentative < best.[nIndex] then
-                  best.[nIndex] <- tentative
-                  cameFrom.[nIndex] <- current
-                  // Re-pushing an improved node is cheaper than supporting
-                  // decrease-key, and the stale-entry check above covers it.
-                  openList.Push(tentative + heuristic n goal, nIndex)
+          // Pre-check the 4 orthogonal neighbours once; diagonal moves require
+          // both adjacent orthogonals to be passable (no corner-cutting).
+          let nIdx = current - width
+          let sIdx = current + width
+          let wIdx = current - 1
+          let eIdx = current + 1
+
+          let okN = isPassable cx (cy - 1) nIdx
+          let okS = isPassable cx (cy + 1) sIdx
+          let okW = isPassable (cx - 1) cy wIdx
+          let okE = isPassable (cx + 1) cy eIdx
+
+          let gStraight = gCurrent + Straight
+          let gDiag = gCurrent + Diagonal
+
+          // Visit in exact row-major (-1..1, -1..1) order to preserve tie-breaking.
+          if okW && okN then
+            let idx = nIdx - 1
+            if isPassable (cx - 1) (cy - 1) idx then
+              relax (cx - 1) (cy - 1) idx gDiag current
+
+          if okN then
+            relax cx (cy - 1) nIdx gStraight current
+
+          if okE && okN then
+            let idx = nIdx + 1
+            if isPassable (cx + 1) (cy - 1) idx then
+              relax (cx + 1) (cy - 1) idx gDiag current
+
+          if okW then
+            relax (cx - 1) cy wIdx gStraight current
+
+          if okE then
+            relax (cx + 1) cy eIdx gStraight current
+
+          if okW && okS then
+            let idx = sIdx - 1
+            if isPassable (cx - 1) (cy + 1) idx then
+              relax (cx - 1) (cy + 1) idx gDiag current
+
+          if okS then
+            relax cx (cy + 1) sIdx gStraight current
+
+          if okE && okS then
+            let idx = sIdx + 1
+            if isPassable (cx + 1) (cy + 1) idx then
+              relax (cx + 1) (cy + 1) idx gDiag current
 
       // A drained open list means the goal is genuinely unreachable, and an
       // empty path is how every caller spells that. Only a search the budget cut
@@ -170,42 +268,31 @@ module Path =
 
   /// One search at the fast budget, and one escalated retry when the fast budget
   /// cut it short **without** a best-effort route to hand back.
-  ///
-  /// That second case is not hypothetical: the graveyard is 112x198 and its
-  /// entrance-to-far-corner routes are longer than 1200 expansions, and a search
-  /// that wanders *away* from the goal before hitting the budget leaves `closest`
-  /// still pointing at the start tile — so the partial route is empty. Every
-  /// caller reads an empty path as "unreachable", which parked a whole Party with
-  /// `goal=(28,187) path=0` while all fourteen survivors sat reachable (measured
-  /// on seed 1: 14 651 floor tiles in the component, A* truncated at 1200).
-  ///
-  /// The retry is bounded by the tile count, which is the most any search can
-  /// expand, so a reachable goal is always found and an unreachable one always
-  /// exhausts the component. It costs one slow plan per stalled attempt, and it is
-  /// only paid when the fast search has already failed — the two outcomes worth
-  /// having are "a route" and "honestly no route", never "no route" for the first.
   let private search
-    (heuristic: Pos -> Pos -> int)
+    (useOctile: bool)
     (g: Grid)
-    (blocked: (Pos -> bool))
+    (blockedIdx: int -> int -> int -> bool)
     (start: Pos)
     (goal: Pos)
     : Result =
-    let quick = searchWith nodeBudget heuristic g blocked start goal
+    let quick = searchWith nodeBudget useOctile g blockedIdx start goal
 
     if not quick.Truncated || not (List.isEmpty quick.Path) then
       quick
     else
-      searchWith (g.Width * g.Height) heuristic g blocked start goal
+      searchWith (g.Width * g.Height) useOctile g blockedIdx start goal
+
+  let internal astarByIndex (g: Grid) (blockedIdx: int -> bool) (start: Pos) (goal: Pos) : Result =
+    search true g (fun _ _ idx -> blockedIdx idx) start goal
 
   let astar (g: Grid) (blocked: (Pos -> bool)) (start: Pos) (goal: Pos) : Result =
-    search octile g blocked start goal
+    search true g (fun x y _ -> blocked { X = x; Y = y }) start goal
 
   /// The same search with no heuristic. Kept because comparing its expansion
   /// count against A*'s is the entire lesson about why a heuristic is worth
   /// having.
   let dijkstra (g: Grid) (blocked: (Pos -> bool)) (start: Pos) (goal: Pos) : Result =
-    search (fun _ _ -> 0) g blocked start goal
+    search false g (fun x y _ -> blocked { X = x; Y = y }) start goal
 
   /// Total cost of a path, in the same units A* minimises.
   let pathCost (start: Pos) (path: Pos list) =
@@ -253,11 +340,18 @@ module Path =
   /// A diagonal step additionally requires both of its orthogonal neighbours to
   /// be open, matching `neighbours`, so sight does not slip between two
   /// diagonally adjacent pillars either.
-  let private lineClear (passable: Pos -> bool) (a: Pos) (b: Pos) =
+  let private lineClear (g: Grid) (a: Pos) (b: Pos) =
+    let width = g.Width
+    let height = g.Height
+    let walls = g.Walls
+
+    let inline passable (px: int) (py: int) =
+      px >= 0 && py >= 0 && px < width && py < height && not walls.[py * width + px]
+
     let dx = abs (b.X - a.X)
     let dy = abs (b.Y - a.Y)
-    let sx = sign (b.X - a.X)
-    let sy = sign (b.Y - a.Y)
+    let sx = if b.X > a.X then 1 elif b.X < a.X then -1 else 0
+    let sy = if b.Y > a.Y then 1 elif b.Y < a.Y then -1 else 0
     let mutable err = dx - dy
     let mutable x = a.X
     let mutable y = a.Y
@@ -284,13 +378,12 @@ module Path =
       let arrived = x = b.X && y = b.Y
 
       if not arrived then
-        if not (passable { X = x; Y = y }) then
+        if not (passable x y) then
           ok <- false
         elif
           x <> previousX
           && y <> previousY
-          && (not (passable { X = x; Y = previousY })
-              || not (passable { X = previousX; Y = y }))
+          && (not (passable x previousY) || not (passable previousX y))
         then
           ok <- false
 
@@ -304,5 +397,4 @@ module Path =
   ///
   /// Entities deliberately do not block sight, so only walls are consulted.
   let lineOfSight (g: Grid) (a: Pos) (b: Pos) =
-    let passable p = Grid.isFloor g p
-    a = b || (lineClear passable a b && lineClear passable b a)
+    a = b || (lineClear g a b && lineClear g b a)
