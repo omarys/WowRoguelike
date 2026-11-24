@@ -6651,26 +6651,74 @@ module Content =
   let private deviatePython id pos =
     wc id "Deviate Python" CreatureType.Beast 19 180 (28, 37) 2.0 826 [] (Some 20) pos
 
+  /// Tendon Rip (Deviate Crocolisk): physical bite with a 30% movement snare.
+  let private tendonRip =
+    { Name = "Tendon Rip"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 12.0
+      ResourceCost = 0
+      Stance = None
+      Interruptible = false
+      Range = 1
+      TargetKind = Foe
+      Effects = [ Damage(28, 37); Cripple(secTicks 8.0, 3000) ] }
+
+  /// Toxic Spit (Deviate Venomwing): ranged Nature bolt with a short poison DoT.
+  let private toxicSpit =
+    { Name = "Toxic Spit"
+      CastTicks = secTicks 2.0
+      CooldownTicks = secTicks 8.0
+      ResourceCost = 0
+      Stance = None
+      Interruptible = true
+      Range = 8
+      TargetKind = Foe
+      Effects = [ SpellDamage(30, 42, Nature); DamageOverTime(secTicks 9.0, 5) ] }
+
+  /// Wild Regeneration (Deviate Shambler): heal-over-time on a wounded ally.
+  let private wildRegeneration =
+    { Name = "Wild Regeneration"
+      CastTicks = secTicks 2.0
+      CooldownTicks = secTicks 18.0
+      ResourceCost = 0
+      Stance = None
+      Interruptible = true
+      Range = 8
+      TargetKind = Ally
+      Effects = [ HealOverTime(secTicks 12.0, 15) ] }
+
+  /// Grasping Vines (Verdan the Everliving): area Nature knockdown + 10s root.
+  let private graspingVines =
+    { Name = "Grasping Vines"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 18.0
+      ResourceCost = 0
+      Stance = None
+      Interruptible = false
+      Range = 2
+      TargetKind = Foe
+      Effects = [ AreaDamage(2, 65, 85); Stun(secTicks 2.0); Root(secTicks 10.0) ] }
+
   /// Deviate Crocolisk (5053): normal, 449 health. Tendon Rip is a snare.
   let private deviateCrocolisk id pos =
-    wc id "Deviate Crocolisk" CreatureType.Beast 19 449 (28, 37) 2.0 826 [] (Some 20) pos
+    wc id "Deviate Crocolisk" CreatureType.Beast 19 449 (28, 37) 2.0 826 [ tendonRip ] (Some 20) pos
 
   /// Deviate Dreadfang (5056): elite wind serpent with Terrify.
   let private deviateDreadfang id pos =
-    wc id "Deviate Dreadfang" CreatureType.Beast 21 1563 (52, 69) 2.0 897 [] (Some 20) pos
+    wc id "Deviate Dreadfang" CreatureType.Beast 21 1563 (52, 69) 2.0 897 [ terrify ] (Some 20) pos
 
   /// Deviate Venomwing (5756): elite wind serpent, ranged Toxic Spit.
   let private deviateVenomwing id pos =
-    wc id "Deviate Venomwing" CreatureType.Beast 21 1563 (52, 69) 2.0 897 [] (Some 20) pos
+    wc id "Deviate Venomwing" CreatureType.Beast 21 1563 (52, 69) 2.0 897 [ toxicSpit ] (Some 20) pos
 
   /// Deviate Lasher (5055): normal, 135 health — the dungeon's filler trash, and
   /// the only thing in here that dies to a single Arcane Explosion.
   let private deviateLasher id pos =
     wc id "Deviate Lasher" CreatureType.Elemental 20 135 (32, 43) 2.0 819 [] (Some 20) pos
 
-  /// Deviate Shambler (5761): casts Wild Regeneration under half health.
+  /// Deviate Shambler (5761): casts Wild Regeneration on wounded allies.
   let private deviateShambler id pos =
-    wc id "Deviate Shambler" CreatureType.Elemental 20 1299 (47, 62) 2.0 712 [] (Some 20) pos
+    wc id "Deviate Shambler" CreatureType.Elemental 20 1299 (47, 62) 2.0 712 [ wildRegeneration ] (Some 20) pos
 
   /// Evolving Ectoplasm (3640): the ooze that splits. The clone is not modelled,
   /// so this is the ooze itself and nothing more.
@@ -6692,10 +6740,10 @@ module Content =
     wc id "Skum" CreatureType.Beast 21 3908 (61, 81) 2.0 854 [] (Some 20) pos
 
   /// Verdan the Everliving (5775): 4,168 health, a 3.5 s swing for 247-328, and
-  /// Grasping Vines — a knockdown plus a ten-second immobilise the vocabulary has
-  /// no case for. Elemental, so he cannot be polymorphed.
+  /// Grasping Vines — an area knockdown plus a ten-second immobilise. Elemental,
+  /// so he cannot be polymorphed.
   let private verdan id pos =
-    wc id "Verdan the Everliving" CreatureType.Elemental 21 4168 (247, 328) 3.5 854 [] (Some 20) pos
+    wc id "Verdan the Everliving" CreatureType.Elemental 21 4168 (247, 328) 3.5 854 [ graspingVines ] (Some 20) pos
 
   /// Lady Anacondra, level 20 elite: 2214 health, 154-183 a swing. She also
   /// carries a Thorns aura in Classic; a reflect-damage effect is not modelled.
@@ -7064,12 +7112,7 @@ module Content =
       partyTiles |> List.forall (fun sp -> Pos.chebyshev p sp > safeSpawnBuffer)
 
     let mobTiles room =
-      let candidates = freeTiles room |> List.filter isSafeForMob
-
-      if room = "the-screaming-gully" then
-        candidates |> List.sortBy (fun p -> p.Y, p.X)
-      else
-        candidates
+      freeTiles room |> List.filter isSafeForMob
 
     let place room (mk: int -> Pos -> Entity) =
       match mobTiles room with
@@ -7117,7 +7160,7 @@ module Content =
           | _ -> (List.rev acc, rest)
 
         let knots, overflow =
-          fill mks (freeTiles room |> List.filter (fun p -> Pos.chebyshev p a <= 2)) []
+          fill mks (mobTiles room |> List.filter (fun p -> Pos.chebyshev p a <= 2)) []
 
         knots @ (overflow |> List.choose (place room))
       | None -> []
@@ -7235,7 +7278,7 @@ module Content =
       TargetKind = Foe
       Effects = [ AreaDamage(1, 267, 307) ] }
 
-  /// Flame Spike (8814): 93-107 Fire, then 50 every 3 s for 9 s.
+  /// Flame Spike (8814): 93-107 Fire, then 50 every 3 s for 9 s (~17/s).
   let private flameSpike =
     { Name = "Flame Spike"
       CastTicks = secTicks 3.0
@@ -7245,9 +7288,9 @@ module Content =
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ SpellDamage(93, 107, Fire); DamageOverTime(secTicks 9.0, 50) ] }
+      Effects = [ SpellDamage(93, 107, Fire); DamageOverTime(secTicks 9.0, 17) ] }
 
-  /// Immolate (11665): 148 up front, then 51 every 3 s for 15 s.
+  /// Immolate (11665): 148 up front, then 51 every 3 s for 15 s (17/s).
   let private immolate =
     { Name = "Immolate"
       CastTicks = secTicks 2.0
@@ -7257,7 +7300,21 @@ module Content =
       Interruptible = true
       Range = 8
       TargetKind = Foe
-      Effects = [ SpellDamage(148, 148, Fire); DamageOverTime(secTicks 15.0, 51) ] }
+      Effects = [ SpellDamage(148, 148, Fire); DamageOverTime(secTicks 15.0, 17) ] }
+
+  /// Arcanist Doan's Arcane Explosion (9433): instant Arcane blast to everything
+  /// within 3 tiles. Separate from the player's `arcaneExplosion` (which has
+  /// `Range = 0` / `TargetKind = Self` and is never reachable by `mobDecisions`).
+  let private scarletArcaneExplosion =
+    { Name = "Arcane Explosion"
+      CastTicks = ticks 0
+      CooldownTicks = secTicks 10.0
+      ResourceCost = 185
+      Stance = None
+      Interruptible = false
+      Range = 3
+      TargetKind = Foe
+      Effects = [ AreaDamage(3, 101, 115) ] }
 
   /// Hammer of Justice (853): instant, 3 s stun, one minute cooldown.
   let private hammerOfJustice =
@@ -7350,6 +7407,7 @@ module Content =
   type private ScarletMob =
     { Key: string
       Name: string
+      CreatureType: CreatureType
       Level: int
       Health: int
       Damage: int * int
@@ -7363,6 +7421,7 @@ module Content =
   let private sm key name level health damage swing abilities : ScarletMob =
     { Key = key
       Name = name
+      CreatureType = CreatureType.Humanoid
       Level = level
       Health = health
       Damage = damage
@@ -7374,6 +7433,9 @@ module Content =
   let private smC key name level health damage swing abilities : ScarletMob =
     { sm key name level health damage swing abilities with Mana = 40 * level }
 
+  let private asType (ct: CreatureType) (m: ScarletMob) : ScarletMob =
+    { m with CreatureType = ct }
+
   /// Every creature of the four wings, one row each, straight from the 1.12
   /// database. The wing lists below say where each one is met.
   let private scarletRoster : ScarletMob list =
@@ -7382,21 +7444,21 @@ module Content =
       smC "scryer" "Scarlet Scryer" 31 2550 (41, 54) 2.00 [ manaBurn; scarletFireball ]
       sm "sentry" "Scarlet Sentry" 31 3018 (74, 98) 2.00 [ cleave ]
       sm "torturer" "Scarlet Torturer" 31 3018 (87, 115) 2.00 [ cleave ]
-      smC "spirit" "Unfettered Spirit" 32 1057 (43, 57) 2.00 [ scarletFrostbolt ]
-      smC "phantasm" "Haunting Phantasm" 33 3330 (78, 104) 2.00 [ scarletSmite ]
+      smC "spirit" "Unfettered Spirit" 32 1057 (43, 57) 2.00 [ scarletFrostbolt ] |> asType CreatureType.Undead
+      smC "phantasm" "Haunting Phantasm" 33 3330 (78, 104) 2.00 [ scarletSmite ] |> asType CreatureType.Undead
       sm "vishas" "Interrogator Vishas" 32 5328 (90, 104) 2.00 []
-      smC "thalnos" "Bloodmage Thalnos" 34 7736 (75, 99) 2.00 [ flameSpike; immolate ]
+      smC "thalnos" "Bloodmage Thalnos" 34 7736 (75, 99) 2.00 [ flameSpike; immolate ] |> asType CreatureType.Undead
       // Library
       smC "adept" "Scarlet Adept" 34 2901 (44, 58) 2.00 [ scarletSmite; scarletRenew ]
       sm "gallant" "Scarlet Gallant" 34 2901 (75, 99) 2.00 [ cleave ]
-      sm "hound" "Scarlet Tracking Hound" 34 3489 (60, 80) 1.50 []
+      sm "hound" "Scarlet Tracking Hound" 34 3489 (60, 80) 1.50 [] |> asType CreatureType.Beast
       sm "monk" "Scarlet Monk" 36 3831 (108, 143) 1.80 [ cleave ]
       sm "soldier" "Scarlet Soldier" 36 3831 (85, 112) 2.00 [ cleave ]
-      smC "azshir" "Azshir the Sleepless" 33 2784 (73, 96) 2.00 [ scarletFrostbolt ]
-      sm "champion-fallen" "Fallen Champion" 33 3330 (78, 104) 2.00 [ cleave ]
-      sm "ironspine" "Ironspine" 33 3330 (83, 99) 2.00 []
+      smC "azshir" "Azshir the Sleepless" 33 2784 (73, 96) 2.00 [ scarletFrostbolt ] |> asType CreatureType.Undead
+      sm "champion-fallen" "Fallen Champion" 33 3330 (78, 104) 2.00 [ cleave ] |> asType CreatureType.Undead
+      sm "ironspine" "Ironspine" 33 3330 (83, 99) 2.00 [] |> asType CreatureType.Undead
       sm "loksey" "Houndmaster Loksey" 34 7736 (114, 152) 2.00 [ cleave ]
-      smC "doan" "Arcanist Doan" 37 8730 (69, 79) 2.00 [ scarletFireball; arcaneExplosion; polymorph ]
+      smC "doan" "Arcanist Doan" 37 8730 (69, 79) 2.00 [ scarletFireball; scarletArcaneExplosion; polymorph ]
       // Armory
       sm "beastmaster" "Scarlet Beastmaster" 35 3660 (83, 110) 2.00 [ cleave ]
       smC "diviner" "Scarlet Diviner" 35 3027 (45, 60) 2.00 [ scarletFireball ]
@@ -7415,7 +7477,7 @@ module Content =
       sm "champion" "Scarlet Champion" 40 3678 (104, 138) 2.00 []
       smC "abbot" "Scarlet Abbot" 40 3678 (104, 138) 2.00 [ scarletSmite; scarletHeal ]
       smC "fairbanks" "High Inquisitor Fairbanks" 40 6130 (151, 200) 2.00 [ scarletSmite; scarletHeal ]
-      sm "mograine" "Scarlet Commander Mograine" 42 5945 (181, 204) 2.20 [ hammerOfJustice ]
+      smC "mograine" "Scarlet Commander Mograine" 42 5945 (181, 204) 2.20 [ hammerOfJustice ]
       smC "whitemane" "High Inquisitor Whitemane" 42 5284 (138, 152) 2.00 [ scarletSmite; scarletHeal; scarletRenew ] ]
 
   let private scarletMobOf (key: string) : ScarletMob =
@@ -7515,10 +7577,15 @@ module Content =
     : Entity list =
     let floors = MapsScarlet.floorTiles grid
     let entrance = floors |> List.maxBy (fun p -> p.Y, -p.X)
+    let dist = Dungeon.floodFill grid entrance
 
+    // Sort by true BFS path distance from the entrance so circular boss sanctums
+    // behind corridors and turns always sit at the deepest end of the walk.
     let walk =
       floors
-      |> List.sortBy (fun p -> Pos.chebyshev p entrance, p.Y, p.X)
+      |> List.sortBy (fun p ->
+        let d = dist.[p.Y * grid.Width + p.X]
+        (if d < 0 then System.Int32.MaxValue else d), p.Y, p.X)
       |> Array.ofList
 
     let free = System.Collections.Generic.HashSet<Pos>(occupied)
@@ -7558,14 +7625,25 @@ module Content =
       let chosen = ResizeArray<Pos>()
 
       for k in 0 .. pulls - 1 do
-        let lo = k * walk.Length / (pulls + 1)
-        let hi = max (lo + 1) ((k + 1) * walk.Length / (pulls + 1))
+        let lo = k * walk.Length / pulls
+        let hi = max (lo + 1) ((k + 1) * walk.Length / pulls)
 
-        walk.[lo .. hi - 1]
-        |> Array.tryFind (fun p ->
+        let fits (p: Pos) =
           Pos.chebyshev p anchor > partyRoom
-          && chosen |> Seq.forall (fun c -> Pos.chebyshev c p >= packSpacing))
-        |> Option.iter chosen.Add
+          && chosen |> Seq.forall (fun c -> Pos.chebyshev c p >= packSpacing)
+
+        let pick =
+          if k = pulls - 1 then
+            // Anchor the final boss pull deep inside the wing's boss sanctum.
+            let mid = lo + (hi - lo) / 2
+
+            walk.[mid .. hi - 1]
+            |> Array.tryFind fits
+            |> Option.orElseWith (fun () -> walk.[lo .. hi - 1] |> Array.tryFindBack fits)
+          else
+            walk.[lo .. hi - 1] |> Array.tryFind fits
+
+        pick |> Option.iter chosen.Add
 
       // A wing too cramped for that spacing still needs its pulls: fall back to
       // evenly spaced positions along the walk.
@@ -7593,7 +7671,7 @@ module Content =
             mob
               (takeId ())
               (nameOf template)
-              CreatureType.Humanoid
+              template.CreatureType
               template.Level
               template.Health
               template.Mana
