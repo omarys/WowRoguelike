@@ -16,11 +16,12 @@ Stitched dungeon (Maps.stitch):
     - Southeast from Gully -> The Winding Chasm -> Crag of the Everliving
       (sweeping eastern outer ring + inner chamber) + Crag of the Everliving South
 """
+import os
 from collections import deque
 from pathlib import Path
 from PIL import Image
 
-IMG_DIR = Path("images/Maps/WailingCaverns")
+IMG_DIR = Path(os.environ.get("WC_IMG_DIR", "images/Maps/WailingCaverns"))
 OUT_FS = Path("src/WowRoguelike.Core/Maps.fs")
 
 SECTION_IMAGES = [
@@ -112,6 +113,19 @@ def compass_direction(a: list[tuple[int, int]], b: list[tuple[int, int]]) -> str
     return "south" if dy > 0 else "north"
 
 
+def widen_pinches(grid: list[list[str]]) -> None:
+    """Widen any 1-tile horizontal or vertical corridor pinch so a 5-hero party
+    never deadlocks on a single-tile bottleneck."""
+    h, w = len(grid), len(grid[0])
+    for y in range(2, h - 2):
+        for x in range(2, w - 2):
+            if grid[y][x] == ".":
+                if grid[y - 1][x] == "#" and grid[y + 1][x] == "#" and grid[y][x - 1] == "." and grid[y][x + 1] == ".":
+                    grid[y - 1][x] = "."
+                if grid[y][x - 1] == "#" and grid[y][x + 1] == "#" and grid[y - 1][x] == "." and grid[y + 1][x] == ".":
+                    grid[y][x - 1] = "."
+
+
 def extract_section_rooms(target_w: int = 56) -> list[tuple[str, list[str], int]]:
     entries = []
     for name in SECTION_IMAGES:
@@ -129,8 +143,12 @@ def extract_section_rooms(target_w: int = 56) -> list[tuple[str, list[str], int]
         comps.sort(key=len, reverse=True)
         for i, comp in enumerate(comps):
             room = crop_component(grid, comp)
+            rg = [list(r) for r in room]
+            widen_pinches(rg)
+            room = ["".join(r) for r in rg]
+            cnt = sum(r.count(".") for r in room)
             rname = name if i == 0 else f"{name}-{compass_direction(comps[0], comp)}"
-            entries.append((rname, room, len(comp)))
+            entries.append((rname, room, cnt))
     return entries
 
 
@@ -220,8 +238,14 @@ def extract_world_map(gw: int = 100, gh: int = 80) -> tuple[list[str], tuple[int
     # 4. Winding Chasm + Crag of the Everliving (central-east & southeast figure-8)
     interior |= _flood_region(
         px, w, h,
-        [(565, 325), (610, 360), (540, 450), (590, 495), (724, 442)],
+        [(550, 275), (565, 325), (610, 360), (540, 450), (590, 495), (724, 442)],
         thresh=0.44, bounds=(500, 265, 765, 585),
+    )
+    # 4b. Crag of the Everliving inner pink chamber (Verdan the Everliving's chamber)
+    interior |= _flood_region(
+        px, w, h,
+        [(619, 495), (615, 455), (625, 485)],
+        thresh=0.40, bounds=(575, 415, 655, 535),
     )
     # 5. Crag of the Everliving South (southernmost loop — Skum's lair)
     interior |= _flood_region(
@@ -290,13 +314,16 @@ def extract_world_map(gw: int = 100, gh: int = 80) -> tuple[list[str], tuple[int
     _carve_path(g, to_grid(145, 330), to_grid(155, 365), ".", radius=1)
     _carve_path(g, to_grid(115, 320), to_grid(90, 295), ".", radius=1)
 
-    # 5. Screaming Gully -> Winding Chasm (eastern diagonal river crossing)
+    # 5. Screaming Gully -> Winding Chasm (eastern diagonal river crossing + north cove)
     _carve_path(g, to_grid(455, 250), to_grid(510, 290), ".", radius=1)
     _carve_path(g, to_grid(510, 290), to_grid(555, 320), ".", radius=1)
+    _carve_path(g, to_grid(550, 275), to_grid(565, 325), ".", radius=1)
 
-    # 6. Winding Chasm -> Crag of the Everliving (inner chamber, western path, outer east ring)
+    # 6. Winding Chasm -> Crag of the Everliving (inner pink chamber, western path, outer east ring)
     _carve_path(g, to_grid(575, 385), to_grid(545, 435), ".", radius=1)
     _carve_path(g, to_grid(610, 380), to_grid(615, 445), ".", radius=1)
+    _carve_path(g, to_grid(615, 445), to_grid(619, 495), ".", radius=1)
+    _carve_path(g, to_grid(619, 495), to_grid(605, 520), ".", radius=1)
     _carve_path(g, to_grid(635, 390), to_grid(695, 415), ".", radius=1)
     _carve_path(g, to_grid(695, 415), to_grid(730, 465), ".", radius=1)
     _carve_path(g, to_grid(730, 465), to_grid(705, 535), ".", radius=1)
@@ -308,6 +335,9 @@ def extract_world_map(gw: int = 100, gh: int = 80) -> tuple[list[str], tuple[int
     _carve_path(g, to_grid(585, 520), to_grid(565, 565), ".", radius=1)
     _carve_path(g, to_grid(565, 565), to_grid(560, 595), ".", radius=1)
     _carve_path(g, to_grid(635, 555), to_grid(585, 580), ".", radius=1)
+
+    # Eliminate any 1-tile corridor pinches before taking the main component
+    widen_pinches(g)
 
     # Keep only the single main connected component (and preserve 1-cell border)
     for x in range(gw):
@@ -347,8 +377,8 @@ def extract_world_map(gw: int = 100, gh: int = 80) -> tuple[list[str], tuple[int
         if iy < 405:
             return "C"      # the-winding-chasm
 
-        # Crag of the Everliving South (southern loop, y >= 542 and x < 625)
-        if iy >= 542 and ix < 625:
+        # Crag of the Everliving South (southern loop + lower approach, y >= 542 and x < 665)
+        if iy >= 542 and ix < 665:
             return "S"      # crag-of-the-everliving-south
 
         # Crag of the Everliving (inner chamber + sweeping eastern outer ring)
@@ -455,14 +485,42 @@ module Maps =
       let dy = a.Y - b.Y
       dx * dx + dy * dy
 
+    let prioritizeLandmarks (landmarks: Pos list) (tiles: Pos list) =
+      let chosen = ResizeArray<Pos>()
+      let used = System.Collections.Generic.HashSet<Pos>()
+
+      for lm in landmarks do
+        let best =
+          tiles
+          |> List.filter (fun p -> not (used.Contains p))
+          |> List.sortBy (fun p -> dist2 p lm, p.Y, p.X)
+          |> List.tryHead
+
+        match best with
+        | Some p ->
+          used.Add p |> ignore
+          chosen.Add p
+        | None -> ()
+
+      (Seq.toList chosen) @ (tiles |> List.filter (fun p -> not (used.Contains p)))
+
     let roomFloors =
       buckets
       |> Map.map (fun name tiles ->
         let list = Seq.toList tiles
-        if name = "the-screaming-gully" then
+        match name with
+        | "the-screaming-gully" ->
           list |> List.sortBy (fun p -> dist2 p worldEntrance, p.Y, p.X)
-        else
-          list)
+        | "the-pit-of-fangs" ->
+          // Place Cobrahn (upper gold curl), Pythas (south green alcove), Kresh (river loop)
+          prioritizeLandmarks [ {{ X = 24; Y = 32 }}; {{ X = 19; Y = 47 }}; {{ X = 10; Y = 22 }} ] list
+        | "crag-of-the-everliving" ->
+          // Place Serpentis (sweeping outer east ridge) and Verdan (inner pink chamber)
+          prioritizeLandmarks [ {{ X = 94; Y = 57 }}; {{ X = 81; Y = 62 }} ] list
+        | "dreamers-rock-east" ->
+          // Center Mutanus in the eastern pool cove
+          prioritizeLandmarks [ {{ X = 53; Y = 9 }} ] list
+        | _ -> list)
 
     canvas, worldEntrance, roomFloors
 """
