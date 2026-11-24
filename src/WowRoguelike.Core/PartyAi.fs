@@ -138,87 +138,93 @@ module PartyAi =
 
     heals || lethal || c.Ability.CastTicks >= secTicks 3.0
 
+  let private isLeap (a: Ability) =
+    a.Effects
+    |> List.exists (function
+      | Charge
+      | Intercept -> true
+      | _ -> false)
+
+  /// Per-tick cached entity slices and lazy interrupt assignment map, computed
+  /// once in `decide` and threaded through the role lanes to avoid repeated
+  /// full-world scans and O(party * hostiles) interrupt recomputations.
+  [<NoComparison; NoEquality>]
+  type private TickCtx =
+    { Party: Entity list
+      Hostiles: Entity list
+      CastingHostiles: Entity list
+      Interrupts: Lazy<Map<EntityId, EntityId>> }
+
   /// Interrupts are scarce and shared, and the Party is assumed to be talking: each
   /// caster caught in the middle of a spell is assigned exactly one interrupter, so
   /// two members never spend a kick on the same cast and nobody holds back waiting for
-  /// permission. The assignment is computed from the World rather than passed as a
-  /// message — every member reads the same World and so reaches the same answer, which
-  /// makes it a consensus that cannot drift out of date.
-  ///
-  /// The cheapest kick that can actually land takes the job: a melee interrupt is back
-  /// in ten seconds where a Counterspell is back in twenty-four, so a sword already in
-  /// range keeps the long cooldown in reserve. Ties go to the closer member and then to
-  /// the lower id, so the same cast gets the same answer on the next Tick.
-  let private interruptAssignments (w: World) =
-    SimState.aliveHostiles w
-    |> List.filter (fun h ->
-      h.Casting
-      |> Option.exists (fun c -> c.Ability.Interruptible && worthBreaking w c))
-    |> List.choose (fun h ->
-      SimState.aliveParty w
-      |> List.choose (fun m ->
-        m.Abilities
-        |> List.filter interrupts
-        |> List.filter (fun a -> canUse m a.Name && SimState.canReach a.Range m h w)
-        |> List.sortBy (fun a -> ((if a.Range <= 1 then 0 else 1), a.CooldownTicks))
+  /// permission.
+  let private interruptAssignments (w: World) (party: Entity list) (castingHostiles: Entity list) =
+    if List.isEmpty castingHostiles then
+      Map.empty
+    else
+      castingHostiles
+      |> List.filter (fun h ->
+        h.Casting
+        |> Option.exists (fun c -> c.Ability.Interruptible && worthBreaking w c))
+      |> List.choose (fun h ->
+        party
+        |> List.choose (fun m ->
+          m.Abilities
+          |> List.filter interrupts
+          |> List.filter (fun a -> canUse m a.Name && SimState.canReach a.Range m h w)
+          |> List.sortBy (fun a -> ((if a.Range <= 1 then 0 else 1), a.CooldownTicks))
+          |> List.tryHead
+          |> Option.map (fun a -> ((if a.Range <= 1 then 0 else 1), Pos.chebyshev m.Pos h.Pos, m.Id)))
+        |> List.sort
         |> List.tryHead
-        |> Option.map (fun a -> ((if a.Range <= 1 then 0 else 1), Pos.chebyshev m.Pos h.Pos, m.Id)))
-      |> List.sort
-      |> List.tryHead
-      |> Option.map (fun (_, _, id) -> h.Id, id))
-    |> Map.ofList
+        |> Option.map (fun (_, _, id) -> h.Id, id))
+      |> Map.ofList
 
-  /// The hostile ids this member is the agreed interrupter for. Evaluated once per
-  /// call, because the assignment walks every pair: asking it inside a `List.filter`
-  /// predicate recomputes the whole thing once per mob.
-  let private interruptTargets (w: World) (m: Entity) : Set<EntityId> =
-    interruptAssignments w
-    |> Map.toList
-    |> List.choose (fun (hostile, interrupter) -> if interrupter = m.Id then Some hostile else None)
-    |> Set.ofList
+  let private makeTickCtx (w: World) : TickCtx =
+    let party = SimState.aliveParty w
+    let hostiles = SimState.aliveHostiles w
+
+    let castingHostiles =
+      hostiles
+      |> List.filter (fun h -> h.Casting |> Option.exists (fun c -> c.Ability.Interruptible))
+
+    { Party = party
+      Hostiles = hostiles
+      CastingHostiles = castingHostiles
+      Interrupts = lazy (interruptAssignments w party castingHostiles) }
+
+  /// The hostile ids this member is the agreed interrupter for.
+  let private interruptTargets (ctx: TickCtx) (m: Entity) : Set<EntityId> =
+    if List.isEmpty ctx.CastingHostiles then
+      Set.empty
+    else
+      ctx.Interrupts.Value
+      |> Map.toList
+      |> List.choose (fun (hostile, interrupter) -> if interrupter = m.Id then Some hostile else None)
+      |> Set.ofList
 
   /// What this member owes the Party: the kick it should spend and the caster it is
   /// the assigned interrupter for, if any.
-  ///
-  /// This exists because an assignment that no lane reads is not a delay, it is a
-  /// **dropped** interrupt. `interruptAssignments` gives each cast to exactly one
-  /// member, so a lane that ignores its assignment does not hand the job back to the
-  /// Warrior — the others were told it was covered. That is what happened to the
-  /// Shaman: the healer seat never read `interruptTargets`, and Earth Shock's 6 s
-  /// cooldown beat the Mage's 24 s Counterspell in the assignment order, so the
-  /// shaman won casts it then never kicked (`sim shmana 30`: zero Earth Shock casts,
-  /// `.pi/research/octowow/shaman-damage-and-interrupts.md` §1-2). The same hole
-  /// swallowed a Paladin's Hammer of Justice, which `breaksCast` reads as a kick too.
-  ///
-  /// Every lane that can interrupt answers with this function, and
-  /// `a cast the party holds a kick for is broken exactly once` asserts the
-  /// contract over the whole roster — the class that lands next cannot silently
-  /// reintroduce the hole, because the test is written against `decide`, not against
-  /// a lane.
-  let private assignedKick (w: World) (m: Entity) : (Ability * EntityId) option =
-    let mine = interruptTargets w m
+  let private assignedKick (w: World) (ctx: TickCtx) (m: Entity) : (Ability * EntityId) option =
+    if List.isEmpty ctx.CastingHostiles then
+      None
+    else
+      let mine = interruptTargets ctx m
 
-    SimState.aliveHostiles w
-    |> List.filter (fun h -> h.Casting |> Option.exists (fun c -> c.Ability.Interruptible))
-    |> List.filter (fun h -> Set.contains h.Id mine)
-    |> List.sortBy (fun h -> Pos.chebyshev m.Pos h.Pos)
-    |> List.tryPick (fun h ->
-      m.Abilities
-      |> List.filter interrupts
-      // A leap is not a kick. `Charge` and `Intercept` carry a `Stun`, so they read
-      // as interrupts and would win assignments a real kick should take — but both
-      // move the kicker to the target, and a Tank that arrives ahead of its healers
-      // is the geometry the Intercept note in `tankOrders` measures against
-      // (7 of 12 against 10 without). Feral Charge is modeled without its leap, so
-      // it stays a kick; the Warrior's Shield Bash was and remains its only one.
-      |> List.filter (fun a ->
-        a.Effects
-        |> List.exists (function Charge | Intercept -> true | _ -> false)
-        |> not)
-      |> List.filter (fun a -> canUse m a.Name && SimState.canReach a.Range m h w)
-      |> List.sortBy (fun a -> ((if a.Range <= 1 then 0 else 1), a.CooldownTicks))
-      |> List.tryHead
-      |> Option.map (fun a -> a, h.Id))
+      if Set.isEmpty mine then
+        None
+      else
+        ctx.CastingHostiles
+        |> List.filter (fun h -> Set.contains h.Id mine)
+        |> List.sortBy (fun h -> Pos.chebyshev m.Pos h.Pos)
+        |> List.tryPick (fun h ->
+          m.Abilities
+          |> List.filter (fun a -> interrupts a && not (isLeap a))
+          |> List.filter (fun a -> canUse m a.Name && SimState.canReach a.Range m h w)
+          |> List.sortBy (fun a -> ((if a.Range <= 1 then 0 else 1), a.CooldownTicks))
+          |> List.tryHead
+          |> Option.map (fun a -> a, h.Id))
 
   /// Roughly how hard an ability hits, for ordering a kit the way a player would
   /// rather than by the order it happens to sit in the list. A sweep is scored per
@@ -357,25 +363,32 @@ module PartyAi =
   /// coarse (a wall behind the mob, the pack distance in three-tile bands, then
   /// open floor) and the two coarse keys are compared on their own, so a Tank that
   /// already holds a good spot stays on it instead of orbiting forever.
-  let private holdSpot (w: World) (m: Entity) (tank: Entity) (party: Entity list) =
+  let private hasBuilder (e: Entity) =
+    e.Abilities
+    |> List.exists (fun a ->
+      a.CooldownTicks = ticks 0
+      && a.TargetKind = Foe
+      && a.Name <> "Ambush"
+      && a.Name <> "Ravage"
+      && a.Effects |> List.exists (function ComboPoint _ -> true | _ -> false))
+
+  let private holdSpot (w: World) (m: Entity) (tank: Entity) (party: Entity list) (aliveHostiles: Entity list) =
     // Whoever brings a builder that wants the mob's back, which is a fact about the
     // kit's numbers rather than its names (`builders`).
-    let backstabber = party |> List.exists (fun e -> not (List.isEmpty (builders e)))
+    let backstabber = party |> List.exists hasBuilder
 
     // A caster behind a corner cannot help, and standing closer does not fix it:
     // the mob has to be pulled out of wherever it is hiding.
     let blind =
       party
-      |> List.filter (fun e ->
-        e.Abilities |> List.exists (fun a -> a.TargetKind = Foe && a.Range > 1))
-      |> List.exists (fun e -> not (Path.lineOfSight w.Grid e.Pos m.Pos))
+      |> List.exists (fun e ->
+        (e.Abilities |> List.exists (fun a -> a.TargetKind = Foe && a.Range > 1))
+        && not (Path.lineOfSight w.Grid e.Pos m.Pos))
 
     // `blind` above asks the *damage* casters whether they can see the mob. It says
     // nothing about the healers, and `SimState.canReach` is within-range *and*
     // line-of-sight — so a Tank its healers cannot see takes no healing at all, at
-    // any distance. That is how a party watches its Tank die with both healers at
-    // full mana: the Tank held a mob in a room corner, both healers stood in the
-    // doorway behind the door jamb, and every heal was refused for want of a ray.
+    // any distance.
     let healers =
       party
       |> List.filter (fun e ->
@@ -387,9 +400,7 @@ module PartyAi =
     let seenByHealers (p: Pos) = healers |> List.forall (fun e -> Path.lineOfSight w.Grid e.Pos p)
 
     // The other half of the same question: a damage dealer with no free tile beside
-    // the mob cannot help whatever the Tank does about the casters' line. Folded into
-    // `needs` rather than handled separately, because the answer is the same one —
-    // make the mob move.
+    // the mob cannot help whatever the Tank does about the casters' line.
     let meleeDps =
       party
       |> List.filter (fun e ->
@@ -399,27 +410,30 @@ module PartyAi =
     let noRoom = meleeDps |> List.exists (fun e -> (SimState.approachTile e m.Pos w).IsNone)
 
     let packGap (p: Pos) =
-      w.Entities
-      |> List.filter (fun e ->
-        e.Faction = Hostile && e.Id <> m.Id && SimState.alive e && not e.Dormant)
-      |> List.map (fun e -> Pos.chebyshev p e.Pos)
-      |> List.sort
-      |> List.tryHead
-      |> Option.defaultValue 99
+      let mutable best = 99
+
+      for e in aliveHostiles do
+        if e.Id <> m.Id then
+          let d = Pos.chebyshev p e.Pos
+          if d < best then best <- d
+
+      best
+
+    let openRoom (p: Pos) =
+      let mutable count = 0
+
+      for dx, dy in ring do
+        if Grid.isFloor w.Grid (Pos.move dx dy p) then
+          count <- count + 1
+
+      count
+
+    let coarseOf (p: Pos) =
+      if backstabber && not (Grid.isFloor w.Grid (behind m p)) then 1 else 0
 
     let score (p: Pos) =
-      let backBlocked = if Grid.isFloor w.Grid (behind m p) then 0 else 1
-
-      let room =
-        ring
-        |> List.filter (fun (dx, dy) -> Grid.isFloor w.Grid (Pos.move dx dy p))
-        |> List.length
-
-      // Open floor is worth having (it is what gives the casters their line), but
-      // it only breaks ties: the one thing that justifies walking is opening the
-      // mob's back.
-      (if backstabber then backBlocked else 0),
-      -room,
+      coarseOf p,
+      -(openRoom p),
       Pos.chebyshev tank.Pos p,
       p.Y,
       p.X
@@ -438,20 +452,25 @@ module PartyAi =
       if p <> tank.Pos && free p then Some p else None
 
     // A Tank with no healer sight line is out of the fight whether or not it is
-    // holding the mob: walk to the nearest tile its healers *can* see. The condition
-    // clears itself the moment the line opens, so it cannot oscillate, and the mob
-    // follows because the Tank is what holds its threat. Three tiles, not thirty:
-    // the job is to step out of the corner, not to kite the pack.
+    // holding the mob: walk to the nearest tile its healers *can* see.
     let rescue =
       if List.isEmpty healers || seenByHealers tank.Pos then
         None
       else
-        [ for dx in -3 .. 3 do
-            for dy in -3 .. 3 do
-              yield Pos.move dx dy tank.Pos ]
-        |> List.filter (fun p -> p <> tank.Pos && free p && seenByHealers p)
-        |> List.sortBy (fun p -> Pos.chebyshev p m.Pos, Pos.chebyshev p tank.Pos, p.Y, p.X)
-        |> List.tryHead
+        let mutable best: Pos option = None
+        let mutable bestKey = (System.Int32.MaxValue, System.Int32.MaxValue, System.Int32.MaxValue, System.Int32.MaxValue)
+
+        for dx in -3 .. 3 do
+          for dy in -3 .. 3 do
+            let p = Pos.move dx dy tank.Pos
+
+            if p <> tank.Pos && free p && seenByHealers p then
+              let k = Pos.chebyshev p m.Pos, Pos.chebyshev p tank.Pos, p.Y, p.X
+              if k < bestKey then
+                bestKey <- k
+                best <- Some p
+
+        best
 
     match rescue with
     | Some p -> Some p
@@ -459,62 +478,34 @@ module PartyAi =
 
     match candidates with
     | [] -> pullBack
-    | cs ->
-      let best = cs |> List.sortBy score |> List.head
-      let coarse (p: Pos) =
-        let a, _, _, _, _ = score p
-        a
+    | first :: rest ->
+      let mutable best = first
+      let mutable bestScore = score first
 
-      // The hold has a second job when somebody needs the mob's back: stand where
-      // it is open. A mob faces what it attacks, so the tile opposite the Tank is
-      // the Rogue's, and a back against a wall is a Backstab that cannot happen.
-      // The old hold score counts "out of melee" against a tile, which is exactly
-      // the step that opens the back — so the tile that leaves the back walled is
-      // scored out when somebody needs it and nobody else can fix it.
+      for p in rest do
+        let s = score p
+        if s < bestScore then
+          bestScore <- s
+          best <- p
+
       let needs = backstabber || blind || noRoom
 
       let backWalled (p: Pos) =
         needs && not (Grid.isFloor w.Grid (behind m p))
 
-      let rank (p: Pos) = coarse p + (if backWalled p then 10_000 else 0)
+      let rank (p: Pos) = coarseOf p + (if backWalled p then 10_000 else 0)
 
-      // Every free tile around it has a wall behind it, so the mob is wedged in a
-      // corner or a dead end and there is no orbiting to be done. Only then is
-      // making it move the answer — and only when somebody actually needs the
-      // back (a Rogue) or the line (a caster), because retreating otherwise is
-      // just kiting the Party into the next pack.
       let wedged =
-        needs && List.forall (fun p -> not (Grid.isFloor w.Grid (behind m p))) cs
+        needs && List.forall (fun p -> not (Grid.isFloor w.Grid (behind m p))) candidates
 
-      // The Tank pull-back (the operator's corridor case, composed with the
-      // flank logic): a builder committed to this fight has no safe flank tile —
-      // the mob's back is against a wall or a tile somebody already holds — so
-      // no orbit opens it and the one-step `pullBack` only moves the problem.
-      // The Tank walks the fight back two or three tiles along its approach,
-      // to the nearest open floor away from the mob, dragging the pack by its
-      // threat: the mob re-faces the Tank as it follows and its back opens onto
-      // the room mouth, which is where the flank finally exists.
-      //
-      // Two bounds keep it honest. `openRoom` >= 5 means the pull only ever
-      // lands the fight on room-shaped floor — a mid-corridor Tank finds no
-      // candidate at all, so this never kites the pack down a corridor — and
-      // `packGap` never drags it toward the next un-pulled group. The
-      // anti-oscillation half is the engine's own commitment: a `MoveTo` sets
-      // `Goal`, the walk runs off `Path` without a fresh order, and the
-      // candidate is a pure function of the world, so re-deciding on a later
-      // tick either re-issues the same goal or the flank has opened and
-      // `stuckFlanker` has cleared — there is no tile to ping-pong between.
       let stuckFlanker =
         meleeDps
         |> List.exists (fun e ->
-          not (List.isEmpty (builders e))
+          hasBuilder e
           && Pos.chebyshev e.Pos m.Pos <= 2
           && (match behindOf w m with
               | Some b -> b <> e.Pos && (behindSpot w e m).IsNone
               | None -> false))
-
-      let openRoom (p: Pos) =
-        ring |> List.filter (fun (dx, dy) -> Grid.isFloor w.Grid (Pos.move dx dy p)) |> List.length
 
       let pullBack3 =
         let dx = sign (tank.Pos.X - m.Pos.X)
@@ -529,11 +520,6 @@ module PartyAi =
           && openRoom goal >= 5)
         |> Option.map along
 
-      // A `stuckFlanker` that cannot find a pull falls through to the orbit
-      // below instead of dead-ending: in a corridor the pull has no candidate
-      // (every landing tile is wall or packed), but a one-tile sidestep still
-      // turns the mob enough to open its back — the same answer the orbit
-      // branch already gives, and the one the corridor fixture needs.
       let pulledBack =
         if wedged then
           match pullBack3 with
@@ -550,14 +536,10 @@ module PartyAi =
       | Some p -> Some p
       | None ->
         if
-          rank best < rank tank.Pos
+          Pos.chebyshev tank.Pos best <= 1
+          && rank best < rank tank.Pos
           && packGap best >= packGap tank.Pos
-          && Pos.chebyshev tank.Pos best <= 1
         then
-          // Never orbit toward another pack: the walk that opens a back is not worth
-          // a second group arriving, which is what a Tank walking sideways into an
-          // un-pulled room buys. And never more than a sidestep either — the Tank's
-          // own rotation is worth more than a long walk to a better tile.
           Some best
         else
           None
@@ -565,23 +547,25 @@ module PartyAi =
   /// Warrior. Taunt back anything that has left the Tank, keep Sunder Armor on the
   /// target (the debuff the Rogue's targeting reads), then spend spare rage on
   /// Heroic Strike. In that order, because armour reduction is group damage.
-  let private tankOrders (w: World) (t: Entity) (target: Entity option) (at: int<tick>) =
+  let private tankOrders (w: World) (ctx: TickCtx) (t: Entity) (target: Entity option) (at: int<tick>) =
     match target with
     | None -> []
     | Some f ->
       let sundered = f.Auras |> List.exists (fun a -> Aura.armorReduction a > 0)
 
       let thief =
-        SimState.aliveHostiles w
+        ctx.Hostiles
         |> List.tryFind (fun h -> h.Engaged && h.Target <> Some t.Id && SimState.canReach 8 t h w)
 
-      // A Tank's job is the damage it stops, not the damage it deals. Disarm a
-      // swing that would land on it, kick a caster before its spell finishes —
-      // with whatever the kit's cheapest ready interrupt is, not a named button,
-      // so the bear's Bash and Feral Charge ride the same branch the Warrior's
-      // Shield Bash did — and only then start reducing armour.
-      let pressured = SimState.healthPct t < 80 || (SimState.aliveHostiles w |> List.filter (fun h -> h.Engaged) |> List.length) > 1
-      let kick = assignedKick w t
+      // A Tank's job is the damage it stops, not the damage it deals.
+      let engagedCount =
+        let mutable n = 0
+        for h in ctx.Hostiles do
+          if h.Engaged then n <- n + 1
+        n
+
+      let pressured = SimState.healthPct t < 80 || engagedCount > 1
+      let kick = assignedKick w ctx t
       let mitigation =
         [ if pressured && has t "Disarm" && canUse t "Disarm" then yield "Disarm"
           // The shield's buttons. Rage is earned from damage dealt and taken now,
@@ -710,7 +694,7 @@ module PartyAi =
   /// is empty is a three-second cast that began too late. The talent cooldowns go
   /// in front of that direct heal below 60%, which is one cast-time of health above
   /// death rather than a panic threshold.
-  let private healerOrders (w: World) (h: Entity) (party: Entity list) (at: int<tick>) =
+  let private healerOrders (w: World) (ctx: TickCtx) (h: Entity) (party: Entity list) (at: int<tick>) =
     // The need-pool, not the roster: everything below — who is wounded, who is
     // pre-emptively covered, who a direct heal may land on — is asked of this list,
     // and a demon is not a body a healer's mana can do anything useful for
@@ -886,10 +870,10 @@ module PartyAi =
         // "Actively engaged": an enemy swinging at this target, which in this
         // model is a mob that is Engaged and has the target as its Target.
         let n =
-          SimState.aliveHostiles w
-          |> List.filter (fun m -> m.Engaged && m.Target = Some t.Id)
-          |> List.length
-          |> max 1
+          let mutable count = 0
+          for m in ctx.Hostiles do
+            if m.Engaged && m.Target = Some t.Id then count <- count + 1
+          max 1 count
 
         let shareBp = max (8000 - 2500 * (n - 1)) 500
         let hlRef = (healsOf hl + h.BonusHealing) * Talents.healBp hl.Name h.Talents / 10000
@@ -1050,8 +1034,8 @@ module PartyAi =
       |> List.tryFind (fun p -> p.Role = Some Tank)
       |> Option.bind (fun tk -> tk.Target)
       |> Option.bind asFoe
-      |> Option.orElse (
-        SimState.aliveHostiles w
+      |> Option.orElseWith (fun () ->
+        ctx.Hostiles
         |> List.filter (fun t -> t.Engaged)
         |> List.sortBy (fun t -> Pos.chebyshev h.Pos t.Pos, t.Id)
         |> List.tryHead
@@ -1401,7 +1385,7 @@ module PartyAi =
           // can take off. `foeTarget` is the fallback for a caster whose target is
           // already the mob it is fighting.
           let candidates =
-            SimState.aliveHostiles w
+            ctx.Hostiles
             |> List.filter (fun f -> SimState.canReach a.Range h f w && carrying true f)
             |> List.sortBy (fun f -> Pos.chebyshev h.Pos f.Pos, f.Id)
             |> List.tryHead
@@ -1738,7 +1722,14 @@ module PartyAi =
   /// heals the party faster than any totem and pays for the drop out of free
   /// regeneration, so the spring replaces a stream that was left standing and
   /// the set arrives at the next pull shaped for it.
-  let private totemOrders (w: World) (e: Entity) (party: Entity list) (at: int<tick>) =
+  let private totemOrders (w: World) (ctx: TickCtx) (e: Entity) (party: Entity list) (at: int<tick>) =
+    // Fast-path: only Shaman (or kits with totem summons) ever drop totems.
+    let hasTotemAbility =
+      e.Abilities |> List.exists (fun a -> a.Effects |> List.exists (function Summon s -> s.Totem.IsSome | _ -> false))
+
+    if not hasTotemAbility then
+      []
+    else
     // (slot, name) of every standing totem the party can still reach.
     let standing =
       w.Entities
@@ -1755,20 +1746,18 @@ module PartyAi =
 
     // The tide is the five-minute reserve, held for a pull that might outlast
     // the party's mana: three or more hostiles with a target, or a healer
-    // running dry. In combat only — this lane also runs between pulls now, and
-    // a tide dropped while resting spends its cooldown where regeneration is
-    // free anyway.
+    // running dry.
+    let targetedCount =
+      let mutable n = 0
+      for h in ctx.Hostiles do
+        if h.Target.IsSome then n <- n + 1
+      n
+
     let toughPull =
       SimState.inCombat w
-      && ((SimState.aliveHostiles w
-           |> List.filter (fun h -> h.Target.IsSome)
-           |> List.length) >= 3
-          // A healer's bar is the party's reserve, so the tide is held for the pull
-          // where the healer itself is running dry — not merely for one where
-          // somebody is. That is the Shaman answering a call, not topping up.
+      && (targetedCount >= 3
           || (party
-              |> List.filter (fun p -> p.Role = Some Healer && p.ResourceKind = Mana)
-              |> List.exists (fun p -> SimState.resourcePct p < 60)))
+              |> List.exists (fun p -> p.Role = Some Healer && p.ResourceKind = Mana && SimState.resourcePct p < 60)))
 
     // Anybody in the party health-pressured: below 60% is where the healers'
     // own calm gate starts reaching, so the stream arrives with the same urgency
@@ -1893,7 +1882,7 @@ module PartyAi =
   /// those rows live on the `TreeDruid` kit — and `Aura.preventsCasting` would
   /// refuse a cast from this shape anyway; every cat row is instant, which is the
   /// property that lets a form-locked body act.
-  let private catOrders (w: World) (e: Entity) (target: Entity option) (at: int<tick>) =
+  let private catOrders (w: World) (ctx: TickCtx) (e: Entity) (target: Entity option) (at: int<tick>) =
     // The cat's own bleed, by caster id: Rake's nine seconds and Rip's twelve are
     // one `Bleeding` case under two names, so "is my bleed up" cannot be asked by
     // name — and the id is what stops a Warlock's Corruption from answering yes.
@@ -1907,7 +1896,7 @@ module PartyAi =
     // here so that moving the lane costs the cat nothing: an enemy still at full
     // health and carrying no debuff is one it met from behind.
     let opener =
-      SimState.aliveHostiles w
+      ctx.Hostiles
       |> List.filter (fun h -> h.Health = h.MaxHealth && h.Auras.IsEmpty && SimState.withinRange 1 e h)
       |> List.sortByDescending (fun h -> h.MaxHealth)
       |> List.tryHead
@@ -1980,18 +1969,9 @@ module PartyAi =
   /// hardest strike it can pay for on the Party's target. Eviscerate's damage is
   /// linear in points, so four points already out-earns the strike that would
   /// build a fifth: it fires from four up, never below.
-  let private meleeOrders (w: World) (e: Entity) (target: Entity option) (at: int<tick>) =
-    // The harder builder is a positional strike: it exists from behind the mob and
-    // nowhere else, and a mob faces what it is attacking. `holdSpot` is what makes
-    // the back exist for a mob the Tank holds. A mob that has *turned on the Rogue*
-    // has no back to offer him — every tile he could step to is in front of it — so
-    // from the front he falls back to the cheap builder rather than burning the
-    // energy on a strike the mob is facing. Any other target qualifies, whichever
-    // seat it is hitting.
+  let private meleeOrders (w: World) (ctx: TickCtx) (e: Entity) (target: Entity option) (at: int<tick>) =
     let inPosition (f: Entity) = not (f.Target |> Option.exists (fun id -> id = e.Id))
 
-    // Which of the kit's two builders needs the back: `builders` puts the harder
-    // one first.
     let positional = builders e |> List.tryHead |> Option.map (fun a -> a.Name)
 
     let mine =
@@ -2004,10 +1984,6 @@ module PartyAi =
             || (match target with
                 | Some f -> inPosition f
                 | None -> true))
-        // Ambush and Ravage are stealth openers, not rotation strikes: left in
-        // this list they would win every `damageOf` comparison and be spent as
-        // though stealth were free. They are offered only by the opener branch
-        // below.
         && a.Name <> "Ambush"
         && a.Name <> "Ravage")
 
@@ -2018,71 +1994,40 @@ module PartyAi =
       |> List.sortByDescending (finisherOf e)
       |> List.tryHead
 
-    // Pool the resource for the strike worth casting instead of emptying the bar
-    // the moment it clears the cheap one's cost: a Rogue who spends 45 as soon as
-    // he has 45 will never reach the 60 his Backstab costs, and Backstab is worth
-    // far more per point than Sinister Strike is. Below that he auto-attacks.
-    // Rank on readiness alone, not on readiness-plus-affordability: `canUse` folds
-    // the resource check in, and ranking through it would quietly drop Backstab
-    // the moment it became unaffordable and hand the turn to the cheap strike.
     let strike =
       mine
       |> List.filter (fun a -> not (isFinisher a) && ready e a.Name)
-      // The positional builder first, and by rule rather than by arithmetic: it is
-      // worth 150% weapon damage against the other builder's 100%, so `damageOf`
-      // happens to put it on top today, and the sort says so on purpose in case a
-      // rank is retuned.
       |> List.sortByDescending (fun a -> (if Some a.Name = positional then 1 else 0), damageOf a)
       |> List.tryHead
       |> Option.filter (SimState.canAfford e)
 
-    // Kicking a spell matters more than the target the Party is on: a healer
-    // left to finish its cast undoes more damage than the Rogue adds. Reachable
-    // casters come first, and Gouge — a four-second stun — is the backup when
-    // Kick is down and the caster is a few tiles away.
-    let myInterrupts = interruptTargets w e
-
     let caster =
-      SimState.aliveHostiles w
-      |> List.filter (fun h -> h.Casting |> Option.exists (fun c -> c.Ability.Interruptible))
-      |> List.filter (fun h -> Set.contains h.Id myInterrupts)
-      |> List.sortBy (fun h -> ((if SimState.canReach 1 e h w then 0 else 1), Pos.chebyshev e.Pos h.Pos))
-      |> List.tryHead
+      if List.isEmpty ctx.CastingHostiles then
+        None
+      else
+        let myInterrupts = interruptTargets ctx e
 
-    // A stun is mitigation too, not only an interrupt: the mob hitting the Party
-    // hardest cannot swing while it is stunned, and that is damage the healer never
-    // pays for. Cheap Shot and Kidney Shot go on the healthiest engaged enemy that
-    // is still able to act — but only when the Rogue can pay for a strike
-    // afterwards, because a Rogue that spends every point of energy on control adds
-    // no damage and the fight just gets longer.
+        if Set.isEmpty myInterrupts then
+          None
+        else
+          ctx.CastingHostiles
+          |> List.filter (fun h -> Set.contains h.Id myInterrupts)
+          |> List.sortBy (fun h -> ((if SimState.canReach 1 e h w then 0 else 1), Pos.chebyshev e.Pos h.Pos))
+          |> List.tryHead
+
     let uncontrolled =
-      SimState.aliveHostiles w
+      ctx.Hostiles
       |> List.filter (fun h -> h.Target.IsSome && SimState.canAct h && SimState.withinRange 1 e h)
       |> List.sortByDescending (fun h -> h.MaxHealth)
       |> List.tryHead
 
-    // shortcut: `Cheap Shot` costs 60 of a 100 point pool, so "stun and still
-    // strike" cannot both hold — the honest gate needs 105 energy and never
-    // fires once. Measured, that removes the stun entirely and `library max`
-    // wipes at 4000 with 27 mobs left; the stun taken at the top of the bar,
-    // where regen would otherwise cap out, grinds the same fight to 11 with the
-    // Party intact at full health. Re-tune if the pool or the cost moves.
-    // The opener. Stealth is not a state in this model; this stands in for it. An
-    // enemy still at full health and carrying no debuff is one the Party has not
-    // touched, so it is the enemy the Rogue met from behind — the first blow of a
-    // pull may be a stealth opener, Ambush for the damage or Cheap Shot for the
-    // stun when Ambush is not trained. As soon as anything lands the health is no
-    // longer full and the window is closed for that pull.
     let opener =
-      SimState.aliveHostiles w
+      ctx.Hostiles
       |> List.filter (fun h ->
         h.Health = h.MaxHealth && h.Auras.IsEmpty && SimState.withinRange 1 e h)
       |> List.sortByDescending (fun h -> h.MaxHealth)
       |> List.tryHead
 
-    // Ravage first: it is the cat's own opener and no Rogue carries it, while
-    // Ambush is the Rogue's and no cat carries it — so the order costs neither
-    // class anything and reads as "the hardest opener this kit has".
     let openWith =
       [ "Ravage"; "Ambush"; "Cheap Shot" ]
       |> List.filter (fun n -> has e n && canUse e n)
@@ -2095,13 +2040,8 @@ module PartyAi =
       |> List.filter (fun n -> has e n && canUse e n && surplus)
       |> List.tryHead
 
-    // The last resort. A Rogue a quarter of health from the end spends its
-    // escape buttons before any rotation strike — Vanish to drop every mob's
-    // gaze at once, else Blind for the nearest hunter still in reach. Either
-    // one is this Tick's whole action; displacing one strike is the price, and
-    // at this moment the strike is worth less than the Rogue.
     let hunted =
-      SimState.aliveHostiles w
+      ctx.Hostiles
       |> List.filter (fun h -> h.Engaged && h.Target = Some e.Id)
       |> List.sortBy (fun h -> Pos.chebyshev e.Pos h.Pos)
 
@@ -2171,43 +2111,37 @@ module PartyAi =
   /// damage per second of casting, and once it is low it plays for damage per
   /// point of mana instead. A free shot (a wand) is the fallback rather than the
   /// winner — ranked naively, "infinite efficiency" would mean it never casts.
-  let private rangedOrders (w: World) (e: Entity) (target: Entity option) (at: int<tick>) =
+  let private rangedOrders (w: World) (ctx: TickCtx) (e: Entity) (target: Entity option) (at: int<tick>) =
     match target with
     | None -> []
     | Some f ->
       let perMana (a: Ability) = damageOf a * 1000 / max 1 a.ResourceCost
       let perCast (a: Ability) = damageOf a * 1000 / max 1 (int a.CastTicks)
 
-      // A spell that lands is damage no heal answers in time. Counterspell it —
-      // whatever it is casting, wherever it is standing — and only then dps.
       let counterspell =
         e.Abilities
         |> List.tryFind (fun a -> a.Effects |> List.contains Interrupt && a.Range > 1)
 
-      // One interrupt per cast, and the assignee is whoever the Party agreed on
-      // (`interruptAssignments`): a melee kick outranks a Counterspell, so the long
-      // cooldown is spent only when no sword can reach.
-      let myInterrupts = interruptTargets w e
-
       let casting =
-        SimState.aliveHostiles w
-        |> List.filter (fun h -> h.Casting |> Option.exists (fun c -> c.Ability.Interruptible))
-        |> List.filter (fun h -> Set.contains h.Id myInterrupts)
-        |> List.filter (fun h -> counterspell |> Option.exists (fun a -> SimState.canReach a.Range e h w))
-        |> List.sortBy (fun h -> Pos.chebyshev e.Pos h.Pos)
-        |> List.tryHead
+        if List.isEmpty ctx.CastingHostiles || counterspell.IsNone then
+          None
+        else
+          let myInterrupts = interruptTargets ctx e
 
-      // A shot deals damage. Sap, Polymorph and the Rogue's stuns reach further
-      // than a sword, but firing one as an attack spends an opener on nothing —
-      // `prePull` is the only place an opener belongs.
-      // Multi-Shot pays per target, so on one body it is a worse Arcane Shot for
-      // twice the mana. Fire it only when a second hostile is near enough to be
-      // caught by it.
+          if Set.isEmpty myInterrupts then
+            None
+          else
+            ctx.CastingHostiles
+            |> List.filter (fun h -> Set.contains h.Id myInterrupts)
+            |> List.filter (fun h -> SimState.canReach counterspell.Value.Range e h w)
+            |> List.sortBy (fun h -> Pos.chebyshev e.Pos h.Pos)
+            |> List.tryHead
+
       let crowded =
-        SimState.aliveHostiles w
-        |> List.filter (fun h -> h.Faction <> e.Faction && Pos.chebyshev f.Pos h.Pos <= 8)
-        |> List.length
-        >= 2
+        let mutable n = 0
+        for h in ctx.Hostiles do
+          if h.Faction <> e.Faction && Pos.chebyshev f.Pos h.Pos <= 8 then n <- n + 1
+        n >= 2
 
       /// A row that sweeps: the shot the Hunter holds is the only one this
       /// rotation presses, so the name stays the shot's even though the shape is
@@ -2470,7 +2404,9 @@ module PartyAi =
 
   let decide (w: World) : Command list =
     let at = w.Tick + ticks 1
-    let party = SimState.aliveParty w
+    let ctx = makeTickCtx w
+    let party = ctx.Party
+    let aliveHostiles = ctx.Hostiles
 
     // The last Shaman standing, with Reincarnation ready, is not a fighter any more:
     // it is a corpse that has not happened yet. Every order set below assumes a
@@ -2566,24 +2502,18 @@ module PartyAi =
       else
         match tank with
         | Some t ->
-          SimState.aliveHostiles w
+          aliveHostiles
           |> List.filter (fun h -> Some h.Id = t.Target || SimState.canReach leash t h w)
-        | None -> SimState.aliveHostiles w
+        | None -> aliveHostiles
 
     let target = strikeTarget w tank hostiles
     let onTank = tankTarget w tank hostiles
 
     // Pre-pull. While nothing has noticed the Party yet, thin the pack and open
-    // from range instead of walking the whole room awake: a Polymorph, Roots or a
-    // Gouge takes one enemy out of the fight before it starts, and one ranged
-    // member opens on the Mob the Party means to kill first. A Scarlet wing holds
-    // 43 hostiles, and fighting them in fives is what wipes the Party.
+    // from range instead of walking the whole room awake.
     let prePull, holdForCc =
-      // `Engaged` beside the target: a pack that has noticed the party — proximity
-      // aggro sets the flag even before its first target resolves — is not a pack
-      // an opener can still land on.
       let engaged =
-        SimState.aliveHostiles w
+        aliveHostiles
         |> List.exists (fun h -> h.Target.IsSome || h.Engaged)
 
       let controlling =
@@ -2608,7 +2538,7 @@ module PartyAi =
       let unnoticed (e: Entity) (a: Ability) =
         a.Name <> "Sap"
         || not (
-          SimState.aliveHostiles w
+          aliveHostiles
           |> List.exists (fun h -> h.Name.Contains "Hound" && Pos.chebyshev h.Pos e.Pos <= 6)
         )
 
@@ -2772,7 +2702,7 @@ module PartyAi =
           let landingSafe =
             match foe with
             | Some f ->
-              SimState.aliveHostiles w
+              aliveHostiles
               |> List.filter (fun h -> h.Id <> f.Id && not (cluster h))
               |> List.forall (fun h ->
                 Pos.chebyshev h.Pos f.Pos > SimState.aggroRadius + 1
@@ -2830,7 +2760,7 @@ module PartyAi =
             // goal 8 tiles away and behind a wall with no sight of it. What it can
             // see is what it may pull; only when it can see nothing at all does the
             // nearest dead body anywhere become the goal, which is the explore case.
-            SimState.aliveHostiles w
+            aliveHostiles
             |> List.sortBy (fun h ->
               (if Path.lineOfSight w.Grid t.Pos h.Pos then 0 else 1), Pos.chebyshev t.Pos h.Pos)
             |> List.tryHead
@@ -2845,7 +2775,7 @@ module PartyAi =
         // the Rogue and no other pack inside reach of the pull.
         let reposition =
           match onTank with
-          | Some f when Pos.chebyshev t.Pos f.Pos <= 1 -> holdSpot w f t party
+          | Some f when Pos.chebyshev t.Pos f.Pos <= 1 -> holdSpot w f t party aliveHostiles
           | _ -> None
 
         [ // Holding for the Party clears the route rather than merely declining to
@@ -3045,7 +2975,7 @@ module PartyAi =
         []
       else
         match
-          SimState.aliveHostiles w
+          aliveHostiles
           |> List.sortBy (fun h -> party |> List.map (fun e -> Pos.chebyshev e.Pos h.Pos) |> List.min)
         with
         | [] -> []
@@ -3116,7 +3046,7 @@ module PartyAi =
         && e.Totem.IsNone)
 
     let resurrections =
-      if SimState.aliveHostiles w |> List.isEmpty then
+      if List.isEmpty aliveHostiles then
         []
       else
         // Self-raise first: the corpse that can get itself up needs no one's help.
@@ -3197,7 +3127,7 @@ module PartyAi =
           []
         else
           let homes =
-            SimState.aliveHostiles w |> List.map (fun h -> defaultArg h.Home h.Pos)
+            aliveHostiles |> List.map (fun h -> defaultArg h.Home h.Pos)
 
           let corpses =
             w.Entities |> List.filter (fun e -> e.Faction = Party && not (SimState.alive e) && e.Totem.IsNone)
@@ -3244,7 +3174,7 @@ module PartyAi =
       then
         []
       else
-        party |> List.collect (fun e -> totemOrders w e party at)
+        party |> List.collect (fun e -> totemOrders w ctx e party at)
 
     // The runner's answer (operator direction): a fleeing mob is the pull
     // widening -- every tile it crosses fetches the pack it reaches -- so the
@@ -3280,7 +3210,7 @@ module PartyAi =
                 party |> List.forall (fun p -> Pos.chebyshev p.Pos g > Pos.chebyshev p.Pos h.Pos))
 
       let runner =
-        SimState.aliveHostiles w
+        aliveHostiles
         |> List.filter isRunner
         |> List.sortBy (fun h ->
           party
@@ -3319,31 +3249,13 @@ module PartyAi =
     @ (if target.IsNone || holdForCc then
          []
        else
-         [ yield! role Tank |> List.collect (fun e -> tankOrders w e onTank at)
+         [ yield! role Tank |> List.collect (fun e -> tankOrders w ctx e onTank at)
            yield! role Healer
                   |> List.collect (fun e ->
-                    // The kick comes before everything else this lane can do, and
-                    // before the damage fallback at the bottom of it. An assignment
-                    // is the Party's consensus that *this* member is the one who
-                    // will stop that cast (`assignedKick` above), so deferring it
-                    // behind a heal, a totem or the mana gate is not a delay — the
-                    // cast finishes and nobody else was ever asked to press. The
-                    // damage gate in particular must not refuse it: a kick is
-                    // damage *prevented*, and `worthBreaking` has already decided
-                    // the cast is worth more than the spell given up.
-                    match assignedKick w e with
+                    match assignedKick w ctx e with
                     | Some(kick, victim) -> cmd at (UseAbility(e.Id, kick.Name, victim))
                     | None ->
-                      // Totems first: they are instant, they last two minutes, and a
-                      // Shaman with no earth totem down is a Tank taking the full
-                      // spread of every swing. Combat is no longer the gate: the
-                      // approach to a pack is exactly when a set left behind wants
-                      // re-dropping, and the pull's first Ticks are the wrong place
-                      // to spend the global on it.
-                      let totems = totemOrders w e party at
-
-                      // The shield is the one order that is not a heal, and it is the
-                      // cheapest: instant, no cooldown, no duration.
+                      let totems = totemOrders w ctx e party at
                       let upkeep = shieldOrders e at
 
                       if not upkeep.IsEmpty then
@@ -3351,73 +3263,28 @@ module PartyAi =
                       elif not totems.IsEmpty then
                         totems
                       else
-                        match healerOrders w e party at with
-                        // Nothing to heal. The heal-first priority above is untouched —
-                        // any order it produced has already won, and always will.
-                        //
-                        // What is left is whether this healer can afford damage, and the
-                        // answer is not a threshold on the pool. A flat "cast above 55%"
-                        // was what stood here, and it answers a question about the
-                        // present with no reference to the future: it spends while the
-                        // pull is long and keeps spending as the pull ends, which is
-                        // exactly backwards. `ManaBudget` prices the future instead.
-                        //
-                        // The window says how fast the party has been taking health off
-                        // the pack, and `remaining hostile HP / that rate` says how many
-                        // seconds are left. The healer's own observed net pool draw times
-                        // those seconds, plus 25% and one heal, is what it must still be
-                        // able to pay. A long pull reserves more than the whole pool and
-                        // nothing is cast; the last few seconds reserve almost nothing and
-                        // almost anything is.
-                        //
-                        // The question is asked before `rangedOrders` rather than after it,
-                        // because that function answers with a `MoveTo` when the target is
-                        // out of reach: a healer that may not cast also may not walk in for
-                        // the cast it was refused.
-                        //
-                        // The other gate is the form: `SimCombat` refuses a damaging cast
-                        // in a form that forbids it, and a Tree of Life Druid used to spend
-                        // whole encounters ordering the Moonfire that was thrown away every
-                        // Tick. A form-locked healer is not a damage dealer and this policy
-                        // does not make it one — so in practice the gate acts on the Priest
-                        // and the Shaman, and a Paladin's Judgement is melee-range by design
-                        // and is never walked to.
+                        match healerOrders w ctx e party at with
                         | [] when canDamageNow e && SimState.ManaBudget.mayDamage w e ->
-                          rangedOrders w e target at
+                          rangedOrders w ctx e target at
                         | orders -> orders)
-           // Cat Form is the one melee shape with its own ordering: a feral Druid is
-           // a `Dps` member whose kit is written against bleeds and combo points
-           // rather than against Backstab's position, so it takes `catOrders` and
-           // the melee lane below skips the body this line has just served.
            yield!
              role Dps
              |> List.filter (fun e -> SimState.inStance e CatForm && melee e)
              |> List.collect (fun e ->
-               // The cat's kit carries no kick today, and the assignment is still
-               // answered here rather than left to the form: a feral body that wins
-               // a cast is a cast nobody else was asked to break, and a row added to
-               // the cat kit later must not need this lane edited. Same contract as
-               // the healer lane above — `assignedKick` or bust.
-               match assignedKick w e with
+               match assignedKick w ctx e with
                | Some(kick, victim) -> cmd at (UseAbility(e.Id, kick.Name, victim))
-               | None -> catOrders w e target at)
+               | None -> catOrders w ctx e target at)
            yield!
              role Dps
              |> List.filter (fun e -> melee e && not (SimState.inStance e CatForm))
-             |> List.collect (fun e -> meleeOrders w e target at)
+             |> List.collect (fun e -> meleeOrders w ctx e target at)
            yield! role Dps
                   |> List.filter ranged
                   |> List.filter (fun e -> not (drained e) && not (resting.Contains e.Id))
                   |> List.collect (fun e ->
-                    match rangedOrders w e target at with
-                    // Shots on cooldown and nothing to fire: a member with a mob on
-                    // top of it still has a sword arm, and Raptor Strike at range 1
-                    // is worth more than the idle tick. Only the ability is taken,
-                    // never the walk — `meleeOrders` closes to melee when nothing
-                    // connects, which is right for a Rogue and would make a Hunter
-                    // charge in on every cooldown gap and shoot its way back out.
+                    match rangedOrders w ctx e target at with
                     | [] ->
-                      meleeOrders w e target at
+                      meleeOrders w ctx e target at
                       |> List.filter (fun c ->
                         match c.Kind with
                         | UseAbility _ -> true

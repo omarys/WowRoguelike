@@ -145,10 +145,12 @@ module SimCombat =
   /// the attacker's skill; a mob's is 5% flat plus 0.1% per level it has on you.
   let dodgeChanceBp (attacker: Entity) (target: Entity) =
     let delta = levelDelta attacker target
-    let boon = target.Auras |> List.sumBy Aura.dodgeBonusBp
 
-    if target.Faction = Party then target.DodgeChanceBp + boon + max 0 delta * 4
-    else max 0 (target.DodgeChanceBp + 500 + delta * 10)
+    if target.Faction = Party then
+      let boon = if target.Auras.IsEmpty then 0 else target.Auras |> List.sumBy Aura.dodgeBonusBp
+      target.DodgeChanceBp + boon + max 0 delta * 4
+    else
+      max 0 (target.DodgeChanceBp + 500 + delta * 10)
 
   /// Mobs parry; the Party does not, so its parry is zero and needs no field.
   let parryChanceBp (attacker: Entity) (target: Entity) =
@@ -191,12 +193,15 @@ module SimCombat =
 
   /// Every band except the ability's own crit bonus, which the caller adds.
   let chanceOf (attacker: Entity) (target: Entity) : SwingChances =
+    let blockBonus = if target.Auras.IsEmpty then 0 else target.Auras |> List.sumBy Aura.blockBonusBp
+    let critBonus = if attacker.Auras.IsEmpty then 0 else attacker.Auras |> List.sumBy Aura.critBonusBp
+
     { Miss = missChanceBp attacker target
       Dodge = dodgeChanceBp attacker target
       Parry = parryChanceBp attacker target
       Glancing = glancingChanceBp attacker target
-      Block = target.BlockChanceBp + (target.Auras |> List.sumBy Aura.blockBonusBp)
-      Crit = attacker.CritChanceBp + (attacker.Auras |> List.sumBy Aura.critBonusBp) + levelCritBonusBp attacker target }
+      Block = target.BlockChanceBp + blockBonus
+      Crit = attacker.CritChanceBp + critBonus + levelCritBonusBp attacker target }
 
   /// Chance (basis points) a spell misses or is fully resisted, by level
   /// difference. A miss is a full resist — partial resists come only from
@@ -420,19 +425,25 @@ module SimCombat =
         // neither multiplied nor multiplied through. The two shares are equal for
         // every entity that exists today, so in the common case this reads exactly as
         // "+180% armour" while staying right if a buff ever separates them.
-        let treeArmor = if SimState.inStance t TreeForm then t.ItemArmor * 180 / 100 else 0
-
         let armor =
-          max 0
-            (t.Armor
-             + treeArmor
-             + (t.Auras |> List.sumBy Aura.armorBonus)
-             - (t.Auras |> List.sumBy Aura.armorReduction))
+          if t.Auras.IsEmpty then
+            max 0 t.Armor
+          else
+            let treeArmor = if SimState.inStance t TreeForm then t.ItemArmor * 180 / 100 else 0
 
-        // Inspiration / Ancestral Healing: a share on top of the armour the
-        // target wears, so it is a multiplier and not a flat add. A target with
-        // nothing procced multiplies by 10000.
-        let armor = armor * (10000 + Aura.armorPctBp t.Auras) / 10000
+            let baseArmor =
+              max 0
+                (t.Armor
+                 + treeArmor
+                 + (t.Auras |> List.sumBy Aura.armorBonus)
+                 - (t.Auras |> List.sumBy Aura.armorReduction))
+
+            // Inspiration / Ancestral Healing: a share on top of the armour the
+            // target wears, so it is a multiplier and not a flat add. A target with
+            // nothing procced multiplies by 10000.
+            let pctBp = Aura.armorPctBp t.Auras
+            if pctBp = 0 then baseArmor else baseArmor * (10000 + pctBp) / 10000
+
         raw * (10000 - armorMitigationBp attacker.Level armor) / 10000
 
       match attackTable chances roll with
@@ -496,39 +507,6 @@ module SimCombat =
 
       mapEntity e.Id (fun x -> { x with Resource = min x.MaxResource (x.Resource + gain) }) w
 
-  /// Water Shield pays one globe for each hit that lands, and pays the holder the
-  /// mana the globe was carrying. The charge is the shield's clock, so this is the
-  /// only place it is spent by damage: every source in the game — a swing, a spell,
-  /// a bleed tick — arrives through `dealDamage`, which is why the globe is taken
-  /// here rather than at a swing site that would have to be found four times.
-  ///
-  /// The aura is rewritten in place rather than dropped and re-added, so the buff
-  /// bar keeps its row and a Shaman holding anything else loses nothing.
-  let private spendWaterShieldGlobe (targetId: EntityId) (w: World) =
-    match tryEntity targetId w with
-    | Some t when alive t ->
-      match Aura.waterShield t.Auras with
-      | Some(WaterShield(charges, _, globeMana, _, _)) when charges > 0 ->
-        let left = charges - 1
-
-        let w =
-          mapEntity
-            targetId
-            (fun e ->
-              { e with
-                  Resource = min e.MaxResource (e.Resource + globeMana)
-                  Auras =
-                    e.Auras
-                    |> List.choose (function
-                      | WaterShield(c, mx, gm, bp, mp) when c > 0 ->
-                        if c > 1 then Some(WaterShield(c - 1, mx, gm, bp, mp)) else None
-                      | a -> Some a) })
-            w
-
-        if left = 0 then logLine (sprintf "%s's Water Shield is spent" t.Name) w else w
-      | _ -> w
-    | _ -> w
-
   /// The two casts Undertow watches. Matched on the base name so the cheaper
   /// "Healing Wave (Rank n)" rung `Content.shamanDownrank` builds is covered too:
   /// that row is renamed *after* its talents are folded in, and the talent is about
@@ -537,105 +515,115 @@ module SimCombat =
     name.StartsWith("Healing Wave") || name.StartsWith("Lesser Healing Wave")
 
   let dealDamage (targetId: EntityId) (amount: int) (w: World) =
-    // Shield Wall takes its share before anything lands, so it covers every
-    // source: a swing, a spell, a DoT tick.
-    let amount =
-      match tryEntity targetId w with
-      | Some t ->
-        amount * (10000 - (t.Auras |> List.sumBy Aura.damageReductionBp)) / 10000
-      | None -> amount
-
-    // What a creature was before this hit: needed to notice a death, which is
-    // the one thing the quest tracker has to hear about. The health it had left is
-    // also the only honest measure of the hit. Overkill is not damage, and the
-    // healers' forecast divides the health still standing by the rate it comes off:
-    // a 200-point hit on a 5 hp corpse counted as 200 would claim the pull is forty
-    // times shorter than it is, and a shorter forecast is the one direction that
-    // makes the healers spend.
-    let victim, effective =
-      match tryEntity targetId w with
-      | Some t when t.Faction = Hostile && alive t -> Some t.Name, min amount t.Health
-      | _ -> None, 0
-
-    let w = w |> ManaBudget.recordDamage effective
-
-    // Taking a hit is paid for in rage, at the same rate as dealing one.
-    let w =
-      match tryEntity targetId w with
-      | Some t -> gainRage t amount w
-      | None -> w
-
-    let w =
-      mapEntity
-        targetId
-        (fun t ->
-          let hp = max 0 (t.Health - amount)
-
-          { t with
-              Health = hp
-              // Being hit pulls. Until this, only proximity inside `aggroRadius`
-              // (plus line of sight) could wake a mob, so every ranged opener in the
-              // game — a Mage's Fireball, a Hunter's Arcane Shot, a Warrior's
-              // crossbow — landed its damage on something that never reacted, and the
-              // party had to walk into the room to start a fight. Damage is the oldest
-              // pull in the game and it costs one flag.
-              Engaged = t.Engaged || (t.Faction = Hostile && hp > 0)
-              Auras = t.Auras |> List.filter (fun a -> not (Aura.endsOnHostileAction a))
-              Casting = if hp = 0 then None else t.Casting
-              Goal = if hp = 0 then None else t.Goal
-              Path = if hp = 0 then [] else t.Path
-              StallTicks = if hp = 0 then ticks 0 else t.StallTicks
-              Destination = if hp = 0 then None else t.Destination
-              MoveTicksLeft = if hp = 0 then ticks 0 else t.MoveTicksLeft
-              MoveTicksTotal = if hp = 0 then ticks 0 else t.MoveTicksTotal })
-        w
-
-    // A kill credits the objectives watching for it, and a quest that finishes
-    // here can wake a dormant boss.
-    let w =
-      match victim with
-      | Some name when (tryEntity targetId w |> Option.exists (fun t -> not (alive t))) ->
-        SimState.recordKill name w
-      | _ -> w
-
-    // Water Shield: the globe that paid for this hit, and the mana it was holding.
-    // Placed before the pushback below so the pool the pushback is priced against
-    // is the pool the Shaman actually has.
-    let w = if amount > 0 then spendWaterShieldGlobe targetId w else w
-
-    // Pushback: damage pushes an interruptible cast in progress back by half a
-    // second instead of cancelling it, at most twice per cast, and the target's
-    // resistance takes a bite out of the chance. Time is what a caster pays for
-    // standing in the fight — cancelling outright made a single hit worth a whole
-    // cast, which priced every cast-time talent in the game at nearly nothing.
-    if amount <= 0 then
-      w
-    else
-      match tryEntity targetId w with
-      | Some t when
-        alive t
-        && (t.Casting
-            |> Option.exists (fun c -> c.Ability.Interruptible && c.Pushes < pushbackMaxPerCast))
-        ->
-        let roll, w = rollRange 0 9999 w
-        let chance = pushbackBaseBp * (10000 - t.PushbackResistanceBp) / 10000
-
-        if roll < chance then
-          w
-          |> mapEntity targetId (fun e ->
-            match e.Casting with
-            | Some c ->
-              { e with
-                  Casting =
-                    Some
-                      { c with
-                          Remaining = c.Remaining + pushbackDelayTicks
-                          Pushes = c.Pushes + 1 } }
-            | None -> e)
-          |> logLine (sprintf "%s's cast is knocked back by damage" t.Name)
+    match tryEntity targetId w with
+    | None -> w
+    | Some t ->
+      // Shield Wall takes its share before anything lands, so it covers every
+      // source: a swing, a spell, a DoT tick.
+      let amount =
+        if t.Auras.IsEmpty then
+          amount
         else
+          let red = t.Auras |> List.sumBy Aura.damageReductionBp
+          if red = 0 then amount else amount * (10000 - red) / 10000
+
+      // What a creature was before this hit: needed to notice a death, which is
+      // the one thing the quest tracker has to hear about. The health it had left is
+      // also the only honest measure of the hit.
+      let victim, effective =
+        if t.Faction = Hostile && alive t then Some t.Name, min amount t.Health else None, 0
+
+      let w = if effective > 0 then ManaBudget.recordDamage effective w else w
+
+      // Taking a hit is paid for in rage, at the same rate as dealing one.
+      let rageGain =
+        if t.ResourceKind = Rage && amount > 0 && t.MaxResource > 0 then
+          max 1 (amount * 5 / (2 * max 1 t.Level))
+        else
+          0
+
+      let hp = max 0 (t.Health - amount)
+      let died = victim.IsSome && hp = 0
+
+      // Only allocate a filtered aura list when a waking aura is actually present.
+      let aurasAfterWake =
+        if t.Auras.IsEmpty || not (t.Auras |> List.exists Aura.endsOnHostileAction) then
+          t.Auras
+        else
+          t.Auras |> List.filter (fun a -> not (Aura.endsOnHostileAction a))
+
+      // Water Shield: the globe that paid for this hit, and the mana it was holding.
+      let resourceAfterGlobe, aurasAfterGlobe, shieldSpent =
+        let res0 =
+          if rageGain > 0 then min t.MaxResource (t.Resource + rageGain) else t.Resource
+
+        if amount > 0 && hp > 0 && not aurasAfterWake.IsEmpty then
+          match Aura.waterShield aurasAfterWake with
+          | Some(WaterShield(charges, _, globeMana, _, _)) when charges > 0 ->
+            let nextAuras =
+              aurasAfterWake
+              |> List.choose (function
+                | WaterShield(c, mx, gm, bp, mp) when c > 0 ->
+                  if c > 1 then Some(WaterShield(c - 1, mx, gm, bp, mp)) else None
+                | a -> Some a)
+
+            min t.MaxResource (res0 + globeMana), nextAuras, (charges = 1)
+          | _ -> res0, aurasAfterWake, false
+        else
+          res0, aurasAfterWake, false
+
+      // Pushback: damage pushes an interruptible cast in progress back by half a
+      // second instead of cancelling it, at most twice per cast.
+      let castingAfter, pushed, w =
+        if hp = 0 then
+          None, false, w
+        elif amount > 0 then
+          match t.Casting with
+          | Some c when c.Ability.Interruptible && c.Pushes < pushbackMaxPerCast ->
+            let roll, w = rollRange 0 9999 w
+            let chance = pushbackBaseBp * (10000 - t.PushbackResistanceBp) / 10000
+
+            if roll < chance then
+              Some
+                { c with
+                    Remaining = c.Remaining + pushbackDelayTicks
+                    Pushes = c.Pushes + 1 },
+              true,
+              w
+            else
+              t.Casting, false, w
+          | _ -> t.Casting, false, w
+        else
+          t.Casting, false, w
+
+      let w =
+        mapEntity
+          targetId
+          (fun _ ->
+            { t with
+                Health = hp
+                Resource = resourceAfterGlobe
+                // Being hit pulls.
+                Engaged = t.Engaged || (t.Faction = Hostile && hp > 0)
+                Auras = aurasAfterGlobe
+                Casting = castingAfter
+                Goal = if hp = 0 then None else t.Goal
+                Path = if hp = 0 then [] else t.Path
+                StallTicks = if hp = 0 then ticks 0 else t.StallTicks
+                Destination = if hp = 0 then None else t.Destination
+                MoveTicksLeft = if hp = 0 then ticks 0 else t.MoveTicksLeft
+                MoveTicksTotal = if hp = 0 then ticks 0 else t.MoveTicksTotal })
           w
-      | _ -> w
+
+      let w =
+        match victim with
+        | Some name when died -> SimState.recordKill name w
+        | _ -> w
+
+      let w =
+        if shieldSpent then logLine (sprintf "%s's Water Shield is spent" t.Name) w else w
+
+      if pushed then logLine (sprintf "%s's cast is knocked back by damage" t.Name) w else w
 
 
   // =========================================================================
@@ -672,39 +660,34 @@ module SimCombat =
     else
       match tryEntity targetId w with
       | Some target when target.Faction = Party ->
-        w.Entities
-        |> List.filter (fun e ->
-          alive e
-          && e.Faction = Party
-          && e.Totem |> Option.exists (fun t -> t.Pulse = Redirects)
-          && Pos.chebyshev e.Pos target.Pos <= e.Totem.Value.Radius)
-        |> List.sortBy (fun e -> Pos.chebyshev e.Pos target.Pos)
-        |> List.tryHead
-        |> Option.map (fun e -> e.Id)
-        |> Option.defaultValue targetId
+        let mutable bestId = targetId
+        let mutable bestDist = System.Int32.MaxValue
+
+        for e in w.Entities do
+          if alive e && e.Faction = Party then
+            match e.Totem with
+            | Some t when t.Pulse = Redirects ->
+              let d = Pos.chebyshev e.Pos target.Pos
+              if d <= t.Radius && d < bestDist then
+                bestDist <- d
+                bestId <- e.Id
+            | _ -> ()
+
+        bestId
       | _ -> targetId
 
   /// Tree of Life's aura of life: while a party Druid holds the form, every party
   /// member — the Druid included — heals as though it had `Spirit / 5` more bonus
   /// healing, which is the form's "20% of your spirit" at the rate the rest of
   /// this file already spends Spirit at.
-  ///
-  /// Read off the world at the moment of the heal rather than written into
-  /// `Entity.BonusHealing` when the form goes up, because a stance is not a
-  /// permanent state: a Druid that shifts out to land a Healing Touch would leave
-  /// the buff behind on four heroes for the rest of the run, and one that shifted
-  /// back in would have to be watched by every consumer of `BonusHealing`. Summed
-  /// over every tree in the party, so a second Restoration Druid is worth a second
-  /// share instead of nothing.
-  ///
-  /// "Nearby" is the party, which is how every other party-wide effect in this
-  /// model is scoped (`PartyBuffKind`): a sim whose party walks in a file does not
-  /// need a radius, and the one place a radius *is* modelled — a totem — has an
-  /// entity to hang it on.
   let treeOfLifeHealing (w: World) =
-    w.Entities
-    |> List.filter (fun e -> e.Faction = Party && alive e && SimState.inStance e TreeForm)
-    |> List.sumBy (fun e -> e.Stats.Spirit / 5)
+    let mutable total = 0
+
+    for e in w.Entities do
+      if e.Faction = Party && alive e && SimState.inStance e TreeForm then
+        total <- total + e.Stats.Spirit / 5
+
+    total
 
   /// Resolve one ability's effects against one target. The resource is spent
   /// here, on resolution, so an interrupted cast costs nothing.
@@ -1932,13 +1915,22 @@ module SimCombat =
   // =========================================================================
 
   let internal allyInNeed (actor: Entity) (ability: Ability) (w: World) =
-    let pool = if actor.Faction = Party then aliveParty w else aliveHostiles w
+    let isParty = actor.Faction = Party
+    let mutable bestId: EntityId option = None
+    let mutable bestPct = System.Int32.MaxValue
 
-    pool
-    |> List.filter (fun e -> e.Health < e.MaxHealth && canReach ability.Range actor e w)
-    |> List.sortBy healthPct
-    |> List.tryHead
-    |> Option.map (fun e -> e.Id)
+    for e in w.Entities do
+      let inPool =
+        if isParty then e.Faction = Party && alive e && e.Totem.IsNone
+        else e.Faction = Hostile && alive e && not e.Dormant
+
+      if inPool && e.Health < e.MaxHealth && canReach ability.Range actor e w then
+        let pct = healthPct e
+        if pct < bestPct then
+          bestPct <- pct
+          bestId <- Some e.Id
+
+    bestId
 
   let internal usableTarget (actor: Entity) (ability: Ability) (w: World) =
     match ability.TargetKind with
