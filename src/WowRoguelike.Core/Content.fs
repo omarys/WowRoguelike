@@ -7106,7 +7106,7 @@ module Content =
 
     // Keep hostiles well clear of the entrance vestibule so the party never
     // spawns inside proximity aggro (`SimState.aggroRadius = 2`) or surrounded.
-    let safeSpawnBuffer = 10
+    let safeSpawnBuffer = 6
 
     let isSafeForMob (p: Pos) =
       partyTiles |> List.forall (fun sp -> Pos.chebyshev p sp > safeSpawnBuffer)

@@ -758,7 +758,7 @@ module SimCombat =
           actorId
           (fun e ->
             { e with
-                Resource = max 0 (e.Resource - cost)
+                Resource = min e.MaxResource (max 0 (e.Resource - cost))
                 // The five-second rule starts when the spell is paid for, so an
                 // interrupted cast — which costs nothing — leaves regeneration
                 // alone. Instants count: vanilla watches the cast, not its size.

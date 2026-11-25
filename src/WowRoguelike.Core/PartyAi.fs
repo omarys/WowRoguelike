@@ -2511,7 +2511,7 @@ module PartyAi =
 
     // Pre-pull. While nothing has noticed the Party yet, thin the pack and open
     // from range instead of walking the whole room awake.
-    let prePull, holdForCc =
+    let prePull, holdForCc, prePullWalkers =
       let engaged =
         aliveHostiles
         |> List.exists (fun h -> h.Target.IsSome || h.Engaged)
@@ -2535,12 +2535,46 @@ module PartyAi =
       //
       // shortcut: stealth is "not in combat, and no hound within 6 tiles"; add a
       // real stealth state if facing or Distract ever matters.
-      let unnoticed (e: Entity) (a: Ability) =
-        a.Name <> "Sap"
-        || not (
+      let unnoticedAt (p: Pos) =
+        not (
           aliveHostiles
-          |> List.exists (fun h -> h.Name.Contains "Hound" && Pos.chebyshev h.Pos e.Pos <= 6)
+          |> List.exists (fun h -> h.Name.Contains "Hound" && Pos.chebyshev h.Pos p <= 6)
         )
+
+      let unnoticed (e: Entity) (a: Ability) =
+        a.Name <> "Sap" || unnoticedAt e.Pos
+
+      let safeFromAggro (p: Pos) =
+        aliveHostiles
+        |> List.forall (fun m ->
+          Pos.chebyshev p m.Pos > SimState.aggroRadius
+          || not (Path.lineOfSight w.Grid m.Pos p))
+
+      // Nearest walkable tile within Sap range and LoS of `h` that stays outside
+      // proximity aggro of every hostile and outside any hound's stealth radius.
+      let sapSpot (e: Entity) (a: Ability) (h: Entity) : Pos option =
+        let r = a.Range
+        let mutable best: Pos option = None
+        let mutable bestKey = (System.Int32.MaxValue, System.Int32.MaxValue, System.Int32.MaxValue, System.Int32.MaxValue)
+
+        for dy in -r .. r do
+          for dx in -r .. r do
+            let p = Pos.move dx dy h.Pos
+
+            if
+              Grid.isFloor w.Grid p
+              && (p = e.Pos || not (SimState.claimedByOther w e.Id p))
+              && Path.lineOfSight w.Grid p h.Pos
+              && safeFromAggro p
+              && unnoticedAt p
+            then
+              let k = Pos.chebyshev e.Pos p, -(Pos.chebyshev p h.Pos), p.Y, p.X
+
+              if k < bestKey then
+                bestKey <- k
+                best <- Some p
+
+        best
 
       // Sap earns the pull's first slot even when a Polymorph is in reach: it is the
       // only opener that starts nothing, and its minute-long cooldown means it must
@@ -2564,14 +2598,58 @@ module PartyAi =
           |> List.sortByDescending (fun h -> h.MaxHealth)
 
         // The opener is a sequence, not one cast (operator direction): the Rogue
-        // Saps first, the Mage Polymorphs a caster when the pack has one, a Druid
-        // Hibernates what its creature type allows. One control per actor and one
-        // target each — two on the same mob waste one — and the candidates scan in
-        // danger order, not just the first: the biggest body in a pack is often the
-        // one control cannot land on (an Elemental Lasher), and insisting on it
-        // spends the opener on an "is immune" line instead of the Raptor beside it.
+        // moves in and Saps a high-threat sappable enemy first while the group
+        // waits, then the Mage Polymorphs a caster when the pack has one, a Druid
+        // Hibernates what its creature type allows, and finally the Tank charges.
+        let isHealer (h: Entity) =
+          h.Abilities
+          |> List.exists (fun a ->
+            a.Effects |> List.exists (function Heal _ | HealOverTime _ -> true | _ -> false))
+
         let isCaster (h: Entity) = h.Abilities |> List.exists (fun a -> a.CastTicks > ticks 0)
 
+        let alreadySapped = hostiles |> List.exists SimState.isSleeping
+
+        // Phase 1: Rogue Sap opener. The group holds all other openers (Polymorph,
+        // Hibernate, Charge, attacks) until the Rogue has walked into Sap range
+        // and landed Sap on the highest-threat sappable surplus enemy.
+        let sapPlan =
+          if alreadySapped then
+            None
+          else
+            actors
+            |> List.tryPick (fun e ->
+              e.Abilities
+              |> List.tryFind (fun a -> a.Name = "Sap" && canUse e a.Name && unnoticed e a)
+              |> Option.bind (fun sap ->
+                surplus
+                |> List.filter (fun h -> canControl e sap h)
+                |> List.sortByDescending (fun h -> (isHealer h, isCaster h, h.MaxHealth))
+                |> List.tryPick (fun h ->
+                  if reaches e h sap then
+                    Some(e, sap, h, None)
+                  elif e.StallTicks <= ticks 0 then
+                    sapSpot e sap h |> Option.map (fun p -> e, sap, h, Some p)
+                  else
+                    None)))
+
+        match sapPlan with
+        | Some(e, sap, h, None) ->
+          [ { ApplyAt = at; Kind = Stop e.Id }
+            { ApplyAt = at; Kind = UseAbility(e.Id, sap.Name, h.Id) } ],
+          true,
+          Set.singleton e.Id
+        | Some(e, _, _, Some p) ->
+          let walk =
+            if e.Goal = Some p && (e.Destination.IsSome || not e.Path.IsEmpty) then
+              []
+            else
+              [ { ApplyAt = at; Kind = MoveTo(e.Id, p) } ]
+
+          walk, true, Set.singleton e.Id
+        | None ->
+
+        // Phase 2: Remaining pre-pull openers (Polymorph, Hibernate, Roots, etc.).
         // An actor openers only what its control reaches from the Tank's side of
         // the door — walking past a stopped Tank into the pack does not converge
         // (measured: the caster oscillates at the corridor mouth), but walking up
@@ -2588,7 +2666,7 @@ module PartyAi =
           actors
           |> List.collect (fun e ->
             e.Abilities
-            |> List.filter controlling
+            |> List.filter (fun a -> a.Name <> "Sap" && controlling a)
             |> List.filter (fun a -> canUse e a.Name && unnoticed e a)
             |> List.map (fun a -> e, a))
           |> List.sortBy (fun (_, a) -> preference a)
@@ -2625,16 +2703,17 @@ module PartyAi =
         // The hold ends by itself: travel ends beside the Tank, in range and the
         // cast flies, or one short and the Tank walks in as before. Without a Tank
         // every chosen opener is already in range, so there is nothing to hold.
-        let cc, walking, hold =
+        let cc, walking, hold, walkers =
           chosen
           |> List.fold
-            (fun (cc, walking, hold) (e, a, h) ->
+            (fun (cc, walking, hold, walkers) (e, a, h) ->
               if reaches e h a then
                 ( cc
                   @ [ { ApplyAt = at; Kind = Stop e.Id }
                       { ApplyAt = at; Kind = UseAbility(e.Id, a.Name, h.Id) } ],
                   walking,
-                  hold )
+                  hold,
+                  walkers )
               else
                 match tank with
                 | Some t when Pos.chebyshev e.Pos t.Pos <= 1 ->
@@ -2643,7 +2722,7 @@ module PartyAi =
                     // mage's approach tile and the target re-books forever and holds
                     // the pull closed). Give the plan up -- no walk, no hold, the
                     // Tank walks in the old way.
-                    (cc, walking, hold)
+                    (cc, walking, hold, walkers)
                 | Some t ->
                     // The walk is to the Tank's side, the door the plan was
                     // measured from. A route that just dropped stale does not hold
@@ -2651,9 +2730,9 @@ module PartyAi =
                     // so a walk that can never converge lets the window close the
                     // old way rather than parking the party at the door forever.
                     let holds = e.StallTicks <= ticks 0
-                    (cc, walking @ [ { ApplyAt = at; Kind = MoveTo(e.Id, t.Pos) } ], hold || holds)
-                | None -> (cc, walking, hold))
-            ([], [], false)
+                    (cc, walking @ [ { ApplyAt = at; Kind = MoveTo(e.Id, t.Pos) } ], hold || holds, Set.add e.Id walkers)
+                | None -> (cc, walking, hold, walkers))
+            ([], [], false, Set.empty)
 
         // The rest of the hold is the cast in flight, so the pack opens on the
         // sheep rather than on it. No other branch orders a controlling ability, so
@@ -2710,7 +2789,7 @@ module PartyAi =
             | None -> false
 
           match tank, foe with
-          | Some t, Some f when openersLanded && landingSafe && not hold && not openerFlying ->
+          | Some t, Some f when openersLanded && landingSafe && List.isEmpty cc && not hold && not openerFlying ->
             t.Abilities
             |> List.tryFind (fun a -> a.Name = "Charge")
             |> Option.filter (fun a -> canUse t a.Name && reaches t f a)
@@ -2725,11 +2804,12 @@ module PartyAi =
           yield! chargeIn ],
         // `cc` too: the booking Tick is before the cast exists, and the damage
         // lane opening on that same Tick is what the opener was booked to precede.
-        not (List.isEmpty cc)
-        || hold
-        || openerFlying
-        || not (List.isEmpty chargeIn)
-      | _ -> [], false
+        (not (List.isEmpty cc)
+         || hold
+         || openerFlying
+         || not (List.isEmpty chargeIn)),
+        walkers
+      | _ -> [], false, Set.empty
 
     // Walking orders apply in and out of a fight. Out of one the Tank leads
     // toward the nearest hostile; in one it closes the last few tiles to the mob
@@ -2951,7 +3031,7 @@ module PartyAi =
 
           if not holding then
             for e in role Tank @ role Healer @ role Dps do
-              if e.Id <> t.Id && Pos.chebyshev e.Pos t.Pos > 3 then
+              if e.Id <> t.Id && not (Set.contains e.Id prePullWalkers) && Pos.chebyshev e.Pos t.Pos > 3 then
                 // Re-aim only when the route on file no longer ends beside the Tank.
                 // A follower re-issued every tick pays a whole-map search for every
                 // tile the Tank walks, which is 100 ms a tick while the Party is

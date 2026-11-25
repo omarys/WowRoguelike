@@ -8398,6 +8398,94 @@ let ``the opener sheep takes one mob and the charge takes the focus`` () =
     sprintf "LOGDUMP: %s" (w.Log |> String.concat " | ")
   )
 
+/// The group waits for the Rogue to move in and Sap a high-threat sappable enemy
+/// before the Mage casts Polymorph or the Tank charges in, even when the Mage is
+/// already within Polymorph range.
+[<Fact>]
+let ``the party waits for the rogue to move in and sap before polymorph and charge`` () =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  let tank =
+    Content.hero 1 "Warrior" Tank 1000 1000 tap 50000 [ Content.charge; Content.sunderArmor ] { X = 3; Y = 4 }
+
+  let mage =
+    Content.hero
+      4
+      "Mage"
+      Dps
+      908
+      2373
+      tap
+      10000
+      [ (AbilityDef.at 24 Content.polymorphRanks).Value ]
+      { X = 2; Y = 4 }
+
+  let rogue =
+    Content.hero
+      3
+      "Rogue"
+      Dps
+      1000
+      100
+      tap
+      10000
+      [ (AbilityDef.at 24 Content.sap).Value
+        (AbilityDef.at 24 Content.sinisterStrike).Value ]
+      { X = 2; Y = 5 }
+
+  let healSpell =
+    { Name = "Heal"
+      ResourceCost = 40
+      CastTicks = secTicks 2.0
+      CooldownTicks = secTicks 6.0
+      Range = 6
+      TargetKind = Ally
+      Stance = None
+      Interruptible = true
+      Effects = [ Heal(80, 100) ] }
+
+  let focusMob = Content.mob 100 "Focus" CreatureType.Humanoid 21 1000 1000 (Some tap) [] None { X = 9; Y = 4 }
+  let bruiser = Content.mob 101 "Bruiser" CreatureType.Humanoid 21 900 900 (Some tap) [] None { X = 10; Y = 4 }
+  let chaplain = Content.mob 102 "Chaplain" CreatureType.Humanoid 21 700 700 (Some tap) [ healSpell ] None { X = 10; Y = 5 }
+
+  let w0 =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 16 9
+      Entities = [ tank; mage; rogue; focusMob; bruiser; chaplain ]
+      Pending = []
+      Rng = Rng.streamsOf 1UL
+      PartyBuffs = []
+      Quests = []
+      Forecast = Forecast.empty
+      TotemLedger = TotemLedger.empty
+      Log = [] }
+
+  // Tick 1: Mage is already within Polymorph range (dist 7-8), but must hold
+  // while the Rogue moves in to Sap the high-threat healer (Chaplain).
+  let tick1 = PartyAi.decide w0 |> List.map (fun c -> c.Kind)
+  Assert.Contains(tick1, function MoveTo(id, _) when id = rogue.Id -> true | _ -> false)
+  Assert.Contains(tick1, fun k -> k = Stop tank.Id)
+  Assert.DoesNotContain(tick1, function UseAbility(id, "Polymorph", _) when id = mage.Id -> true | _ -> false)
+
+  let mutable w = w0
+
+  for _ in 1 .. 400 do
+    w <- SimTick.step (Bench.autoPilot w) w
+
+  let chronological = List.rev w.Log
+  let sapIdx = chronological |> List.tryFindIndex (fun l -> l.Contains "Rogue puts Chaplain to sleep")
+  let polyIdx = chronological |> List.tryFindIndex (fun l -> l.Contains "Mage polymorphs Bruiser")
+  let chargeIdx = chronological |> List.tryFindIndex (fun l -> l.Contains "Warrior charges Focus")
+
+  Assert.True(
+    sapIdx.IsSome && polyIdx.IsSome && chargeIdx.IsSome
+    && sapIdx.Value < polyIdx.Value
+    && polyIdx.Value < chargeIdx.Value,
+    sprintf "Expected Sap < Polymorph < Charge, got sap=%A poly=%A charge=%A | LOG: %s"
+      sapIdx polyIdx chargeIdx (chronological |> List.truncate 30 |> String.concat " | ")
+  )
+
 /// A Tree Druid openers with Hibernate, and only onto what the vanilla spell
 /// accepts: a Beast, never a Humanoid, which the engine's wider `sleepable` set
 /// would otherwise allow.
