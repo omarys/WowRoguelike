@@ -1689,6 +1689,23 @@ module Content =
               Range = 1
               Effects = [ Stun(secTicks 4.0) ] } ] }
 
+  /// Stealth: out-of-combat invisibility so the Rogue can slip into Sap range
+  /// without drawing proximity aggro from non-Hound mobs. Sapping does not
+  /// break it; landing a damaging attack does.
+  let stealth: AbilityDef =
+    { Name = "Stealth"
+      Resource = Energy
+      Stance = None
+      TargetKind = Self
+      Interruptible = false
+      Ranks =
+        [ { Level = 1
+            Cost = 0
+            CastTicks = ticks 0
+            CooldownTicks = secTicks 10.0
+            Range = 0
+            Effects = [ Vanish(secTicks 60.0) ] } ] }
+
   /// Vanish: the Rogue's last resort. Instant and free — vanilla spends a Flash
   /// Powder reagent and the sim models none, so the button costs no energy — on
   /// vanilla's 5-minute cooldown, single rank trained at 22. The effect is the
@@ -5121,7 +5138,7 @@ module Content =
       partyThreatBp
       (AbilityDef.kitAt
         level
-        [ sinisterStrike; backstab; ambush; eviscerate; gouge; kick; sap; cheapShot; kidneyShot; vanish; blind ])
+        [ stealth; sinisterStrike; backstab; ambush; eviscerate; gouge; kick; sap; cheapShot; kidneyShot; vanish; blind ])
       { X = 1; Y = 7 }
     |> fun r ->
       // A second Assassin's Blade in the off hand: dual wield is learned at 10.

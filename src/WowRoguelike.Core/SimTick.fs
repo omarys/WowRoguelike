@@ -950,7 +950,12 @@ module SimTick =
     let mutable anyNonReady = false
 
     for e in w.Entities do
-      if canAct e && e.AutoAttack.IsSome && (e.Auras.IsEmpty || not (e.Auras |> List.exists Aura.disablesAttack)) then
+      if
+        canAct e
+        && not (isStealthed e)
+        && e.AutoAttack.IsSome
+        && (e.Auras.IsEmpty || not (e.Auras |> List.exists Aura.disablesAttack))
+      then
         let attack = e.AutoAttack.Value
         let offHandTicks = max (ticks 2) (attack.Ticks * 3 / 5)
         let mainReady = e.SwingTicksLeft <= ticks 1
@@ -970,6 +975,7 @@ module SimTick =
           (fun e ->
             if
               canAct e
+              && not (isStealthed e)
               && e.AutoAttack.IsSome
               && (e.Auras.IsEmpty || not (e.Auras |> List.exists Aura.disablesAttack))
             then
@@ -1167,7 +1173,9 @@ module SimTick =
             let noticed =
               pList
               |> List.exists (fun p ->
-                Pos.chebyshev m0.Pos p.Pos <= aggroRadius && Path.lineOfSight acc.Grid m0.Pos p.Pos)
+                (not (isStealthed p) || m0.Name.Contains "Hound")
+                && Pos.chebyshev m0.Pos p.Pos <= aggroRadius
+                && Path.lineOfSight acc.Grid m0.Pos p.Pos)
 
             if noticed then
               let w1 =
@@ -1452,7 +1460,8 @@ module SimTick =
             e.Faction = Hostile
             && alive e
             && not e.Engaged
-            && Pos.chebyshev c.Pos e.Pos <= callForHelpRadius)
+            && Pos.chebyshev c.Pos e.Pos <= callForHelpRadius
+            && Path.lineOfSight w.Grid c.Pos e.Pos)
 
         let w =
           (w, neighbours)

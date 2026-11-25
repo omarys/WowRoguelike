@@ -8486,6 +8486,116 @@ let ``the party waits for the rogue to move in and sap before polymorph and char
       sapIdx polyIdx chargeIdx (chronological |> List.truncate 30 |> String.concat " | ")
   )
 
+/// Sapping an enemy does not break the Rogue's stealth, and a stealthed Rogue
+/// standing next to non-Hound mobs does not trigger proximity aggro.
+[<Fact>]
+let ``sapping an enemy does not break the rogue's stealth`` () =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  let rogue =
+    { Content.hero
+        3
+        "Rogue"
+        Dps
+        1000
+        100
+        tap
+        10000
+        [ (AbilityDef.at 24 Content.stealth).Value
+          (AbilityDef.at 24 Content.sap).Value ]
+        { X = 5; Y = 5 } with
+        Auras = [ Stealthed(secTicks 60.0) ] }
+
+  let targetMob = Content.mob 100 "Guard" CreatureType.Humanoid 21 1000 1000 (Some tap) [] None { X = 6; Y = 5 }
+  let neighbour = Content.mob 101 "Sentry" CreatureType.Humanoid 21 1000 1000 (Some tap) [] None { X = 6; Y = 6 }
+
+  let w0 =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = Grid.create 12 10
+      Entities = [ rogue; targetMob; neighbour ]
+      Pending = []
+      Rng = Rng.streamsOf 1UL
+      PartyBuffs = []
+      Quests = []
+      Forecast = Forecast.empty
+      TotemLedger = TotemLedger.empty
+      Log = [] }
+
+  let w1 =
+    SimTick.step [ { ApplyAt = ticks 1; Kind = UseAbility(rogue.Id, "Sap", targetMob.Id) } ] w0
+
+  let rogueAfter = w1.Entities |> List.find (fun e -> e.Id = rogue.Id)
+  let targetAfter = w1.Entities |> List.find (fun e -> e.Id = targetMob.Id)
+  let neighbourAfter = w1.Entities |> List.find (fun e -> e.Id = neighbour.Id)
+
+  Assert.True(SimState.isStealthed rogueAfter, "Sap must not break the Rogue's stealth")
+  Assert.True(SimState.isSleeping targetAfter, "Sap should put the target to sleep")
+  Assert.False(targetAfter.Engaged, "Sapping should not engage the target")
+  Assert.False(neighbourAfter.Engaged, "Non-Hound neighbours should not proximity-aggro a stealthed Rogue")
+
+/// Calling for help and area effects must not pull enemies on the other side of a wall.
+[<Fact>]
+let ``aggro does not pull an enemy group through a wall`` () =
+  let tap = { Min = 1; Max = 1; Ticks = secTicks 2.7; Range = 1 }
+
+  // A vertical wall at X = 6 divides the room into left (X <= 5) and right (X >= 7).
+  let grid = Grid.ofRows (List.replicate 10 "......#.......")
+
+  let warrior =
+    Content.hero 1 "Warrior" Tank 1000 1000 tap 50000 [ Content.sunderArmor ] { X = 4; Y = 5 }
+
+  let caller =
+    { Content.mob 100 "Caller" CreatureType.Humanoid 21 1000 1000 (Some tap) [] (Some 50) { X = 5; Y = 5 } with
+        Health = 200
+        Engaged = true
+        Target = Some warrior.Id }
+
+  // 2 tiles away from Caller (<= callForHelpRadius = 4), but behind the wall at X = 6.
+  let behindWall =
+    Content.mob 101 "BehindWall" CreatureType.Humanoid 21 1000 1000 (Some tap) [] None { X = 7; Y = 5 }
+
+  // Same room as Caller, 2 tiles away with clear LoS.
+  let sameRoom =
+    Content.mob 102 "SameRoom" CreatureType.Humanoid 21 1000 1000 (Some tap) [] None { X = 5; Y = 3 }
+
+  let w0 =
+    { Tick = ticks 0
+      RestTicks = ticks 0
+      Grid = grid
+      Entities = [ warrior; caller; behindWall; sameRoom ]
+      Pending = []
+      Rng = Rng.streamsOf 1UL
+      PartyBuffs = []
+      Quests = []
+      Forecast = Forecast.empty
+      TotemLedger = TotemLedger.empty
+      Log = [] }
+
+  let w1 = SimTick.callForHelp w0
+  let behindAfter = w1.Entities |> List.find (fun e -> e.Id = behindWall.Id)
+  let sameAfter = w1.Entities |> List.find (fun e -> e.Id = sameRoom.Id)
+
+  Assert.False(behindAfter.Engaged, "callForHelp must not pull a mob on the other side of a wall")
+  Assert.True(sameAfter.Engaged, "callForHelp should still pull a mob in line of sight")
+
+  // AreaDamage must also respect walls.
+  let aoe =
+    { Name = "Arcane Explosion"
+      CastTicks = ticks 0
+      CooldownTicks = ticks 0
+      ResourceCost = 0
+      Stance = None
+      Interruptible = false
+      Range = 0
+      TargetKind = Self
+      Effects = [ AreaDamage(4, 50, 50) ] }
+
+  let w2 = SimCombat.resolveAbility warrior.Id warrior.Id aoe w0
+  let behindAoe = w2.Entities |> List.find (fun e -> e.Id = behindWall.Id)
+  Assert.Equal(behindWall.MaxHealth, behindAoe.Health)
+  Assert.False(behindAoe.Engaged, "AreaDamage must not hit or aggro a mob behind a wall")
+
 /// A Tree Druid openers with Hibernate, and only onto what the vanilla spell
 /// accepts: a Beast, never a Humanoid, which the engine's wider `sleepable` set
 /// would otherwise allow.
@@ -10049,7 +10159,7 @@ let ``the leader waits for every mana user to drink, not only the healers`` () =
           decisions wet
           |> List.exists (fun k' ->
             match k' with
-            | UseAbility(_, n, _) -> n = "Polymorph" || n = "Sap" || n = "Hibernate"
+            | UseAbility(_, n, _) -> n = "Polymorph" || n = "Sap" || n = "Hibernate" || n = "Stealth"
             | _ -> false)
         )
       | _ -> false)

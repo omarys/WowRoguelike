@@ -1251,7 +1251,12 @@ module SimCombat =
                      Auras =
                        Stealthed duration
                        :: (e.Auras |> List.filter (fun a -> not (Aura.isStealthed a))) })
-          |> logLine (sprintf "%s vanishes" actor.Name)
+          |> logLine (
+            if ability.Name = "Stealth" then
+              sprintf "%s enters stealth" actor.Name
+            else
+              sprintf "%s vanishes" actor.Name
+          )
 
         | Shapeshift(Serpent, duration, bonus) ->
           w
@@ -1290,7 +1295,7 @@ module SimCombat =
           else
             w.Entities
             |> List.filter (fun m ->
-              m.Faction = Hostile && alive m && withinRange ability.Range actor m)
+              m.Faction = Hostile && alive m && canReach ability.Range actor m w)
             |> List.fold (fun w m ->
               let highest = m.Threat |> Map.toList |> List.map snd |> List.fold max 0
 
@@ -1344,6 +1349,7 @@ module SimCombat =
             e.Faction <> actor.Faction
             && alive e
             && Pos.chebyshev actor.Pos e.Pos <= radius
+            && Path.lineOfSight w.Grid actor.Pos e.Pos
             && (frontArc
                 |> Option.map (fun tiles -> List.contains e.Pos tiles)
                 |> Option.defaultValue true))
@@ -2114,6 +2120,9 @@ module SimCombat =
             // Vanilla's own rule, and the reason Intercept exists: Charge opens a
             // fight, it does not join one. Silent, because the AI re-asks every
             // Tick and a refusal per Tick buries the log.
+            w
+          elif ability.Name = "Stealth" && SimState.inCombat w then
+            // Out-of-combat stealth only; Vanish is the in-combat equivalent.
             w
           elif onCooldown then
             w |> logLine (sprintf "%s: %s on cooldown" actor.Name ability.Name)

@@ -2056,10 +2056,11 @@ module PartyAi =
         |> Option.map (fun h -> cmd at (UseAbility(e.Id, "Blind", h.Id)))
 
     match caster with
-    // Vanish bought seconds, not damage: while the stealth runs this lane places
-    // nothing, because the first strike would be what ends it. The rotation
-    // resumes on its own once the aura has run out or the fight is over.
-    | _ when SimState.isStealthed e -> []
+    // Vanish bought seconds at low health, not damage: while recovering under
+    // Vanish this lane places nothing, because the first strike would end it.
+    // A healthy Rogue opening from pre-pull Stealth proceeds normally into its
+    // opener (Ambush/Backstab).
+    | _ when SimState.isStealthed e && e.Health * 4 < e.MaxHealth -> []
     | _ when lastResort.IsSome -> lastResort.Value
     | Some c when has e "Kick" && canUse e "Kick" && SimState.withinRange 1 e c ->
       cmd at (UseAbility(e.Id, "Kick", c.Id))
@@ -2550,9 +2551,10 @@ module PartyAi =
           Pos.chebyshev p m.Pos > SimState.aggroRadius
           || not (Path.lineOfSight w.Grid m.Pos p))
 
-      // Nearest walkable tile within Sap range and LoS of `h` that stays outside
-      // proximity aggro of every hostile and outside any hound's stealth radius.
-      let sapSpot (e: Entity) (a: Ability) (h: Entity) : Pos option =
+      // Nearest walkable tile within Sap range and LoS of `h`. When stealthed
+      // (or about to stealth), non-Hound mobs cannot proximity-aggro the Rogue,
+      // so only Hound detection matters; otherwise also stay outside aggroRadius.
+      let sapSpot (e: Entity) (a: Ability) (h: Entity) (stealthed: bool) : Pos option =
         let r = a.Range
         let mutable best: Pos option = None
         let mutable bestKey = (System.Int32.MaxValue, System.Int32.MaxValue, System.Int32.MaxValue, System.Int32.MaxValue)
@@ -2565,7 +2567,7 @@ module PartyAi =
               Grid.isFloor w.Grid p
               && (p = e.Pos || not (SimState.claimedByOther w e.Id p))
               && Path.lineOfSight w.Grid p h.Pos
-              && safeFromAggro p
+              && (stealthed || safeFromAggro p)
               && unnoticedAt p
             then
               let k = Pos.chebyshev e.Pos p, -(Pos.chebyshev p h.Pos), p.Y, p.X
@@ -2610,9 +2612,10 @@ module PartyAi =
 
         let alreadySapped = hostiles |> List.exists SimState.isSleeping
 
-        // Phase 1: Rogue Sap opener. The group holds all other openers (Polymorph,
-        // Hibernate, Charge, attacks) until the Rogue has walked into Sap range
-        // and landed Sap on the highest-threat sappable surplus enemy.
+        // Phase 1: Rogue Stealth + Sap opener. The group holds all other openers
+        // (Polymorph, Hibernate, Charge, attacks) until the Rogue has stealthed,
+        // walked into Sap range, and landed Sap on the highest-threat sappable
+        // surplus enemy (sapping does not break stealth).
         let sapPlan =
           if alreadySapped then
             None
@@ -2622,24 +2625,41 @@ module PartyAi =
               e.Abilities
               |> List.tryFind (fun a -> a.Name = "Sap" && canUse e a.Name && unnoticed e a)
               |> Option.bind (fun sap ->
+                let needsStealth =
+                  not (SimState.isStealthed e)
+                  && has e "Stealth"
+                  && canUse e "Stealth"
+
+                let willBeStealthed = SimState.isStealthed e || needsStealth
+
                 surplus
                 |> List.filter (fun h -> canControl e sap h)
                 |> List.sortByDescending (fun h -> (isHealer h, isCaster h, h.MaxHealth))
                 |> List.tryPick (fun h ->
-                  if reaches e h sap then
-                    Some(e, sap, h, None)
+                  if needsStealth then
+                    if reaches e h sap || (e.StallTicks <= ticks 0 && (sapSpot e sap h true).IsSome) then
+                      Some(e, sap, h, Choice1Of3 ())
+                    else
+                      None
+                  elif reaches e h sap then
+                    Some(e, sap, h, Choice2Of3 ())
                   elif e.StallTicks <= ticks 0 then
-                    sapSpot e sap h |> Option.map (fun p -> e, sap, h, Some p)
+                    sapSpot e sap h willBeStealthed |> Option.map (fun p -> e, sap, h, Choice3Of3 p)
                   else
                     None)))
 
         match sapPlan with
-        | Some(e, sap, h, None) ->
+        | Some(e, _, _, Choice1Of3 ()) ->
+          [ { ApplyAt = at; Kind = Stop e.Id }
+            { ApplyAt = at; Kind = UseAbility(e.Id, "Stealth", e.Id) } ],
+          true,
+          Set.singleton e.Id
+        | Some(e, sap, h, Choice2Of3 ()) ->
           [ { ApplyAt = at; Kind = Stop e.Id }
             { ApplyAt = at; Kind = UseAbility(e.Id, sap.Name, h.Id) } ],
           true,
           Set.singleton e.Id
-        | Some(e, _, _, Some p) ->
+        | Some(e, _, _, Choice3Of3 p) ->
           let walk =
             if e.Goal = Some p && (e.Destination.IsSome || not e.Path.IsEmpty) then
               []
