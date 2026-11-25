@@ -302,8 +302,8 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
   /// is taller than its tile and stands on it, overhanging the row above.
   let tile = 40
   let spriteSize = 48
-  let columns = 22
-  let rows = 13
+  let defaultColumns = 22
+  let defaultRows = 13
 
   /// 5x7 pixel font, baked 2x into the atlas so drawing is native-size (crisp).
   let glyphW = 5
@@ -313,7 +313,6 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
   let cellH = glyphH * fontScale
 
   /// The strip below the grid that holds the clickable controls.
-  let uiTop = rows * tile + 8
   let uiHeight = 264
 
   /// The combat log box below the control strip. The window is taller than the
@@ -328,11 +327,30 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
 
   /// The side panel to the right of the grid: the party roster on top, the
   /// queue below.
-  let panelX = columns * tile + 8
   let panelW = 320
   let rosterTop = 24
   let rosterRowH = 42
   let queueTop = 242
+
+  /// Live viewport dimensions: resizing the window expands (or contracts) the
+  /// visible map area while keeping the side panel docked right and the
+  /// control strip + combat log docked at the bottom.
+  let viewW () =
+    if this.GraphicsDevice <> null then
+      this.GraphicsDevice.Viewport.Width
+    else
+      defaultColumns * tile + 8 + panelW
+
+  let viewH () =
+    if this.GraphicsDevice <> null then
+      this.GraphicsDevice.Viewport.Height
+    else
+      defaultRows * tile + 8 + uiHeight + logHeight
+
+  let panelX () = max (tile + 8) (viewW () - panelW)
+  let uiTop () = max (tile + 8) (viewH () - uiHeight - logHeight)
+  let mapViewW () = max tile (panelX () - 8)
+  let mapViewH () = max tile (uiTop () - 8)
 
   /// Ceiling on ticks per rendered frame. Without it a slow frame becomes a
   /// longer frame, which is the classic spiral. Falling behind in real time is
@@ -340,6 +358,7 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
   let maxTicksPerFrame = 4
 
   let mutable spriteBatch: SpriteBatch = null
+  let mutable mapRasterizer: RasterizerState = null
   let mutable pixel: Texture2D = null
   let mutable disc: Texture2D = null
   let mutable fontTex: Texture2D = null
@@ -388,27 +407,48 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
     if w > 0 then
       spriteBatch.Draw(pixel, Rectangle(x, y, w, height), colour)
 
+  /// Sub-tick interpolation fraction (0..1) so movement renders smoothly at
+  /// display frame rate between 20Hz simulation ticks.
+  let mutable subTickAlpha = 0.0
+
   /// Where the entity should be drawn this instant, interpolating between the
   /// tile it is leaving and the tile it is entering. The Core knows nothing
   /// about this (Q27a).
   let drawnAt (e: Entity) =
     match e.Destination with
     | Some dest when e.MoveTicksTotal > ticks 0 ->
+      let remaining = max 0.0 (float e.MoveTicksLeft - subTickAlpha)
       let progress =
-        1.0 - (float e.MoveTicksLeft / float e.MoveTicksTotal)
+        1.0 - (remaining / float e.MoveTicksTotal)
 
       (float e.Pos.X + (float dest.X - float e.Pos.X) * progress,
        float e.Pos.Y + (float dest.Y - float e.Pos.Y) * progress)
     | _ -> (float e.Pos.X, float e.Pos.Y)
 
-  /// The camera is a window on the grid: a Scarlet Monastery wing is a hundred
-  /// tiles tall and the view is thirteen, so the map has to scroll. It centres on
-  /// the selection, else on the Warrior, and clamps so the grid's edge never
-  /// shows as void.
-  let mutable camX = 0
-  let mutable camY = 0
+  /// The camera is a continuous float window on the grid: it glides smoothly
+  /// after the selection (else the Warrior) rather than snapping tile-by-tile,
+  /// and clamps so the grid's edge never shows as void when the map is larger
+  /// than the viewport.
+  let mutable camX = 0.0
+  let mutable camY = 0.0
+  let mutable camInitialized = false
 
-  let followCamera () =
+  let clampCamX (x: float) =
+    let viewCols = float (mapViewW ()) / float tile
+    let maxX = max 0.0 (float world.Grid.Width - viewCols)
+    max 0.0 (min maxX x)
+
+  let clampCamY (y: float) =
+    let viewRows = float (mapViewH ()) / float tile
+    let maxY = max 0.0 (float world.Grid.Height - viewRows)
+    max 0.0 (min maxY y)
+
+  /// Camera top-left in whole screen pixels, shared by tiles, sprites, FX, and
+  /// click hit-testing so adjacent tiles never develop sub-pixel seams.
+  let camPx () =
+    int (Math.Round(camX * float tile)), int (Math.Round(camY * float tile))
+
+  let followCamera (dt: float) =
     let target =
       selected
       |> Option.bind (fun id -> SimState.tryEntity id world)
@@ -419,14 +459,29 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
 
     match target with
     | Some e ->
-      camX <- max 0 (min (world.Grid.Width - columns) (e.Pos.X - columns / 2))
-      camY <- max 0 (min (world.Grid.Height - rows) (e.Pos.Y - rows / 2))
-    | None -> ()
+      let fx, fy = drawnAt e
+      let viewCols = float (mapViewW ()) / float tile
+      let viewRows = float (mapViewH ()) / float tile
+      let targetX = clampCamX (fx + 0.5 - viewCols / 2.0)
+      let targetY = clampCamY (fy + 0.5 - viewRows / 2.0)
 
-  /// An entity's position on screen, in tiles, once the camera is applied.
-  let screenAt (e: Entity) =
+      if not camInitialized then
+        camX <- targetX
+        camY <- targetY
+        camInitialized <- true
+      else
+        let blend = 1.0 - Math.Exp(-12.0 * max 0.0 (min 0.1 dt))
+        camX <- clampCamX (camX + (targetX - camX) * blend)
+        camY <- clampCamY (camY + (targetY - camY) * blend)
+    | None ->
+      camX <- clampCamX camX
+      camY <- clampCamY camY
+
+  /// An entity's tile top-left on screen, in pixels, once the camera is applied.
+  let screenPx (e: Entity) =
     let fx, fy = drawnAt e
-    (fx - float camX, fy - float camY)
+    let cpx, cpy = camPx ()
+    int (Math.Round(fx * float tile)) - cpx, int (Math.Round(fy * float tile)) - cpy
 
   let entityColour (e: Entity) =
     if not (SimState.alive e) then
@@ -686,9 +741,9 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
   /// tile and stands on it, while the disc fallback sits lower. Drawing and
   /// hit-testing both measure from here, so a click lands on what is on screen.
   let artRect (e: Entity) =
-    let fx, fy = screenAt e
-    let cx = int (fx * float tile + float tile / 2.0)
-    let feet = int (fy * float tile) + tile - 3
+    let sx, sy = screenPx e
+    let cx = sx + tile / 2
+    let feet = sy + tile - 3
 
     match textures.TryFind(spriteKey e) with
     | Some _ -> Rectangle(cx - spriteSize / 2, feet - spriteSize, spriteSize, spriteSize)
@@ -797,13 +852,16 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
   /// art drawn above it, so the overhanging head is reachable without taking the
   /// click away from the tile below.
   let entityAt (mx: int) (my: int) =
-    let tileRect (e: Entity) =
-      let fx, fy = screenAt e
-      Rectangle(int (fx * float tile), int (fy * float tile), tile, tile)
+    if mx < 0 || my < 0 || mx >= mapViewW () || my >= mapViewH () then
+      None
+    else
+      let tileRect (e: Entity) =
+        let sx, sy = screenPx e
+        Rectangle(sx, sy, tile, tile)
 
-    world.Entities
-    |> List.tryFind (fun e ->
-      SimState.alive e && (Rectangle.Union(tileRect e, artRect e)).Contains(mx, my))
+      world.Entities
+      |> List.tryFind (fun e ->
+        SimState.alive e && (Rectangle.Union(tileRect e, artRect e)).Contains(mx, my))
 
   let nameOf (id: EntityId) =
     SimState.tryEntity id world |> Option.map (fun e -> e.Name) |> Option.defaultValue "?"
@@ -830,13 +888,14 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
   /// `pending`, so a click cancels the right one.
   let queueRows () =
     let rowH = 34
-    let visible = max 1 ((uiTop - queueTop) / rowH)
+    let px = panelX ()
+    let visible = max 1 ((uiTop () - queueTop) / rowH)
 
     pending
     |> Seq.indexed
     |> Seq.filter (fun (_, kind) -> selected = None || Some(actorOf kind) = selected)
     |> Seq.truncate visible
-    |> Seq.mapi (fun row (i, _) -> Rectangle(panelX + 8, queueTop + row * rowH, panelW - 16, rowH - 4), i)
+    |> Seq.mapi (fun row (i, _) -> Rectangle(px + 8, queueTop + row * rowH, panelW - 16, rowH - 4), i)
     |> Seq.toList
 
   /// What the selected member does with no order queued: swing at an engaged
@@ -862,7 +921,7 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
     let panelW = this.GraphicsDevice.Viewport.Width
     let mutable x = 8
     let mutable row = 0
-    let y0 = uiTop + 6
+    let y0 = uiTop () + 6
     let rowH = 26
 
     let newRow () =
@@ -1061,8 +1120,8 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
     spawnFx (List.length world.Log - linesBefore)
 
   do
-    graphics.PreferredBackBufferWidth <- panelX + panelW
-    graphics.PreferredBackBufferHeight <- uiTop + uiHeight + logHeight
+    graphics.PreferredBackBufferWidth <- defaultColumns * tile + 8 + panelW
+    graphics.PreferredBackBufferHeight <- defaultRows * tile + 8 + uiHeight + logHeight
     this.Content.RootDirectory <- "Content"
     this.IsMouseVisible <- true
 
@@ -1148,6 +1207,8 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
     pending.Clear()
     printedLogLines <- 0
     accumulator <- 0.0
+    subTickAlpha <- 0.0
+    camInitialized <- false
     fx <- []
     menu <- Menu.Closed
     Console.WriteLine(sprintf "[%s — level %d]" entry.Label (snd entry.Bands.[band]))
@@ -1167,6 +1228,8 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
     selected <- None
     pendingAction <- None
     pending.Clear()
+    camX <- clampCamX camX
+    camY <- clampCamY camY
     menu <- Menu.Browse(source, seed)
 
   /// Browsing pans by hand: the camera follows the Warrior in play, but the
@@ -1174,8 +1237,8 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
   /// standing in. Clamped the same way `followCamera` clamps.
   let panBrowse (m: MouseState) =
     if m.LeftButton = ButtonState.Pressed && prevMouse.LeftButton = ButtonState.Pressed then
-      camX <- max 0 (min (world.Grid.Width - columns) (camX - (m.X - prevMouse.X) / tile))
-      camY <- max 0 (min (world.Grid.Height - rows) (camY - (m.Y - prevMouse.Y) / tile))
+      camX <- clampCamX (camX - float (m.X - prevMouse.X) / float tile)
+      camY <- clampCamY (camY - float (m.Y - prevMouse.Y) / float tile)
 
   let updateMenu (keyboard: KeyboardState) =
     let up = pressed keyboard Keys.Up || pressed keyboard Keys.W
@@ -1218,9 +1281,10 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
   /// The menu is an opaque card: the dungeon list first, then the band, which is
   /// the difficulty.
   let drawMenu () =
-    let width = min (columns * tile - 40) 560
+    let mw = mapViewW ()
+    let width = min (mw - 40) 560
     let height = 60 + 9 * 26
-    let x = (columns * tile - width) / 2
+    let x = (mw - width) / 2
     let y = 30
 
     spriteBatch.Draw(pixel, Rectangle(x, y, width, height), Color(10, 12, 16) * 0.96f)
@@ -1274,8 +1338,9 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
         (source + 1)
         browseSources.Length
 
-    spriteBatch.Draw(pixel, Rectangle(0, 0, columns * tile, 22), Color(10, 12, 16) * 0.92f)
-    drawTextShadow (shorten (max 1 ((columns * tile - 16) / cellW)) text) 8 6 (Color(190, 214, 160))
+    let mw = mapViewW ()
+    spriteBatch.Draw(pixel, Rectangle(0, 0, mw, 22), Color(10, 12, 16) * 0.92f)
+    drawTextShadow (shorten (max 1 ((mw - 16) / cellW)) text) 8 6 (Color(190, 214, 160))
 
   override _.Initialize() =
     // Set here rather than in the constructor: the window exists by now.
@@ -1284,6 +1349,7 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
 
   override _.LoadContent() =
     spriteBatch <- new SpriteBatch(this.GraphicsDevice)
+    mapRasterizer <- new RasterizerState(ScissorTestEnable = true)
     pixel <- new Texture2D(this.GraphicsDevice, 1, 1)
     pixel.SetData([| Color.White |])
     disc <- makeDisc 32
@@ -1375,19 +1441,23 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
             pendingAction <- None
           | _ -> if e.Faction = Party then selected <- Some e.Id
         | None ->
-          let tx, ty = mx / tile + camX, my / tile + camY
+          if mx >= 0 && mx < mapViewW () && my >= 0 && my < mapViewH () then
+            let cpx, cpy = camPx ()
+            let tx, ty = (mx + cpx) / tile, (my + cpy) / tile
 
-          if
-            ty < world.Grid.Height
-            && tx < world.Grid.Width
-            && Grid.isFloor world.Grid { X = tx; Y = ty }
-          then
-            match pendingAction, selected with
-            | Some (Moving aid), _ ->
-              pending.Add(MoveTo(aid, { X = tx; Y = ty }))
-              pendingAction <- None
-            | None, Some aid -> pending.Add(MoveTo(aid, { X = tx; Y = ty }))
-            | _ -> ()
+            if
+              tx >= 0
+              && ty >= 0
+              && ty < world.Grid.Height
+              && tx < world.Grid.Width
+              && Grid.isFloor world.Grid { X = tx; Y = ty }
+            then
+              match pendingAction, selected with
+              | Some (Moving aid), _ ->
+                pending.Add(MoveTo(aid, { X = tx; Y = ty }))
+                pendingAction <- None
+              | None, Some aid -> pending.Add(MoveTo(aid, { X = tx; Y = ty }))
+              | _ -> ()
 
     prevMouse <- mouse
 
@@ -1460,9 +1530,23 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
   override _.Draw(gameTime: GameTime) =
     this.GraphicsDevice.Clear(Color(10, 10, 14))
 
+    subTickAlpha <-
+      if menu = Menu.Closed && ticksPerSecond > 0.0 && tourHold.IsNone then
+        max 0.0 (min 1.0 accumulator)
+      else
+        0.0
+
     match menu with
-    | Menu.Browse _ -> () // the browser pans by hand
-    | _ -> followCamera ()
+    | Menu.Browse _ ->
+      camX <- clampCamX camX
+      camY <- clampCamY camY
+    | _ -> followCamera gameTime.ElapsedGameTime.TotalSeconds
+
+    let mw = mapViewW ()
+    let mh = mapViewH ()
+    let px = panelX ()
+    let ut = uiTop ()
+    let cpx, cpy = camPx ()
 
     let validIds =
       match pendingAction with
@@ -1470,26 +1554,9 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
         SimState.validTargets aid ability world |> List.map (fun t -> t.Id) |> Set.ofList
       | _ -> Set.empty
 
-    spriteBatch.Begin()
-
-    // The tour's heading: which wing is running, and — once it ends — the
-    // outcome and what loads next, held above the frozen final frame.
-    if tour then
-      let heading =
-        match tourHold with
-        | Some _ ->
-          let prefix =
-            match SimState.outcome world with
-            | EncounterCleared -> "CLEARED — next: "
-            | _ -> "WIPED — next: "
-
-          let _, _, entry = tourStops.[(tourIndex + 1) % tourStops.Length]
-          prefix + entry.Label
-        | None ->
-          let _, _, entry = tourStops.[tourIndex]
-          entry.Label
-
-      drawTextShadow heading (panelX / 2 - measure heading / 2) 8 (Color(255, 235, 180))
+    let prevScissor = this.GraphicsDevice.ScissorRectangle
+    this.GraphicsDevice.ScissorRectangle <- Rectangle(0, 0, mw, mh)
+    spriteBatch.Begin(rasterizerState = mapRasterizer)
 
     // Floor decorations per theme: the generated cave grows the sliced-sheet
     // mushrooms and fern; the Caverns grow their own stalagmites, glowing
@@ -1507,10 +1574,15 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
           "sprites/fern"
         |]
 
-    for y in camY .. min (camY + rows - 1) (world.Grid.Height - 1) do
-      for x in camX .. min (camX + columns - 1) (world.Grid.Width - 1) do
+    let minY = max 0 (cpy / tile)
+    let maxY = min (world.Grid.Height - 1) ((cpy + mh) / tile + 1)
+    let minX = max 0 (cpx / tile)
+    let maxX = min (world.Grid.Width - 1) ((cpx + mw) / tile + 1)
+
+    for y in minY .. maxY do
+      for x in minX .. maxX do
         let p = { X = x; Y = y }
-        let dest = Rectangle((x - camX) * tile, (y - camY) * tile, tile, tile)
+        let dest = Rectangle(x * tile - cpx, y * tile - cpy, tile, tile)
         let h = tileHash x y
 
         if Grid.isWall world.Grid p then
@@ -1599,14 +1671,15 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
     let hover = entityAt mouse.X mouse.Y |> Option.map (fun e -> e.Id)
 
     for e in drawOrder do
-      let fx, fy = screenAt e
+      let sx, sy = screenPx e
+      let wx, _ = drawnAt e
 
-      let cx = int (fx * float tile + float tile / 2.0)
-      let feet = int (fy * float tile) + tile - 3
+      let cx = sx + tile / 2
+      let feet = sy + tile - 3
       let top = feet - spriteSize
       let art = textures.TryFind(spriteKey e)
       let flip = if facesLeft e then SpriteEffects.FlipHorizontally else SpriteEffects.None
-      lastSeenX <- Map.add e.Id fx lastSeenX
+      lastSeenX <- Map.add e.Id wx lastSeenX
       let box = artRect e
 
       let drawArt (tint: Color) =
@@ -1698,7 +1771,7 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
     fx <- fx |> List.filter (fun f -> nowFx - f.Born < 1.2f) |> List.truncate 96
 
     let spot (p: float * float) =
-      int ((fst p - float camX) * float tile), int ((snd p - float camY) * float tile) + tile - 3
+      int (Math.Round(fst p * float tile)) - cpx, int (Math.Round(snd p * float tile)) - cpy + tile - 3
 
     for f in fx do
       let age = nowFx - f.Born
@@ -1810,26 +1883,50 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
           number Color.White (string f.Value) flight 0.7f
       | _ -> ()
 
+    spriteBatch.End()
+    this.GraphicsDevice.ScissorRectangle <- prevScissor
+
+    spriteBatch.Begin()
+
+    // The tour's heading: which wing is running, and — once it ends — the
+    // outcome and what loads next, held above the frozen final frame.
+    if tour then
+      let heading =
+        match tourHold with
+        | Some _ ->
+          let prefix =
+            match SimState.outcome world with
+            | EncounterCleared -> "CLEARED — next: "
+            | _ -> "WIPED — next: "
+
+          let _, _, entry = tourStops.[(tourIndex + 1) % tourStops.Length]
+          prefix + entry.Label
+        | None ->
+          let _, _, entry = tourStops.[tourIndex]
+          entry.Label
+
+      drawTextShadow heading (mw / 2 - measure heading / 2) 8 (Color(255, 235, 180))
+
     // The side panel: the party's health and mana, then the queue.
-    panel (Rectangle(panelX, 0, panelW, uiTop))
+    panel (Rectangle(px, 0, panelW, ut))
     let m = mouse
     let rowChars = max 1 ((panelW - 24) / cellW)
 
-    drawTextShadow "PARTY" (panelX + 8) 8 (Color(190, 214, 160))
+    drawTextShadow "PARTY" (px + 8) 8 (Color(190, 214, 160))
     let party = world.Entities |> List.filter (fun e -> e.Faction = Party)
     let portrait = rosterRowH - 6
-    let barX = panelX + 8 + portrait + 6
+    let barX = px + 8 + portrait + 6
     let barW = 84
     let textX = barX + barW + 6
-    let nameChars = max 1 ((panelX + panelW - barX - 8) / cellW)
+    let nameChars = max 1 ((px + panelW - barX - 8) / cellW)
 
     for i, e in party |> List.indexed do
       let y = rosterTop + i * rosterRowH
 
       if selected = Some e.Id then
-        spriteBatch.Draw(pixel, Rectangle(panelX + 4, y - 2, panelW - 8, rosterRowH - 2), Color(120, 200, 255) * 0.18f)
+        spriteBatch.Draw(pixel, Rectangle(px + 4, y - 2, panelW - 8, rosterRowH - 2), Color(120, 200, 255) * 0.18f)
 
-      let frame = Rectangle(panelX + 8, y, portrait, portrait)
+      let frame = Rectangle(px + 8, y, portrait, portrait)
       spriteBatch.Draw(pixel, frame, Color(78, 112, 58))
       spriteBatch.Draw(pixel, Rectangle(frame.X + 1, frame.Y + 1, frame.Width - 2, frame.Height - 2), Color(14, 16, 14))
 
@@ -1853,7 +1950,7 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
       | Some aid -> sprintf "queue %s" (nameOf aid)
       | None -> "queue all"
 
-    drawTextShadow (shorten rowChars title) (panelX + 8) (queueTop - 16) (Color(190, 214, 160))
+    drawTextShadow (shorten rowChars title) (px + 8) (queueTop - 16) (Color(190, 214, 160))
     let rows = queueRows ()
 
     for (rect, i) in rows do
@@ -1872,11 +1969,11 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
         | Some aid -> defaultAction aid
         | None -> "nothing queued"
 
-      drawTextWrapped text (panelX + 12) (queueTop + 2) (panelW - 24) (Color(130, 136, 128))
+      drawTextWrapped text (px + 12) (queueTop + 2) (panelW - 24) (Color(130, 136, 128))
 
     // The clickable strip.
-    let panelW = this.GraphicsDevice.Viewport.Width
-    panel (Rectangle(0, uiTop, panelW, uiHeight))
+    let stripW = this.GraphicsDevice.Viewport.Width
+    panel (Rectangle(0, ut, stripW, uiHeight))
 
     for (rect, label, action) in uiButtons () do
       let hover = action <> Heading && rect.Contains(m.X, m.Y)
@@ -1904,17 +2001,17 @@ type RoguelikeGame(?browse: int * uint64, ?smTour: bool, ?wcTour: bool) as this 
       | Some aid, None -> sprintf "%s selected - Move, an ability, or click a tile to walk" (nameOf aid)
       | None, _ -> "Click a party member to command them"
 
-    drawTextWrapped hint 8 (uiTop + uiHeight - 20) (panelW - 16) (Color(160, 160, 170))
+    drawTextWrapped hint 8 (ut + uiHeight - 20) (stripW - 16) (Color(160, 160, 170))
 
     // The combat log. `world.Log` is newest-first, so reverse it to read the
     // way a log should: oldest visible line at the top, newest at the bottom.
-    let logTop = uiTop + uiHeight
+    let logTop = ut + uiHeight
     let bodyTop = logTop + 24
     let lineH = cellH + 2
     let lines = max 1 ((this.GraphicsDevice.Viewport.Height - bodyTop - 6) / lineH)
-    let logChars = max 1 ((panelW - 16) / cellW)
+    let logChars = max 1 ((stripW - 16) / cellW)
 
-    panel (Rectangle(0, logTop, panelW, this.GraphicsDevice.Viewport.Height - logTop))
+    panel (Rectangle(0, logTop, stripW, this.GraphicsDevice.Viewport.Height - logTop))
     drawTextShadow "COMBAT LOG" 8 (logTop + 6) (Color(190, 214, 160))
 
     world.Log
